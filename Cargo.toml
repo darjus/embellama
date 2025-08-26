@@ -1,8 +1,54 @@
 [package]
 name = "embellama"
 version = "0.1.0"
-edition = "2024"
+edition = "2021"
+authors = ["Embellama Contributors"]
+description = "High-performance Rust library for generating text embeddings using llama-cpp"
+repository = "https://github.com/embellama/embellama"
+readme = "README.md"
+keywords = ["embeddings", "llama", "nlp", "machine-learning", "ai"]
+categories = ["science", "api-bindings", "text-processing"]
 license = "Apache-2.0"
-license-file = "LICENSE"
 
 [dependencies]
+llama-cpp-2 = "0.1.117"
+thiserror = "1.0"
+anyhow = "1.0"
+tracing = "0.1"
+tracing-subscriber = { version = "0.3", features = ["env-filter"] }
+serde = { version = "1.0", features = ["derive"] }
+serde_json = "1.0"
+rayon = "1.8"
+parking_lot = "0.12"
+
+# Optional server dependencies
+axum = { version = "0.7", optional = true }
+tokio = { version = "1.35", features = ["full"], optional = true }
+clap = { version = "4.4", features = ["derive"], optional = true }
+tower = { version = "0.4", optional = true }
+tower-http = { version = "0.5", features = ["cors", "trace"], optional = true }
+
+[dev-dependencies]
+criterion = { version = "0.5", features = ["html_reports"] }
+serial_test = "3.0"
+tempfile = "3.8"
+tokio-test = "0.4"
+pretty_assertions = "1.4"
+
+[features]
+default = []
+server = ["dep:axum", "dep:tokio", "dep:clap", "dep:tower", "dep:tower-http"]
+
+[[bin]]
+name = "embellama-server"
+required-features = ["server"]
+path = "src/bin/server.rs"
+
+[profile.release]
+opt-level = 3
+lto = true
+codegen-units = 1
+panic = "abort"
+
+[profile.bench]
+inherits = "release"

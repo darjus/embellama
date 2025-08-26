@@ -1,19 +1,156 @@
-// Copyright 2024 Embellama Contributors
-//
-// Licensed under the Apache License, Version 2.0 (the "License");
-// you may not use this file except in compliance with the License.
-// You may obtain a copy of the License at
-//
-//     http://www.apache.org/licenses/LICENSE-2.0
-//
-// Unless required by applicable law or agreed to in writing, software
-// distributed under the License is distributed on an "AS IS" BASIS,
-// WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
-// See the License for the specific language governing permissions and
-// limitations under the License.
+#![warn(missing_docs, clippy::all, clippy::pedantic)]
+#![allow(clippy::module_name_repetitions, clippy::must_use_candidate)]
 
-pub fn add(left: u64, right: u64) -> u64 {
-    left + right
+//! # Embellama
+//!
+//! A high-performance Rust library for generating text embeddings using llama-cpp-2.
+//!
+//! ## Features
+//!
+//! - High-performance embedding generation using llama.cpp backend
+//! - Support for batch processing with parallel pre/post-processing
+//! - Thread-safe model management with Arc/RwLock
+//! - Comprehensive error handling
+//! - Builder pattern for configuration
+//! - Optional HTTP server with OpenAI-compatible API
+//!
+//! ## Example
+//!
+//! ```ignore
+//! use embellama::{EmbeddingEngine, EngineConfig};
+//!
+//! # async fn example() -> Result<(), Box<dyn std::error::Error>> {
+//! // Configure and build the engine
+//! let config = EngineConfig::builder()
+//!     .with_model_path("models/all-MiniLM-L6-v2.gguf")
+//!     .with_model_name("minilm")
+//!     .with_context_size(512)
+//!     .with_n_threads(4)
+//!     .build()?;
+//!
+//! let engine = EmbeddingEngine::new(config)?;
+//!
+//! // Generate a single embedding
+//! let embedding = engine.embed("minilm", "Hello, world!")?;
+//! println!("Embedding dimension: {}", embedding.len());
+//!
+//! // Generate batch embeddings
+//! let texts = vec![
+//!     "First document",
+//!     "Second document", 
+//!     "Third document",
+//! ];
+//! let embeddings = engine.embed_batch("minilm", texts)?;
+//! println!("Generated {} embeddings", embeddings.len());
+//! # Ok(())
+//! # }
+//! ```
+
+/// Error handling module
+pub mod error;
+
+/// Configuration module
+pub mod config;
+
+// Re-export main types
+pub use config::{EngineConfig, EngineConfigBuilder, PoolingStrategy};
+pub use error::{Error, Result};
+
+use tracing::{debug, info};
+
+/// Library version
+pub const VERSION: &str = env!("CARGO_PKG_VERSION");
+
+/// Initialize the library with default tracing subscriber
+///
+/// This function sets up tracing for the library with sensible defaults.
+/// Call this once at the start of your application.
+///
+/// # Example
+///
+/// ```
+/// embellama::init();
+/// ```
+pub fn init() {
+    init_with_env_filter("info");
+}
+
+/// Initialize the library with a custom environment filter
+///
+/// This function sets up tracing with a custom filter string.
+///
+/// # Arguments
+///
+/// * `filter` - Environment filter string (e.g., "info", "debug", "embellama=debug")
+///
+/// # Example
+///
+/// ```
+/// embellama::init_with_env_filter("embellama=debug,info");
+/// ```
+pub fn init_with_env_filter(filter: &str) {
+    use tracing_subscriber::{fmt, prelude::*, EnvFilter};
+
+    let env_filter = EnvFilter::try_from_default_env()
+        .unwrap_or_else(|_| EnvFilter::new(filter));
+
+    tracing_subscriber::registry()
+        .with(fmt::layer())
+        .with(env_filter)
+        .init();
+
+    info!("Embellama library initialized v{}", VERSION);
+    debug!("Debug logging enabled");
+}
+
+/// Get library version information
+///
+/// Returns a struct containing version and build information.
+#[derive(Debug, Clone)]
+pub struct VersionInfo {
+    /// Library version
+    pub version: &'static str,
+    /// Rust compiler version used to build
+    pub rustc_version: &'static str,
+    /// Target architecture
+    pub target_arch: &'static str,
+    /// Target OS
+    pub target_os: &'static str,
+    /// Whether server feature is enabled
+    pub server_enabled: bool,
+}
+
+impl VersionInfo {
+    /// Create version info struct
+    pub fn new() -> Self {
+        Self {
+            version: VERSION,
+            rustc_version: "unknown",
+            target_arch: std::env::consts::ARCH,
+            target_os: std::env::consts::OS,
+            server_enabled: cfg!(feature = "server"),
+        }
+    }
+}
+
+impl Default for VersionInfo {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
+impl std::fmt::Display for VersionInfo {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        writeln!(f, "Embellama v{}", self.version)?;
+        writeln!(f, "  Target: {}-{}", self.target_arch, self.target_os)?;
+        writeln!(f, "  Server: {}", if self.server_enabled { "enabled" } else { "disabled" })?;
+        Ok(())
+    }
+}
+
+/// Get version information
+pub fn version_info() -> VersionInfo {
+    VersionInfo::new()
 }
 
 #[cfg(test)]
@@ -21,8 +158,18 @@ mod tests {
     use super::*;
 
     #[test]
-    fn it_works() {
-        let result = add(2, 2);
-        assert_eq!(result, 4);
+    fn test_version_info() {
+        let info = version_info();
+        assert_eq!(info.version, VERSION);
+        assert!(!info.target_arch.is_empty());
+        assert!(!info.target_os.is_empty());
+    }
+
+    #[test] 
+    fn test_version_display() {
+        let info = version_info();
+        let display = info.to_string();
+        assert!(display.contains("Embellama"));
+        assert!(display.contains(VERSION));
     }
 }
