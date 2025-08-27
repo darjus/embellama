@@ -1,7 +1,189 @@
+// Copyright 2025 Embellama Contributors
+//
+// Licensed under the Apache License, Version 2.0 (the "License");
+// you may not use this file except in compliance with the License.
+// You may obtain a copy of the License at
+//
+//     http://www.apache.org/licenses/LICENSE-2.0
+//
+// Unless required by applicable law or agreed to in writing, software
+// distributed under the License is distributed on an "AS IS" BASIS,
+// WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+// See the License for the specific language governing permissions and
+// limitations under the License.
+
 use crate::error::{Error, Result};
 use serde::{Deserialize, Serialize};
 use std::env;
 use std::path::{Path, PathBuf};
+
+/// Configuration for a single model
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct ModelConfig {
+    /// Path to the GGUF model file
+    pub model_path: PathBuf,
+    
+    /// Name identifier for the model
+    pub model_name: String,
+    
+    /// Context size (number of tokens)
+    pub n_ctx: Option<u32>,
+    
+    /// Number of threads for CPU inference
+    pub n_threads: Option<usize>,
+    
+    /// Number of GPU layers to offload (0 = CPU only)
+    pub n_gpu_layers: Option<u32>,
+    
+    /// Use memory mapping for model loading
+    /// NOTE: This setting is not yet supported by llama-cpp-2 API
+    pub use_mmap: bool,
+    
+    /// Use memory locking to prevent swapping
+    /// NOTE: This setting is not yet supported by llama-cpp-2 API
+    pub use_mlock: bool,
+    
+    /// Enable embedding normalization
+    pub normalize_embeddings: bool,
+    
+    /// Pooling strategy for embeddings
+    pub pooling_strategy: PoolingStrategy,
+}
+
+impl ModelConfig {
+    /// Create a new configuration builder
+    pub fn builder() -> ModelConfigBuilder {
+        ModelConfigBuilder::new()
+    }
+
+    /// Validate the configuration
+    pub fn validate(&self) -> Result<()> {
+        if self.model_path.as_os_str().is_empty() {
+            return Err(Error::config("Model path cannot be empty"));
+        }
+
+        if !self.model_path.exists() {
+            return Err(Error::config(format!(
+                "Model file does not exist: {}",
+                self.model_path.display()
+            )));
+        }
+
+        if self.model_name.is_empty() {
+            return Err(Error::config("Model name cannot be empty"));
+        }
+
+        if let Some(n_ctx) = self.n_ctx {
+            if n_ctx == 0 {
+                return Err(Error::config("Context size must be greater than 0"));
+            }
+        }
+
+        if let Some(n_threads) = self.n_threads {
+            if n_threads == 0 {
+                return Err(Error::config("Number of threads must be greater than 0"));
+            }
+        }
+
+        Ok(())
+    }
+}
+
+impl Default for ModelConfig {
+    fn default() -> Self {
+        Self {
+            model_path: PathBuf::new(),
+            model_name: String::new(),
+            n_ctx: Some(2048),
+            n_threads: None,
+            n_gpu_layers: Some(0),
+            use_mmap: true,
+            use_mlock: false,
+            normalize_embeddings: true,
+            pooling_strategy: PoolingStrategy::default(),
+        }
+    }
+}
+
+/// Builder for creating ModelConfig instances
+pub struct ModelConfigBuilder {
+    config: ModelConfig,
+}
+
+impl ModelConfigBuilder {
+    /// Create a new builder with default configuration
+    pub fn new() -> Self {
+        Self {
+            config: ModelConfig::default(),
+        }
+    }
+
+    /// Set the model path
+    pub fn with_model_path<P: AsRef<Path>>(mut self, path: P) -> Self {
+        self.config.model_path = path.as_ref().to_path_buf();
+        self
+    }
+
+    /// Set the model name
+    pub fn with_model_name<S: Into<String>>(mut self, name: S) -> Self {
+        self.config.model_name = name.into();
+        self
+    }
+
+    /// Set the context size
+    pub fn with_n_ctx(mut self, ctx: u32) -> Self {
+        self.config.n_ctx = Some(ctx);
+        self
+    }
+
+    /// Set the number of threads
+    pub fn with_n_threads(mut self, threads: usize) -> Self {
+        self.config.n_threads = Some(threads);
+        self
+    }
+
+    /// Set the number of GPU layers
+    pub fn with_n_gpu_layers(mut self, layers: u32) -> Self {
+        self.config.n_gpu_layers = Some(layers);
+        self
+    }
+
+    /// Set whether to use memory mapping
+    pub fn with_use_mmap(mut self, use_mmap: bool) -> Self {
+        self.config.use_mmap = use_mmap;
+        self
+    }
+
+    /// Set whether to use memory locking
+    pub fn with_use_mlock(mut self, use_mlock: bool) -> Self {
+        self.config.use_mlock = use_mlock;
+        self
+    }
+
+    /// Set whether to normalize embeddings
+    pub fn with_normalize_embeddings(mut self, normalize: bool) -> Self {
+        self.config.normalize_embeddings = normalize;
+        self
+    }
+
+    /// Set the pooling strategy
+    pub fn with_pooling_strategy(mut self, strategy: PoolingStrategy) -> Self {
+        self.config.pooling_strategy = strategy;
+        self
+    }
+
+    /// Build the configuration
+    pub fn build(self) -> Result<ModelConfig> {
+        self.config.validate()?;
+        Ok(self.config)
+    }
+}
+
+impl Default for ModelConfigBuilder {
+    fn default() -> Self {
+        Self::new()
+    }
+}
 
 /// Configuration for the embedding engine
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -21,8 +203,8 @@ pub struct EngineConfig {
     /// Whether to use GPU acceleration if available
     pub use_gpu: bool,
     
-    /// Number of GPU layers to offload (0 = CPU only, -1 = all layers)
-    pub n_gpu_layers: Option<i32>,
+    /// Number of GPU layers to offload (0 = CPU only)
+    pub n_gpu_layers: Option<u32>,
     
     /// Batch size for processing
     pub batch_size: Option<usize>,
@@ -49,9 +231,11 @@ pub struct EngineConfig {
     pub temperature: Option<f32>,
 
     /// Use memory mapping for model loading
+    /// NOTE: This setting is not yet supported by llama-cpp-2 API
     pub use_mmap: bool,
 
     /// Use memory locking to prevent swapping
+    /// NOTE: This setting is not yet supported by llama-cpp-2 API
     pub use_mlock: bool,
 }
 
@@ -82,7 +266,7 @@ impl Default for EngineConfig {
             context_size: None,
             n_threads: None,
             use_gpu: true,
-            n_gpu_layers: Some(-1),
+            n_gpu_layers: Some(0),
             batch_size: Some(32),
             normalize_embeddings: true,
             pooling_strategy: PoolingStrategy::default(),
@@ -182,6 +366,21 @@ impl EngineConfig {
 
         builder.build()
     }
+
+    /// Convert EngineConfig to ModelConfig
+    pub fn to_model_config(&self) -> ModelConfig {
+        ModelConfig {
+            model_path: self.model_path.clone(),
+            model_name: self.model_name.clone(),
+            n_ctx: self.context_size.map(|s| s as u32),
+            n_threads: self.n_threads,
+            n_gpu_layers: self.n_gpu_layers,
+            use_mmap: self.use_mmap,
+            use_mlock: self.use_mlock,
+            normalize_embeddings: self.normalize_embeddings,
+            pooling_strategy: self.pooling_strategy,
+        }
+    }
 }
 
 /// Builder for creating EngineConfig instances
@@ -228,7 +427,7 @@ impl EngineConfigBuilder {
     }
 
     /// Set the number of GPU layers
-    pub fn with_n_gpu_layers(mut self, layers: i32) -> Self {
+    pub fn with_n_gpu_layers(mut self, layers: u32) -> Self {
         self.config.n_gpu_layers = Some(layers);
         self
     }
@@ -311,6 +510,70 @@ mod tests {
     use super::*;
     use std::fs;
     use tempfile::tempdir;
+
+    #[test]
+    fn test_model_config_builder() {
+        let dir = tempdir().unwrap();
+        let model_path = dir.path().join("model.gguf");
+        fs::write(&model_path, b"dummy").unwrap();
+
+        let config = ModelConfig::builder()
+            .with_model_path(&model_path)
+            .with_model_name("test-model")
+            .with_n_ctx(512)
+            .with_n_threads(4)
+            .with_n_gpu_layers(0)
+            .build()
+            .unwrap();
+
+        assert_eq!(config.model_path, model_path);
+        assert_eq!(config.model_name, "test-model");
+        assert_eq!(config.n_ctx, Some(512));
+        assert_eq!(config.n_threads, Some(4));
+        assert_eq!(config.n_gpu_layers, Some(0));
+    }
+
+    #[test]
+    fn test_model_config_validation() {
+        let result = ModelConfig::builder()
+            .with_model_name("test")
+            .build();
+
+        assert!(result.is_err());
+        assert!(matches!(result.unwrap_err(), Error::ConfigurationError { .. }));
+
+        let dir = tempdir().unwrap();
+        let model_path = dir.path().join("model.gguf");
+        fs::write(&model_path, b"dummy").unwrap();
+
+        let result = ModelConfig::builder()
+            .with_model_path(&model_path)
+            .with_model_name("test")
+            .with_n_ctx(0)
+            .build();
+        assert!(result.is_err());
+    }
+
+    #[test]
+    fn test_engine_to_model_config() {
+        let dir = tempdir().unwrap();
+        let model_path = dir.path().join("model.gguf");
+        fs::write(&model_path, b"dummy").unwrap();
+
+        let engine_config = EngineConfig::builder()
+            .with_model_path(&model_path)
+            .with_model_name("test-model")
+            .with_context_size(1024)
+            .with_n_threads(8)
+            .build()
+            .unwrap();
+
+        let model_config = engine_config.to_model_config();
+        assert_eq!(model_config.model_path, model_path);
+        assert_eq!(model_config.model_name, "test-model");
+        assert_eq!(model_config.n_ctx, Some(1024));
+        assert_eq!(model_config.n_threads, Some(8));
+    }
 
     #[test]
     fn test_config_builder() {

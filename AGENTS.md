@@ -1,5 +1,15 @@
 # Agent Guidelines for Embellama
 
+## Critical Threading Constraints
+
+**IMPORTANT**: The `LlamaContext` from `llama-cpp-2` is `!Send` and `!Sync`, meaning it cannot be shared between threads. This fundamental constraint drives the entire architecture.
+
+### Key Points:
+- **Never use `Arc<EmbeddingModel>`** - This will not compile due to `!Send` constraint
+- **Each thread must own its model instance** - Models are thread-local
+- **Use message passing, not shared state** - Channel-based communication between threads
+- **Worker pool architecture for server** - Each worker thread owns a model instance
+
 
 
 ## Project Overview
@@ -115,7 +125,28 @@ pub(crate) struct InternalState { }
 
 // Only expose necessary public interface
 pub struct EmbeddingEngine {
-    inner: Arc<EngineInner>, // Private implementation
+    inner: Box<EngineInner>, // Private implementation (NOT Arc due to !Send)
+}
+```
+
+#### Threading Architecture Pattern
+```rust
+// WRONG: Won't compile - LlamaContext is !Send
+pub struct EmbeddingEngine {
+    model: Arc<RwLock<EmbeddingModel>>, // ❌ Compilation error
+}
+
+// CORRECT: Use channels for thread communication
+pub struct EmbeddingEngine {
+    sender: mpsc::Sender<WorkerRequest>,  // ✅ Send requests to worker
+}
+
+// Worker owns model on its thread
+fn worker_thread(receiver: mpsc::Receiver<WorkerRequest>) {
+    let model = EmbeddingModel::new(...);  // Thread-local ownership
+    while let Ok(req) = receiver.recv() {
+        // Process with thread-local model
+    }
 }
 ```
 
@@ -225,11 +256,13 @@ Use for:
 - Finding solutions to specific error messages
 - Researching llama.cpp integration details
 - Checking best practices and patterns
+- **Understanding !Send and !Sync constraints**
 
 Example scenarios:
 - "How to use llama-cpp-2 crate effectively"
 - "Rust async performance optimization techniques"
 - "OpenAI embedding API specification"
+- "Working with !Send types in async Rust"
 
 #### zen:thinkdeeper
 Use when:
@@ -237,11 +270,13 @@ Use when:
 - Evaluating complex trade-offs
 - Solving intricate algorithmic problems
 - Making critical design decisions
+- **Designing thread-safe architectures with !Send constraints**
 
 Example scenarios:
-- "Should we use channels or shared state for batch processing?"
+- "Should we use channels or shared state for batch processing?" (Answer: Channels, due to !Send)
 - "How to optimize memory usage for large embedding batches?"
 - "Architecture for dynamic model loading/unloading"
+- "Worker pool design for !Send types"
 
 #### zen:debug
 Use when:
@@ -278,10 +313,16 @@ embellama/
 └── src/
     ├── lib.rs         # Public API, feature flags
     ├── engine.rs      # EmbeddingEngine (public interface)
-    ├── model.rs       # EmbeddingModel (internal)
+    ├── model.rs       # EmbeddingModel (internal, !Send)
     ├── batch.rs       # Batch processing (internal)
     ├── config.rs      # Configuration types (public)
     ├── error.rs       # Error types with thiserror
+    ├── server/        # Server-specific modules (feature-gated)
+    │   ├── mod.rs
+    │   ├── worker.rs      # Inference worker threads
+    │   ├── dispatcher.rs  # Request routing
+    │   ├── channel.rs     # Message types
+    │   └── state.rs       # AppState (channels, not models)
     └── bin/
         └── server.rs  # Server binary (server feature)
 ```
@@ -300,11 +341,19 @@ embellama/
 - Test model loading/unloading cycles
 - Validate OpenAI API compatibility
 
+### Concurrency Tests (Critical)
+- **Test worker pool message passing**
+- **Verify models stay on their threads**
+- **Test concurrent request handling**
+- **Validate channel-based communication**
+- **Ensure no data races or deadlocks**
+
 ### Performance Tests
 - Benchmark single embedding generation
 - Benchmark batch processing
-- Memory usage under load
+- Memory usage under load (per worker)
 - Concurrent request handling
+- Worker pool scaling characteristics
 
 ## Security Considerations
 

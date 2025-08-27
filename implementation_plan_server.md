@@ -1,240 +1,563 @@
-# Embellama Server Implementation Plan
+# Implementation Plan: Embellama Server
 
-## Overview
-Build an OpenAI-compatible REST API server for the Embellama library using Axum, providing high-performance embedding generation endpoints.
+This document outlines the phased implementation plan for the `embellama` server component. The server provides an OpenAI-compatible REST API for the core library functionality.
 
-## Phase 1: Server Implementation
+## Critical Architecture Constraint
 
-### 1.1 CLI Interface
-- [ ] Set up `clap` for argument parsing with:
-  - `--model-path` (required)
-  - `--model-name` (default: model filename)
-  - `--host` (default: 127.0.0.1)
-  - `--port` (default: 8080)
-  - `--context-size` (optional)
-  - `--threads` (optional)
-  - `--gpu` (flag)
-- [ ] Add configuration file support (TOML/YAML)
-- [ ] Implement environment variable fallbacks
+**⚠️ IMPORTANT**: Due to `LlamaContext` being `!Send`:
+- Models cannot be shared between threads using `Arc`
+- Each worker thread must own its model instance
+- All communication uses message passing via channels
+- Worker pool pattern is mandatory for concurrent requests
 
-### 1.2 API Data Models
-- [ ] Create request/response DTOs:
-  ```rust
-  struct EmbeddingsRequest {
-      model: String,
-      input: StringOrVec,
-      encoding_format: Option<EncodingFormat>,
-  }
+## Phase 1: Server Foundation
+**Priority: CRITICAL** | **Estimated Time: 3-4 hours**
+
+### Objectives
+Set up the basic server infrastructure with Axum and establish the project structure.
+
+### Tasks
+- [ ] Configure server dependencies in `Cargo.toml`
+  - [ ] Add server feature flag configuration
+  - [ ] Add `axum = { version = "0.7", optional = true }`
+  - [ ] Add `tokio = { version = "1.35", features = ["full"], optional = true }`
+  - [ ] Add `clap = { version = "4.4", features = ["derive"], optional = true }`
+  - [ ] Add `tower = { version = "0.4", optional = true }`
+  - [ ] Add `tower-http = { version = "0.5", features = ["cors", "trace"], optional = true }`
+  - [ ] Configure binary target with required features
   
-  struct EmbeddingsResponse {
-      object: String,
-      data: Vec<EmbeddingData>,
-      model: String,
-      usage: Usage,
-  }
-  ```
-- [ ] Implement `serde` serialization/deserialization
-- [ ] Add input validation middleware
+- [ ] Create server module structure
+  - [ ] Create `src/server/mod.rs` with submodule declarations
+  - [ ] Create `src/server/worker.rs` for worker thread implementation
+  - [ ] Create `src/server/dispatcher.rs` for request routing
+  - [ ] Create `src/server/channel.rs` for message types
+  - [ ] Create `src/server/state.rs` for application state
+  - [ ] Create `src/bin/server.rs` for server binary
+  
+- [ ] Implement CLI argument parsing (`src/bin/server.rs`)
+  - [ ] Define `Args` struct with `clap` derive
+  - [ ] Add arguments:
+    - [ ] `--model-path` - Path to GGUF model file
+    - [ ] `--model-name` - Model identifier for API
+    - [ ] `--host` - Bind address (default: 127.0.0.1)
+    - [ ] `--port` - Server port (default: 8080)
+    - [ ] `--workers` - Number of worker threads
+    - [ ] `--queue-size` - Max pending requests per worker
+  - [ ] Implement argument validation
+  
+- [ ] Set up basic Axum application
+  - [ ] Create `Router` with basic routes
+  - [ ] Add `/health` endpoint
+  - [ ] Configure middleware (CORS, tracing)
+  - [ ] Set up graceful shutdown
+  - [ ] Implement server binding and listening
+  
+- [ ] Configure logging for server
+  - [ ] Set up `tracing_subscriber` with env filter
+  - [ ] Add request/response logging middleware
+  - [ ] Configure structured logging output
+  - [ ] Add correlation IDs for requests
 
-### 1.3 Axum Server Setup
-- [ ] Create `AppState` with `Arc<EmbeddingEngine>`
-- [ ] Set up router with routes:
-  - `POST /v1/embeddings` - Main embedding endpoint
-  - `GET /health` - Health check
-  - `GET /models` - List available models
-  - `GET /metrics` - Prometheus metrics (optional)
-- [ ] Implement middleware stack:
-  - CORS handling
-  - Request logging with tracing
-  - Timeout middleware
-  - Compression (gzip/brotli)
-  - Rate limiting
+### Success Criteria
+- [ ] Server starts with `cargo run --features server --bin embellama-server`
+- [ ] `/health` endpoint returns 200 OK
+- [ ] CLI arguments are parsed correctly
+- [ ] Logging produces structured output
 
-### 1.4 API Endpoints
-- [ ] Implement `/v1/embeddings` handler:
-  - Parse request body
-  - Handle single string and array inputs
-  - Generate embeddings using engine
-  - Format OpenAI-compatible response
-  - Track token usage
-- [ ] Add `/health` endpoint with model status
-- [ ] Implement `/models` to list loaded models
-- [ ] Add request ID tracking for debugging
+### Dependencies
+- Core library phases 1-3 (available for import)
 
-### 1.5 Server Infrastructure
-- [ ] Implement graceful shutdown handling
-- [ ] Add connection pooling if needed
-- [ ] Set up metrics collection (optional)
-- [ ] Implement request/response logging
-- [ ] Add OpenTelemetry support (optional)
+---
 
-## Phase 2: Testing & Quality Assurance
+## Phase 2: Worker Pool Architecture
+**Priority: CRITICAL** | **Estimated Time: 6-8 hours**
 
-### 2.1 Server E2E Tests
-- [ ] Test OpenAI API compatibility
-- [ ] Test error responses and status codes
-- [ ] Test rate limiting and timeouts
-- [ ] Test graceful shutdown
-- [ ] Load testing with `vegeta` or `k6`
+### Objectives
+Implement the worker pool pattern to handle the `!Send` constraint with thread-local models.
 
-### 2.2 Performance Testing
-- [ ] Benchmark API latency under load
-- [ ] Test concurrent request handling
-- [ ] Memory usage under sustained load
-- [ ] Connection pool efficiency
-- [ ] Rate limiting effectiveness
+### Tasks
+- [ ] Define message types (`src/server/channel.rs`)
+  - [ ] Create `WorkerRequest` struct:
+    - [ ] `id: Uuid` - Request identifier
+    - [ ] `model: String` - Model name
+    - [ ] `input: TextInput` - Text(s) to process
+    - [ ] `response_tx: oneshot::Sender<WorkerResponse>`
+  - [ ] Create `WorkerResponse` struct:
+    - [ ] `embeddings: Vec<Vec<f32>>`
+    - [ ] `token_count: usize`
+    - [ ] `processing_time_ms: u64`
+  - [ ] Create `TextInput` enum for single/batch
+  
+- [ ] Implement worker thread (`src/server/worker.rs`)
+  - [ ] Create `Worker` struct with:
+    - [ ] Thread-local `EmbeddingModel`
+    - [ ] Request receiver channel
+    - [ ] Worker ID and metrics
+  - [ ] Implement worker main loop:
+    - [ ] Receive requests from channel
+    - [ ] Process with thread-local model
+    - [ ] Send response via oneshot channel
+    - [ ] Handle errors gracefully
+  - [ ] Add worker lifecycle management:
+    - [ ] Initialization with model loading
+    - [ ] Graceful shutdown handling
+    - [ ] Error recovery mechanisms
+  
+- [ ] Implement dispatcher (`src/server/dispatcher.rs`)
+  - [ ] Create `Dispatcher` struct with:
+    - [ ] Vector of worker sender channels
+    - [ ] Round-robin or load-based routing
+    - [ ] Request queue management
+  - [ ] Implement request routing:
+    - [ ] Select available worker
+    - [ ] Forward request to worker
+    - [ ] Handle backpressure
+    - [ ] Implement timeout handling
+  
+- [ ] Create worker pool management
+  - [ ] Spawn worker threads on startup
+  - [ ] Each worker loads its own model instance
+  - [ ] Monitor worker health
+  - [ ] Handle worker failures/restarts
+  - [ ] Implement graceful shutdown
+  
+- [ ] Implement `AppState` (`src/server/state.rs`)
+  - [ ] Store dispatcher sender channel
+  - [ ] Configuration parameters
+  - [ ] Metrics and statistics
+  - [ ] Health check status
+  
+- [ ] Add worker pool tests
+  - [ ] Test message passing
+  - [ ] Test concurrent requests
+  - [ ] Test worker failure recovery
+  - [ ] Verify thread isolation
 
-## Phase 3: Documentation
+### Success Criteria
+- [ ] Worker pool starts successfully
+- [ ] Models load on each worker thread
+- [ ] Messages route correctly to workers
+- [ ] No data races or deadlocks
+- [ ] Graceful shutdown works properly
 
-### 3.1 API Documentation
-- [ ] Create OpenAPI/Swagger spec
-- [ ] Document all endpoints with examples
-- [ ] Document error codes and responses
-- [ ] Add authentication documentation (if implemented)
+### Dependencies
+- Phase 1 (Server Foundation)
 
-### 3.2 Deployment Documentation
-- [ ] Create Docker/Containerfile
-- [ ] Write Kubernetes deployment manifests
-- [ ] Add docker-compose example
-- [ ] Document systemd service setup
-- [ ] Create production deployment guide
+---
 
-### 3.3 Client Examples
-- [ ] Python client example
-- [ ] JavaScript/TypeScript client example
-- [ ] cURL command examples
-- [ ] Postman collection
+## Phase 3: OpenAI-Compatible API Endpoints
+**Priority: HIGH** | **Estimated Time: 4-6 hours**
 
-## Phase 4: Production Readiness
+### Objectives
+Implement the OpenAI-compatible `/v1/embeddings` endpoint with proper request/response handling.
 
-### 4.1 Production Features
-- [ ] Add circuit breaker pattern
-- [ ] Implement retry logic with backoff
-- [ ] Add distributed tracing
-- [ ] Implement health check probes
-- [ ] Add admin endpoints for management
+### Tasks
+- [ ] Define API types (create `src/server/api_types.rs`)
+  - [ ] Implement `EmbeddingsRequest`:
+    ```rust
+    #[derive(Deserialize)]
+    struct EmbeddingsRequest {
+        model: String,
+        input: InputType, // String or Vec<String>
+        encoding_format: Option<String>, // "float" or "base64"
+        dimensions: Option<usize>,
+        user: Option<String>,
+    }
+    ```
+  - [ ] Implement `EmbeddingsResponse`:
+    ```rust
+    #[derive(Serialize)]
+    struct EmbeddingsResponse {
+        object: String, // "list"
+        data: Vec<EmbeddingData>,
+        model: String,
+        usage: Usage,
+    }
+    ```
+  - [ ] Add supporting types (EmbeddingData, Usage)
+  
+- [ ] Implement embeddings handler
+  - [ ] Create async handler function
+  - [ ] Parse and validate request
+  - [ ] Create oneshot channel for response
+  - [ ] Send request to dispatcher
+  - [ ] Await response with timeout
+  - [ ] Format OpenAI-compatible response
+  
+- [ ] Add input validation
+  - [ ] Validate model name exists
+  - [ ] Check input text length limits
+  - [ ] Validate encoding format
+  - [ ] Handle empty inputs gracefully
+  
+- [ ] Implement error responses
+  - [ ] OpenAI-compatible error format
+  - [ ] Appropriate HTTP status codes
+  - [ ] Helpful error messages
+  - [ ] Request ID in errors
+  
+- [ ] Add routes to router
+  - [ ] Mount `/v1/embeddings` POST endpoint
+  - [ ] Add `/v1/models` GET endpoint
+  - [ ] Add OpenAPI/Swagger documentation
+  
+- [ ] Implement content negotiation
+  - [ ] Support JSON requests/responses
+  - [ ] Handle content-type headers
+  - [ ] Support gzip compression
 
-### 4.2 Security Hardening
-- [ ] Add input sanitization
-- [ ] Implement request size limits
-- [ ] Add API key authentication (optional)
-- [ ] Set up TLS/HTTPS support
-- [ ] Security audit with `cargo audit`
+### Success Criteria
+- [ ] Endpoint accepts OpenAI-format requests
+- [ ] Responses match OpenAI structure
+- [ ] Error handling follows OpenAI patterns
+- [ ] Works with OpenAI client libraries
 
-### 4.3 Monitoring & Observability
-- [ ] Prometheus metrics integration
-- [ ] Structured logging with tracing
-- [ ] Request/response logging
-- [ ] Performance metrics dashboard
-- [ ] Alert configuration
+### Dependencies
+- Phase 2 (Worker Pool Architecture)
 
-## Server-Specific Dependencies
+---
 
-```toml
-[[bin]]
-name = "embellama-server"
-required-features = ["server"]
-path = "src/bin/server.rs"
+## Phase 4: Request/Response Pipeline
+**Priority: HIGH** | **Estimated Time: 5-7 hours**
 
-[features]
-server = ["dep:axum", "dep:tokio", "dep:clap", "dep:tower", "dep:tower-http"]
+### Objectives
+Implement the complete request processing pipeline with proper error handling and monitoring.
 
-[dependencies.tokio]
-version = "1.35"
-features = ["full"]
-optional = true
+### Tasks
+- [ ] Implement request preprocessing
+  - [ ] Add request ID generation
+  - [ ] Implement rate limiting
+  - [ ] Add request size limits
+  - [ ] Validate authentication (if configured)
+  
+- [ ] Enhance request flow
+  - [ ] Add request queuing with priorities
+  - [ ] Implement request cancellation
+  - [ ] Add request deduplication
+  - [ ] Handle batch request optimization
+  
+- [ ] Implement response post-processing
+  - [ ] Format embeddings (float vs base64)
+  - [ ] Calculate token usage statistics
+  - [ ] Add response caching headers
+  - [ ] Implement response compression
+  
+- [ ] Add timeout handling
+  - [ ] Configure per-request timeouts
+  - [ ] Implement timeout response
+  - [ ] Clean up timed-out requests
+  - [ ] Return partial results option
+  
+- [ ] Implement backpressure handling
+  - [ ] Monitor queue depths
+  - [ ] Return 503 when overloaded
+  - [ ] Add retry-after headers
+  - [ ] Implement circuit breaker pattern
+  
+- [ ] Add observability
+  - [ ] Request/response metrics
+  - [ ] Latency histograms
+  - [ ] Queue depth monitoring
+  - [ ] Worker utilization metrics
+  
+- [ ] Error recovery mechanisms
+  - [ ] Retry failed requests
+  - [ ] Dead letter queue for failures
+  - [ ] Graceful degradation
+  - [ ] Health check integration
 
-[dependencies.axum]
-version = "0.7"
-optional = true
+### Success Criteria
+- [ ] Requests process end-to-end
+- [ ] Timeouts work correctly
+- [ ] Backpressure prevents overload
+- [ ] Metrics are collected accurately
+- [ ] Error recovery functions properly
 
-[dependencies.clap]
-version = "4.4"
-features = ["derive", "env"]
-optional = true
+### Dependencies
+- Phase 3 (API Endpoints)
 
-[dependencies.tower]
-version = "0.4"
-optional = true
+---
 
-[dependencies.tower-http]
-version = "0.5"
-features = ["cors", "compression-gzip", "compression-br", "timeout", "trace"]
-optional = true
+## Phase 5: Integration Testing & Validation
+**Priority: MEDIUM** | **Estimated Time: 6-8 hours**
 
-[dependencies.prometheus]
-version = "0.13"
-optional = true
+### Objectives
+Ensure server functionality with comprehensive integration tests and OpenAI compatibility validation.
 
-[dev-dependencies]
-reqwest = { version = "0.11", features = ["json"] }
-```
+### Tasks
+- [ ] Set up test infrastructure
+  - [ ] Create test server helper functions
+  - [ ] Download test models for CI
+  - [ ] Configure test environment
+  - [ ] Set up test fixtures
+  
+- [ ] Write API integration tests
+  - [ ] Test single embedding requests
+  - [ ] Test batch embedding requests
+  - [ ] Test error scenarios
+  - [ ] Test timeout handling
+  - [ ] Test concurrent requests
+  
+- [ ] OpenAI compatibility tests
+  - [ ] Test with OpenAI Python client
+  - [ ] Test with OpenAI JavaScript client
+  - [ ] Validate response format exactly
+  - [ ] Test streaming if applicable
+  
+- [ ] Load testing
+  - [ ] Use `oha` or `wrk` for load testing
+  - [ ] Test various concurrency levels
+  - [ ] Measure latency percentiles
+  - [ ] Find breaking points
+  - [ ] Test sustained load
+  
+- [ ] Worker pool tests
+  - [ ] Test worker failures
+  - [ ] Test model reloading
+  - [ ] Test graceful shutdown
+  - [ ] Test resource cleanup
+  
+- [ ] End-to-end scenarios
+  - [ ] RAG pipeline simulation
+  - [ ] Semantic search workflow
+  - [ ] High-volume batch processing
+  - [ ] Mixed workload patterns
+  
+- [ ] Performance benchmarks
+  - [ ] Single request latency
+  - [ ] Throughput at various batch sizes
+  - [ ] Memory usage under load
+  - [ ] CPU utilization patterns
 
-## Architecture Notes
+### Success Criteria
+- [ ] All integration tests pass
+- [ ] OpenAI clients work seamlessly
+- [ ] Performance meets targets
+- [ ] No memory leaks under load
+- [ ] Graceful degradation verified
 
-### Axum Best Practices (2024)
-- Use `Arc<AppState>` for shared state management
-- Leverage Tower middleware ecosystem for cross-cutting concerns
-- Implement extractors for clean request handling
-- Use tokio runtime for async operations
-- Modular router organization with `merge()` for scalability
+### Dependencies
+- Phase 4 (Request/Response Pipeline)
 
-### OpenAI API Compatibility
-- Endpoint: `POST /v1/embeddings`
-- Support both single string and array inputs
-- Return format includes `object`, `data`, `model`, and `usage` fields
-- Maximum input: 8192 tokens for latest models
-- Batch limit: 2048 inputs per request
+---
 
-### State Management Pattern
+## Phase 6: Production Features
+**Priority: LOW** | **Estimated Time: 8-10 hours**
+
+### Objectives
+Add production-ready features for monitoring, operations, and deployment.
+
+### Tasks
+- [ ] Implement monitoring endpoints
+  - [ ] Add `/metrics` Prometheus endpoint
+  - [ ] Export key metrics:
+    - [ ] Request rate and latency
+    - [ ] Model inference time
+    - [ ] Queue depths
+    - [ ] Worker utilization
+    - [ ] Error rates
+  - [ ] Add custom business metrics
+  
+- [ ] Add operational endpoints
+  - [ ] `/admin/reload` - Reload models
+  - [ ] `/admin/workers` - Worker status
+  - [ ] `/admin/config` - View configuration
+  - [ ] `/admin/drain` - Graceful drain
+  
+- [ ] Implement configuration management
+  - [ ] Support environment variables
+  - [ ] Add configuration file support (YAML/TOML)
+  - [ ] Hot-reload configuration
+  - [ ] Validate configuration changes
+  
+- [ ] Add deployment features
+  - [ ] Docker container support
+  - [ ] Kubernetes readiness/liveness probes
+  - [ ] Horizontal scaling support
+  - [ ] Rolling update compatibility
+  
+- [ ] Enhance security
+  - [ ] Add API key authentication
+  - [ ] Implement rate limiting per client
+  - [ ] Add request signing/verification
+  - [ ] Audit logging for requests
+  
+- [ ] Implement caching layer
+  - [ ] Cache frequent embeddings
+  - [ ] LRU eviction policy
+  - [ ] Cache metrics
+  - [ ] Cache invalidation API
+  
+- [ ] Add multi-model support
+  - [ ] Load multiple models
+  - [ ] Route by model name
+  - [ ] Model versioning
+  - [ ] A/B testing support
+  
+- [ ] Production documentation
+  - [ ] Deployment guide
+  - [ ] Operations runbook
+  - [ ] Monitoring setup
+  - [ ] Troubleshooting guide
+
+### Success Criteria
+- [ ] Prometheus metrics exported
+- [ ] Docker container runs successfully
+- [ ] Configuration hot-reload works
+- [ ] Multi-model routing functions
+- [ ] Production documentation complete
+
+### Dependencies
+- Phase 5 (Integration Testing)
+
+---
+
+## Phase 7: Performance Optimization
+**Priority: LOW** | **Estimated Time: 4-6 hours**
+
+### Objectives
+Optimize server performance based on profiling and real-world usage patterns.
+
+### Tasks
+- [ ] Profile server performance
+  - [ ] CPU profiling with flamegraph
+  - [ ] Memory profiling with heaptrack
+  - [ ] Async runtime analysis
+  - [ ] Channel contention analysis
+  
+- [ ] Optimize request routing
+  - [ ] Implement smart load balancing
+  - [ ] Add work-stealing queue
+  - [ ] Optimize channel implementations
+  - [ ] Reduce context switching
+  
+- [ ] Improve batching efficiency
+  - [ ] Dynamic batch aggregation
+  - [ ] Adaptive batch sizing
+  - [ ] Optimize batch timeout
+  - [ ] Coalesce small requests
+  
+- [ ] Optimize serialization
+  - [ ] Use faster JSON library (simd-json)
+  - [ ] Implement zero-copy where possible
+  - [ ] Optimize base64 encoding
+  - [ ] Buffer pool for responses
+  
+- [ ] Network optimizations
+  - [ ] TCP tuning parameters
+  - [ ] HTTP/2 support
+  - [ ] Keep-alive optimization
+  - [ ] Response streaming
+  
+- [ ] Worker pool tuning
+  - [ ] Optimal worker count discovery
+  - [ ] CPU affinity settings
+  - [ ] NUMA awareness
+  - [ ] Memory pooling
+
+### Success Criteria
+- [ ] 30% latency improvement
+- [ ] 50% throughput increase
+- [ ] Reduced memory footprint
+- [ ] Better resource utilization
+
+### Dependencies
+- Phase 6 (Production Features)
+
+---
+
+## Implementation Notes
+
+### Critical Threading Architecture
+
 ```rust
-#[derive(Clone)]
+// Server architecture to handle !Send constraint:
+
+// 1. Main thread: Axum server with tokio runtime
+// 2. Worker threads: Each owns a LlamaContext
+// 3. Communication: Channels only, no shared state
+
+// AppState (Send + Sync + Clone)
 struct AppState {
-    engine: Arc<EmbeddingEngine>,
-    metrics: Arc<Mutex<Metrics>>,
+    dispatcher_tx: mpsc::Sender<WorkerRequest>,
     config: Arc<ServerConfig>,
+    metrics: Arc<Metrics>,
 }
 
-// Usage in handlers
-async fn embeddings_handler(
-    State(state): State<AppState>,
-    Json(req): Json<EmbeddingsRequest>,
-) -> Result<Json<EmbeddingsResponse>, ApiError> {
-    // Handler implementation
+// Worker (runs on dedicated thread)
+struct Worker {
+    id: usize,
+    model: EmbeddingModel,  // !Send - stays on this thread
+    receiver: mpsc::Receiver<WorkerRequest>,
 }
+
+// Request flow:
+// HTTP Handler -> Dispatcher -> Worker -> Response Channel -> HTTP Response
 ```
 
-### Middleware Stack Order
-1. Request ID injection
-2. Logging/Tracing
-3. CORS
-4. Rate limiting
-5. Timeout
-6. Compression
-7. Route handlers
+### Deployment Considerations
 
-## Risk Mitigation
+1. **Memory Requirements**
+   - Each worker needs full model in memory
+   - Total RAM = `num_workers × model_size + overhead`
+   - Example: 4 workers × 1.5GB model = 6GB minimum
 
-1. **API compatibility**: Regularly test against OpenAI client libraries
-2. **Load handling**: Implement backpressure and queue management
-3. **Memory leaks**: Use connection pooling with proper cleanup
-4. **Security**: Regular dependency updates and security audits
-5. **Observability**: Comprehensive metrics and logging from day one
+2. **CPU Considerations**
+   - Workers should not exceed physical cores
+   - Leave cores for tokio runtime
+   - Recommended: `workers = physical_cores - 2`
+
+3. **Scaling Strategy**
+   - Vertical: Add more workers (limited by RAM)
+   - Horizontal: Multiple server instances
+   - Use load balancer for horizontal scaling
+
+### Monitoring Key Metrics
+
+1. **Latency Metrics**
+   - Request processing time (P50, P95, P99)
+   - Model inference time
+   - Queue wait time
+   - Total end-to-end time
+
+2. **Throughput Metrics**
+   - Requests per second
+   - Embeddings per second
+   - Batch size distribution
+   - Worker utilization
+
+3. **Health Metrics**
+   - Worker status
+   - Queue depths
+   - Error rates
+   - Memory usage
+
+### Testing Strategy
+
+1. **Unit Tests**: Test individual components
+2. **Integration Tests**: Test API endpoints
+3. **Load Tests**: Verify performance under load
+4. **Chaos Tests**: Test failure scenarios
+5. **Compatibility Tests**: Verify OpenAI compatibility
 
 ## Success Metrics
 
-- [ ] < 10ms API overhead (excluding model inference)
-- [ ] Handle 1000+ concurrent connections
-- [ ] 99.99% API availability
-- [ ] Full OpenAI client compatibility
-- [ ] < 100MB server memory overhead
+### Performance Targets
+- [ ] Single request: <100ms P99 latency
+- [ ] Batch requests: >1000 embeddings/second
+- [ ] Concurrent requests: Linear scaling with workers
+- [ ] Memory: <2x model size per worker
+- [ ] Startup time: <10 seconds
 
-## Development Workflow
+### Reliability Targets
+- [ ] 99.9% uptime
+- [ ] Graceful degradation under load
+- [ ] Zero data loss
+- [ ] Clean shutdown/restart
+- [ ] Automatic recovery from failures
 
-1. **Build on stable library** - Server depends on completed library
-2. **Start with core endpoints** - `/v1/embeddings` first
-3. **Add middleware incrementally** - Test each layer
-4. **Load test early** - Identify bottlenecks before production
-5. **Document as you build** - Keep OpenAPI spec current
-
-This plan focuses on building a production-ready REST API server that complements the Embellama library.
+### Compatibility Targets
+- [ ] 100% OpenAI API compatibility
+- [ ] Works with all OpenAI client libraries
+- [ ] Supports common embedding models
+- [ ] Drop-in replacement capability
