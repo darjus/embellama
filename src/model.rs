@@ -17,13 +17,14 @@
 //! This module contains the `EmbeddingModel` struct which encapsulates
 //! the llama.cpp model and context, handling the generation of embeddings.
 
-use crate::config::ModelConfig;
+use crate::config::{ModelConfig, PoolingStrategy};
 use crate::error::{Error, Result};
 use llama_cpp_2::context::LlamaContext;
 use llama_cpp_2::{
     context::params::LlamaContextParams,
     llama_backend::LlamaBackend,
-    model::{params::LlamaModelParams, AddBos, LlamaModel},
+    llama_batch::LlamaBatch,
+    model::{params::LlamaModelParams, AddBos, LlamaModel, Special},
     token::LlamaToken,
 };
 use self_cell::self_cell;
@@ -347,9 +348,45 @@ impl EmbeddingModel {
     /// - Tokenization fails
     /// - The input exceeds the maximum token limit
     /// - Model inference fails
-    pub fn generate_embedding(&mut self, _text: &str) -> Result<Vec<f32>> {
-        // TODO: Phase 3 - Implement single embedding generation
-        unimplemented!("Embedding generation will be implemented in Phase 3")
+    #[instrument(skip(self, text), fields(text_len = text.len()))]
+    pub fn generate_embedding(&mut self, text: &str) -> Result<Vec<f32>> {
+        // Validate input
+        if text.is_empty() {
+            return Err(Error::InvalidInput {
+                message: "Cannot generate embedding for empty text".to_string(),
+            });
+        }
+
+        // Tokenize the text
+        let tokens = self.tokenize(text, true)?;
+        
+        // Check token limit
+        if tokens.len() > self.max_context_size {
+            return Err(Error::InvalidInput {
+                message: format!(
+                    "Text exceeds maximum token limit: {} > {}",
+                    tokens.len(),
+                    self.max_context_size
+                ),
+            });
+        }
+
+        debug!("Tokenized text into {} tokens", tokens.len());
+
+        // Process tokens to get embeddings
+        let embeddings = self.process_tokens(&tokens)?;
+        
+        // Apply pooling strategy
+        let pooled = self.apply_pooling(&embeddings, &self.config.pooling_strategy)?;
+        
+        // Normalize if configured
+        let final_embedding = if self.config.normalize_embeddings {
+            self.normalize_embedding(pooled)?
+        } else {
+            pooled
+        };
+
+        Ok(final_embedding)
     }
 
     /// Processes a batch of tokens through the model.
@@ -362,11 +399,159 @@ impl EmbeddingModel {
     ///
     /// # Returns
     ///
-    /// Returns the raw output from the model.
-    #[allow(dead_code)]
-    pub(crate) fn process_tokens(&mut self, _tokens: &[LlamaToken]) -> Result<Vec<f32>> {
-        // TODO: Phase 3 - Implement token processing
-        unimplemented!("Token processing will be implemented in Phase 3")
+    /// Returns the raw embeddings for all tokens.
+    #[instrument(skip(self, tokens), fields(token_count = tokens.len()))]
+    pub(crate) fn process_tokens(&mut self, tokens: &[LlamaToken]) -> Result<Vec<Vec<f32>>> {
+        if tokens.is_empty() {
+            return Err(Error::InvalidInput {
+                message: "Cannot process empty token list".to_string(),
+            });
+        }
+
+        // Create a batch for processing
+        let n_tokens = tokens.len();
+        let mut batch = LlamaBatch::new(n_tokens, 1);
+        
+        // Add tokens to batch
+        for (i, &token) in tokens.iter().enumerate() {
+            let is_last = i == n_tokens - 1;
+            batch.add(token, i as i32, &[0], is_last).map_err(|e| {
+                Error::EmbeddingGenerationError {
+                    message: format!("Failed to add token to batch: {}", e),
+                    source: Some(anyhow::anyhow!(e)),
+                }
+            })?;
+        }
+
+        // Process the batch through the model
+        self.cell.with_dependent_mut(|_, ctx| {
+            ctx.decode(&mut batch).map_err(|e| {
+                Error::EmbeddingGenerationError {
+                    message: format!("Failed to decode batch: {}", e),
+                    source: Some(anyhow::anyhow!(e)),
+                }
+            })
+        })?;
+
+        // Extract embeddings for all tokens
+        let mut all_embeddings = Vec::with_capacity(n_tokens);
+
+        for i in 0..n_tokens {
+            let embeddings = self.cell.with_dependent(|_, ctx| {
+                ctx.embeddings_ith(i as i32)
+                    .or_else(|e| Err(Error::EmbeddingGenerationError {
+                        message: format!("Failed to get embeddings for token {}", i),
+                        source: Some(anyhow::anyhow!(e)),
+                    }))
+            })?;
+            
+            all_embeddings.push(embeddings.to_vec());
+        }
+
+        Ok(all_embeddings)
+    }
+
+    /// Applies pooling strategy to token embeddings.
+    ///
+    /// # Arguments
+    ///
+    /// * `embeddings` - Token embeddings from the model
+    /// * `strategy` - Pooling strategy to apply
+    ///
+    /// # Returns
+    ///
+    /// Returns a single pooled embedding vector.
+    fn apply_pooling(
+        &self,
+        embeddings: &[Vec<f32>],
+        strategy: &PoolingStrategy,
+    ) -> Result<Vec<f32>> {
+        if embeddings.is_empty() {
+            return Err(Error::EmbeddingGenerationError {
+                message: "No embeddings to pool".to_string(),
+                source: None,
+            });
+        }
+
+        let embedding_dim = embeddings[0].len();
+        
+        match strategy {
+            PoolingStrategy::Mean => {
+                // Mean pooling across all tokens
+                let mut pooled = vec![0.0f32; embedding_dim];
+                let n_tokens = embeddings.len() as f32;
+                
+                for token_emb in embeddings {
+                    for (i, &val) in token_emb.iter().enumerate() {
+                        pooled[i] += val / n_tokens;
+                    }
+                }
+                
+                Ok(pooled)
+            }
+            PoolingStrategy::Cls => {
+                // Use only the first token (CLS token)
+                Ok(embeddings[0].clone())
+            }
+            PoolingStrategy::Max => {
+                // Max pooling across all tokens
+                let mut pooled = vec![f32::NEG_INFINITY; embedding_dim];
+                
+                for token_emb in embeddings {
+                    for (i, &val) in token_emb.iter().enumerate() {
+                        pooled[i] = pooled[i].max(val);
+                    }
+                }
+                
+                Ok(pooled)
+            }
+            PoolingStrategy::MeanSqrt => {
+                // Mean pooling with sqrt(length) normalization
+                let mut pooled = vec![0.0f32; embedding_dim];
+                let sqrt_n = (embeddings.len() as f32).sqrt();
+                
+                for token_emb in embeddings {
+                    for (i, &val) in token_emb.iter().enumerate() {
+                        pooled[i] += val;
+                    }
+                }
+                
+                // Normalize by sqrt(length)
+                for val in &mut pooled {
+                    *val /= sqrt_n;
+                }
+                
+                Ok(pooled)
+            }
+        }
+    }
+
+    /// Normalizes an embedding vector to unit length (L2 normalization).
+    ///
+    /// # Arguments
+    ///
+    /// * `embedding` - The embedding vector to normalize
+    ///
+    /// # Returns
+    ///
+    /// Returns the normalized embedding vector.
+    fn normalize_embedding(&self, mut embedding: Vec<f32>) -> Result<Vec<f32>> {
+        // Calculate L2 norm
+        let norm: f32 = embedding.iter().map(|x| x * x).sum::<f32>().sqrt();
+        
+        if norm == 0.0 {
+            return Err(Error::EmbeddingGenerationError {
+                message: "Cannot normalize zero vector".to_string(),
+                source: None,
+            });
+        }
+        
+        // Normalize the vector
+        for val in &mut embedding {
+            *val /= norm;
+        }
+        
+        Ok(embedding)
     }
 }
 

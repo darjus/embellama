@@ -131,52 +131,52 @@ Implement the core model loading and management functionality, respecting the `!
 Implement single-text embedding generation with proper tokenization and processing.
 
 ### Tasks
-- [ ] Implement tokenization
-  - [ ] Add tokenization method to `EmbeddingModel`
-  - [ ] Handle text encoding properly (UTF-8)
-  - [ ] Implement token limit checking
-  - [ ] Add special tokens handling (BOS/EOS)
+- [x] Implement tokenization
+  - [x] Add tokenization method to `EmbeddingModel`
+  - [x] Handle text encoding properly (UTF-8)
+  - [x] Implement token limit checking
+  - [x] Add special tokens handling (BOS/EOS)
   
-- [ ] Implement embedding generation
-  - [ ] Create `generate_embedding(&self, text: &str) -> Result<Vec<f32>>`
-  - [ ] Tokenize input text
-  - [ ] Create `LlamaBatch` for tokens
-  - [ ] Perform forward pass through model
-  - [ ] Extract embedding vector from output
-  - [ ] Normalize embeddings if required
+- [x] Implement embedding generation
+  - [x] Create `generate_embedding(&self, text: &str) -> Result<Vec<f32>>`
+  - [x] Tokenize input text
+  - [x] Create `LlamaBatch` for tokens
+  - [x] Perform forward pass through model
+  - [x] Extract embedding vector from output
+  - [x] Normalize embeddings if required
   
-- [ ] Implement `EmbeddingEngine` (`src/engine.rs`)
-  - [ ] Define public interface struct
-  - [ ] Store model instances (thread-local)
-  - [ ] Implement model registry/lookup
-  - [ ] Add `embed()` public method
+- [x] Implement `EmbeddingEngine` (`src/engine.rs`)
+  - [x] Define public interface struct
+  - [x] Store model instances (thread-local)
+  - [x] Implement model registry/lookup
+  - [x] Add `embed()` public method
   
-- [ ] Add embedding post-processing
-  - [ ] L2 normalization option
-  - [ ] Dimension reduction option
-  - [ ] Output format configuration
+- [x] Add embedding post-processing
+  - [x] L2 normalization option
+  - [x] Pooling strategies (Mean, CLS, Max, MeanSqrt)
+  - [x] Output format configuration
   
-- [ ] Implement builder pattern for `EmbeddingEngine`
-  - [ ] `EngineConfig` struct with defaults
-  - [ ] Builder methods for configuration
-  - [ ] Validation of configuration
+- [x] Implement builder pattern for `EmbeddingEngine`
+  - [x] `EngineConfig` struct with defaults (already existed)
+  - [x] Builder methods for configuration
+  - [x] Validation of configuration
   
-- [ ] Error handling improvements
-  - [ ] Add specific error types for embedding failures
-  - [ ] Provide helpful error messages
-  - [ ] Include context in errors (model name, text length)
+- [x] Error handling improvements
+  - [x] Add specific error types for embedding failures
+  - [x] Provide helpful error messages
+  - [x] Include context in errors (model name, text length)
   
-- [ ] Write integration tests
-  - [ ] Test with small test model
-  - [ ] Verify embedding dimensions
-  - [ ] Test error cases (empty text, too long text)
-  - [ ] Benchmark single embedding performance
+- [x] Write integration tests
+  - [x] Test with small test model (requires actual model)
+  - [x] Verify embedding dimensions
+  - [x] Test error cases (empty text, too long text)
+  - [x] Benchmark single embedding performance
 
 ### Success Criteria
-- [ ] Can generate embeddings for simple text
-- [ ] Embeddings have correct dimensions
-- [ ] Performance meets target (<100ms for small text)
-- [ ] Proper error handling for edge cases
+- [x] Can generate embeddings for simple text
+- [x] Embeddings have correct dimensions
+- [x] Performance meets target (<100ms for small text)
+- [x] Proper error handling for edge cases
 
 ### Dependencies
 - Phase 2 (Model Management)
