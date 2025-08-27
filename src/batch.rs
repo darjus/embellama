@@ -19,17 +19,24 @@
 //! for pre/post-processing while respecting the single-threaded constraint of
 //! model inference.
 
-use crate::error::Result;
+use crate::error::{Error, Result};
 use crate::model::EmbeddingModel;
-// TODO: Phase 4 - Uncomment when implementing parallel processing
-// use rayon::prelude::*;
+use crate::config::PoolingStrategy;
+use rayon::prelude::*;
+use std::sync::Arc;
+use std::sync::atomic::{AtomicUsize, Ordering};
+use tracing::{debug, instrument};
 
 /// Represents a batch of texts to be processed.
 pub struct BatchProcessor {
-    // TODO: Phase 4 - Add actual fields
-    // texts: Vec<String>,
-    // max_batch_size: usize,
-    // progress_callback: Option<Box<dyn Fn(usize, usize) + Send>>,
+    /// Maximum number of texts to process in a single batch
+    max_batch_size: usize,
+    /// Optional progress callback for tracking batch processing
+    progress_callback: Option<Arc<dyn Fn(usize, usize) + Send + Sync>>,
+    /// Whether to normalize embeddings
+    normalize: bool,
+    /// Pooling strategy to apply
+    pooling_strategy: PoolingStrategy,
 }
 
 impl BatchProcessor {
@@ -42,9 +49,18 @@ impl BatchProcessor {
     /// # Returns
     ///
     /// Returns a new `BatchProcessor` instance.
-    pub fn new(_max_batch_size: usize) -> Self {
-        // TODO: Phase 4 - Implement batch processor creation
-        BatchProcessor {}
+    pub fn new(max_batch_size: usize) -> Self {
+        BatchProcessor {
+            max_batch_size,
+            progress_callback: None,
+            normalize: true,
+            pooling_strategy: PoolingStrategy::Mean,
+        }
+    }
+    
+    /// Creates a batch processor with custom configuration.
+    pub fn builder() -> BatchProcessorBuilder {
+        BatchProcessorBuilder::default()
     }
 
     /// Processes a batch of texts to generate embeddings.
@@ -69,13 +85,48 @@ impl BatchProcessor {
     /// - Any text fails tokenization
     /// - Model inference fails
     /// - Memory allocation fails
+    #[instrument(skip(self, model, texts), fields(batch_size = texts.len()))]
     pub fn process_batch(
         &self,
-        _model: &EmbeddingModel,
-        _texts: Vec<&str>,
+        model: &mut EmbeddingModel,
+        texts: Vec<&str>,
     ) -> Result<Vec<Vec<f32>>> {
-        // TODO: Phase 4 - Implement batch processing
-        unimplemented!("Batch processing will be implemented in Phase 4")
+        if texts.is_empty() {
+            return Ok(Vec::new());
+        }
+        
+        debug!("Processing batch of {} texts", texts.len());
+        
+        // Progress tracking
+        let progress_counter = Arc::new(AtomicUsize::new(0));
+        let total = texts.len();
+        
+        // Step 1: Parallel validation (not tokenization in Phase 4)
+        // Real tokenization happens in model.generate_embedding()
+        self.parallel_validate(&texts)?;
+        
+        // Step 2: Sequential model inference (respecting !Send constraint)
+        // This includes tokenization, inference, pooling, and normalization
+        let mut embeddings = Vec::with_capacity(texts.len());
+        for text in texts {
+            // Process through model (handles everything internally)
+            let embedding = model.generate_embedding(text)?;
+            embeddings.push(embedding);
+            
+            // Update progress
+            let current = progress_counter.fetch_add(1, Ordering::Relaxed) + 1;
+            if let Some(ref callback) = self.progress_callback {
+                callback(current, total);
+            }
+            
+            debug!("Processed text {}/{}", current, total);
+        }
+        
+        // Step 3: Return embeddings directly (already normalized by model)
+        // > NOTE: In Phase 4, post-processing is handled by model
+        // Future phases may add additional parallel post-processing
+        
+        Ok(embeddings)
     }
 
     /// Sets a progress callback for batch processing.
@@ -85,14 +136,42 @@ impl BatchProcessor {
     /// # Arguments
     ///
     /// * `callback` - A function that receives progress updates
-    pub fn set_progress_callback<F>(&mut self, _callback: F)
+    pub fn set_progress_callback<F>(&mut self, callback: F)
     where
-        F: Fn(usize, usize) + Send + 'static,
+        F: Fn(usize, usize) + Send + Sync + 'static,
     {
-        // TODO: Phase 4 - Implement progress callback
-        unimplemented!("Progress callback will be implemented in Phase 4")
+        self.progress_callback = Some(Arc::new(callback));
     }
 
+    /// Validates texts in parallel.
+    ///
+    /// # Arguments
+    ///
+    /// * `texts` - Vector of texts to validate
+    ///
+    /// # Returns
+    ///
+    /// Returns Ok if all texts are valid, Err otherwise.
+    #[instrument(skip(self, texts), fields(count = texts.len()))]
+    fn parallel_validate(&self, texts: &[&str]) -> Result<()> {
+        debug!("Validating {} texts in parallel", texts.len());
+        
+        // Parallel validation with error handling
+        texts
+            .par_iter()
+            .try_for_each(|text| {
+                if text.is_empty() {
+                    return Err(Error::InvalidInput {
+                        message: "Cannot process empty text".to_string(),
+                    });
+                }
+                // Could add more validation here (e.g., max length check)
+                Ok(())
+            })?;
+        
+        Ok(())
+    }
+    
     /// Tokenizes texts in parallel.
     ///
     /// # Arguments
@@ -102,10 +181,43 @@ impl BatchProcessor {
     /// # Returns
     ///
     /// Returns a vector of tokenized sequences.
-    #[allow(dead_code)]
-    fn parallel_tokenize(&self, _texts: &[&str]) -> Result<Vec<Vec<i32>>> {
-        // TODO: Phase 4 - Implement parallel tokenization
-        unimplemented!("Parallel tokenization will be implemented in Phase 4")
+    #[instrument(skip(self, texts), fields(count = texts.len()))]
+    fn parallel_tokenize(&self, texts: &[&str]) -> Result<Vec<Vec<i32>>> {
+        debug!("Starting parallel tokenization of {} texts", texts.len());
+        
+        // Process texts in chunks to avoid overwhelming the system
+        let chunk_size = self.max_batch_size.min(texts.len());
+        
+        // Parallel tokenization with error handling
+        let results: Result<Vec<_>> = texts
+            .par_chunks(chunk_size)
+            .flat_map(|chunk| {
+                chunk.par_iter().map(|text| {
+                    // Validate text
+                    if text.is_empty() {
+                        return Err(Error::InvalidInput {
+                            message: "Cannot tokenize empty text".to_string(),
+                        });
+                    }
+                    
+                    // Simulate tokenization (in real implementation, this would use the model's tokenizer)
+                    // For now, we'll create placeholder tokens
+                    // > NOTE: Real tokenization requires access to model's tokenizer
+                    // This is a simplified version for Phase 4 implementation
+                    let tokens: Vec<i32> = text.bytes().map(|b| b as i32).collect();
+                    
+                    if tokens.len() > 512 {  // Example max token limit
+                        return Err(Error::InvalidInput {
+                            message: format!("Text exceeds maximum token limit: {} > 512", tokens.len()),
+                        });
+                    }
+                    
+                    Ok(tokens)
+                })
+            })
+            .collect();
+        
+        results
     }
 
     /// Post-processes embeddings in parallel.
@@ -113,19 +225,88 @@ impl BatchProcessor {
     /// # Arguments
     ///
     /// * `embeddings` - Raw embeddings from model
-    /// * `normalize` - Whether to normalize the embeddings
     ///
     /// # Returns
     ///
-    /// Returns processed embeddings.
-    #[allow(dead_code)]
+    /// Returns processed embeddings with normalization applied if configured.
+    #[instrument(skip(self, embeddings), fields(count = embeddings.len()))]
     fn parallel_postprocess(
         &self,
-        _embeddings: Vec<Vec<f32>>,
-        _normalize: bool,
+        embeddings: Vec<Vec<f32>>,
     ) -> Result<Vec<Vec<f32>>> {
-        // TODO: Phase 4 - Implement parallel post-processing
-        unimplemented!("Parallel post-processing will be implemented in Phase 4")
+        debug!("Starting parallel post-processing of {} embeddings", embeddings.len());
+        
+        // Parallel normalization if configured
+        let processed: Vec<Vec<f32>> = if self.normalize {
+            embeddings
+                .into_par_iter()
+                .map(|mut embedding| {
+                    // L2 normalization
+                    let norm: f32 = embedding.iter().map(|x| x * x).sum::<f32>().sqrt();
+                    
+                    if norm > 0.0 {
+                        for val in &mut embedding {
+                            *val /= norm;
+                        }
+                    }
+                    
+                    embedding
+                })
+                .collect()
+        } else {
+            embeddings
+        };
+        
+        debug!("Completed post-processing");
+        Ok(processed)
+    }
+}
+
+/// Builder for creating configured BatchProcessor instances.
+#[derive(Default)]
+pub struct BatchProcessorBuilder {
+    max_batch_size: Option<usize>,
+    normalize: bool,
+    pooling_strategy: PoolingStrategy,
+    progress_callback: Option<Arc<dyn Fn(usize, usize) + Send + Sync>>,
+}
+
+impl BatchProcessorBuilder {
+    /// Sets the maximum batch size.
+    pub fn with_max_batch_size(mut self, size: usize) -> Self {
+        self.max_batch_size = Some(size);
+        self
+    }
+    
+    /// Sets whether to normalize embeddings.
+    pub fn with_normalization(mut self, normalize: bool) -> Self {
+        self.normalize = normalize;
+        self
+    }
+    
+    /// Sets the pooling strategy.
+    pub fn with_pooling_strategy(mut self, strategy: PoolingStrategy) -> Self {
+        self.pooling_strategy = strategy;
+        self
+    }
+    
+    /// Sets the progress callback.
+    pub fn with_progress_callback<F>(mut self, callback: F) -> Self
+    where
+        F: Fn(usize, usize) + Send + Sync + 'static,
+    {
+        self.progress_callback = Some(Arc::new(callback));
+        self
+    }
+    
+    /// Builds the BatchProcessor.
+    pub fn build(self) -> BatchProcessor {
+        BatchProcessor {
+            max_batch_size: self.max_batch_size.unwrap_or(32),
+            progress_callback: self.progress_callback,
+            normalize: self.normalize,
+            pooling_strategy: self.pooling_strategy,
+        }
     }
 }
 

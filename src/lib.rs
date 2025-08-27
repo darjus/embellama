@@ -76,6 +76,7 @@ pub mod engine;
 pub mod batch;
 
 // Re-export main types
+pub use batch::{BatchProcessor, BatchProcessorBuilder};
 pub use config::{EngineConfig, EngineConfigBuilder, ModelConfig, ModelConfigBuilder, PoolingStrategy};
 pub use engine::{EmbeddingEngine, ModelInfo};
 pub use error::{Error, Result};

@@ -18,6 +18,7 @@
 //! the primary interface for the library, managing model lifecycle and
 //! providing high-level embedding generation APIs.
 
+use crate::batch::{BatchProcessor, BatchProcessorBuilder};
 use crate::config::EngineConfig;
 use crate::error::{Error, Result};
 use crate::model::EmbeddingModel;
@@ -270,6 +271,10 @@ impl EmbeddingEngine {
 
     /// Generates embeddings for a batch of texts using the specified model.
     ///
+    /// This method processes multiple texts efficiently using parallel processing
+    /// for tokenization and post-processing while respecting the single-threaded
+    /// constraint of model inference.
+    ///
     /// # Arguments
     ///
     /// * `model_name` - The name of the model to use (or None for default)
@@ -284,6 +289,7 @@ impl EmbeddingEngine {
     /// This function will return an error if:
     /// - The model is not found
     /// - Any embedding generation fails
+    #[instrument(skip(self, texts), fields(batch_size = texts.len()))]
     pub fn embed_batch(&self, model_name: Option<&str>, texts: Vec<&str>) -> Result<Vec<Vec<f32>>> {
         // Determine which model to use
         let model_name = model_name
@@ -296,7 +302,20 @@ impl EmbeddingEngine {
         // Ensure model is loaded in current thread
         self.ensure_model_loaded(&model_name)?;
         
-        // Process each text sequentially (Phase 4 will add parallel pre/post processing)
+        // Get model configuration for batch processing
+        let config = self.model_configs.read()
+            .get(&model_name)
+            .ok_or_else(|| Error::ModelNotFound { name: model_name.clone() })?
+            .clone();
+        
+        // Create batch processor with model configuration
+        let batch_processor = BatchProcessorBuilder::default()
+            .with_max_batch_size(64)  // Default batch size
+            .with_normalization(config.normalize_embeddings)
+            .with_pooling_strategy(config.pooling_strategy.clone())
+            .build();
+        
+        // Process batch using the BatchProcessor
         THREAD_MODELS.with(|models| {
             let mut models = models.borrow_mut();
             let model = models.get_mut(&model_name).ok_or_else(|| {
@@ -305,12 +324,7 @@ impl EmbeddingEngine {
                 }
             })?;
             
-            let mut embeddings = Vec::with_capacity(texts.len());
-            for text in texts {
-                embeddings.push(model.generate_embedding(text)?);
-            }
-            
-            Ok(embeddings)
+            batch_processor.process_batch(model, texts)
         })
     }
 

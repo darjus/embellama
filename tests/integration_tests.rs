@@ -427,3 +427,190 @@ fn bench_single_embedding() {
     // Assert performance target (adjust based on hardware)
     assert!(avg_time.as_millis() < 1000, "Embedding generation too slow: {:?}", avg_time);
 }
+
+// ============================================================================
+// Phase 4: Batch Processing Tests
+// ============================================================================
+
+#[test]
+#[ignore] // Requires actual GGUF model file
+#[serial]
+fn test_batch_processing_basic() {
+    let model_path = std::env::var("EMBELLAMA_TEST_MODEL")
+        .expect("Set EMBELLAMA_TEST_MODEL to run this test");
+    let model_path = PathBuf::from(model_path);
+    
+    let config = create_test_config(model_path, "test_batch");
+    let engine = EmbeddingEngine::new(config).unwrap();
+    
+    // Test batch of texts
+    let texts = vec![
+        "First text for batch processing",
+        "Second text with different content",
+        "Third text to complete the batch",
+    ];
+    
+    let embeddings = engine.embed_batch(Some("test_batch"), texts.clone()).unwrap();
+    
+    // Verify batch results
+    assert_eq!(embeddings.len(), texts.len());
+    
+    // Each embedding should have the same dimensions
+    let dim = embeddings[0].len();
+    assert!(dim > 0);
+    for emb in &embeddings {
+        assert_eq!(emb.len(), dim);
+    }
+    
+    // Embeddings should be different for different texts
+    assert_ne!(embeddings[0], embeddings[1]);
+    assert_ne!(embeddings[1], embeddings[2]);
+}
+
+#[test]
+#[ignore] // Requires actual GGUF model file
+#[serial]
+fn test_batch_processing_large() {
+    let model_path = std::env::var("EMBELLAMA_TEST_MODEL")
+        .expect("Set EMBELLAMA_TEST_MODEL to run this test");
+    let model_path = PathBuf::from(model_path);
+    
+    let config = create_test_config(model_path, "test_large_batch");
+    let engine = EmbeddingEngine::new(config).unwrap();
+    
+    // Create a large batch
+    let mut texts = Vec::new();
+    for i in 0..100 {
+        texts.push(format!("Test document number {}", i));
+    }
+    let text_refs: Vec<&str> = texts.iter().map(|s| s.as_str()).collect();
+    
+    let start = std::time::Instant::now();
+    let embeddings = engine.embed_batch(Some("test_large_batch"), text_refs).unwrap();
+    let duration = start.elapsed();
+    
+    println!("Processed {} texts in {:?}", texts.len(), duration);
+    println!("Average time per text: {:?}", duration / texts.len() as u32);
+    
+    assert_eq!(embeddings.len(), texts.len());
+}
+
+#[test]
+#[ignore] // Requires actual GGUF model file
+#[serial]
+fn test_batch_processing_empty() {
+    let model_path = std::env::var("EMBELLAMA_TEST_MODEL")
+        .expect("Set EMBELLAMA_TEST_MODEL to run this test");
+    let model_path = PathBuf::from(model_path);
+    
+    let config = create_test_config(model_path, "test_empty_batch");
+    let engine = EmbeddingEngine::new(config).unwrap();
+    
+    // Test empty batch
+    let texts: Vec<&str> = vec![];
+    let embeddings = engine.embed_batch(Some("test_empty_batch"), texts).unwrap();
+    
+    assert!(embeddings.is_empty());
+}
+
+#[test]
+#[ignore] // Requires actual GGUF model file
+#[serial]
+fn test_batch_processing_single_item() {
+    let model_path = std::env::var("EMBELLAMA_TEST_MODEL")
+        .expect("Set EMBELLAMA_TEST_MODEL to run this test");
+    let model_path = PathBuf::from(model_path);
+    
+    let config = create_test_config(model_path, "test_single_batch");
+    let engine = EmbeddingEngine::new(config).unwrap();
+    
+    // Test single item batch
+    let texts = vec!["Single text item"];
+    let batch_embeddings = engine.embed_batch(Some("test_single_batch"), texts.clone()).unwrap();
+    
+    // Compare with single embedding
+    let single_embedding = engine.embed(Some("test_single_batch"), texts[0]).unwrap();
+    
+    assert_eq!(batch_embeddings.len(), 1);
+    assert_eq!(batch_embeddings[0], single_embedding);
+}
+
+#[test]
+#[ignore] // Requires actual GGUF model file
+#[serial]
+fn test_batch_processing_order_preservation() {
+    let model_path = std::env::var("EMBELLAMA_TEST_MODEL")
+        .expect("Set EMBELLAMA_TEST_MODEL to run this test");
+    let model_path = PathBuf::from(model_path);
+    
+    let config = create_test_config(model_path, "test_order");
+    let engine = EmbeddingEngine::new(config).unwrap();
+    
+    // Test that order is preserved
+    let texts = vec![
+        "Alpha text",
+        "Beta text",
+        "Gamma text",
+        "Delta text",
+        "Epsilon text",
+    ];
+    
+    let batch_embeddings = engine.embed_batch(Some("test_order"), texts.clone()).unwrap();
+    
+    // Get individual embeddings
+    let mut individual_embeddings = Vec::new();
+    for text in &texts {
+        individual_embeddings.push(engine.embed(Some("test_order"), text).unwrap());
+    }
+    
+    // Verify order is preserved
+    assert_eq!(batch_embeddings.len(), individual_embeddings.len());
+    for (batch_emb, individual_emb) in batch_embeddings.iter().zip(individual_embeddings.iter()) {
+        assert_eq!(batch_emb, individual_emb);
+    }
+}
+
+#[test]
+#[ignore] // Requires actual GGUF model file
+#[serial]
+fn test_batch_vs_sequential_performance() {
+    let model_path = std::env::var("EMBELLAMA_TEST_MODEL")
+        .expect("Set EMBELLAMA_TEST_MODEL to run this test");
+    let model_path = PathBuf::from(model_path);
+    
+    let config = create_test_config(model_path, "test_perf");
+    let engine = EmbeddingEngine::new(config).unwrap();
+    
+    // Create test texts
+    let mut texts = Vec::new();
+    for i in 0..20 {
+        texts.push(format!("Performance test document {}", i));
+    }
+    let text_refs: Vec<&str> = texts.iter().map(|s| s.as_str()).collect();
+    
+    // Measure sequential processing time
+    let sequential_start = std::time::Instant::now();
+    let mut sequential_embeddings = Vec::new();
+    for text in &text_refs {
+        sequential_embeddings.push(engine.embed(Some("test_perf"), text).unwrap());
+    }
+    let sequential_duration = sequential_start.elapsed();
+    
+    // Measure batch processing time
+    let batch_start = std::time::Instant::now();
+    let batch_embeddings = engine.embed_batch(Some("test_perf"), text_refs).unwrap();
+    let batch_duration = batch_start.elapsed();
+    
+    println!("Sequential processing: {:?}", sequential_duration);
+    println!("Batch processing: {:?}", batch_duration);
+    println!("Speedup: {:.2}x", sequential_duration.as_secs_f64() / batch_duration.as_secs_f64());
+    
+    // Verify results are the same
+    assert_eq!(batch_embeddings.len(), sequential_embeddings.len());
+    for (batch_emb, seq_emb) in batch_embeddings.iter().zip(sequential_embeddings.iter()) {
+        assert_eq!(batch_emb, seq_emb);
+    }
+    
+    // > NOTE: Batch processing should be faster for tokenization and post-processing
+    // Model inference remains sequential due to !Send constraint
+}

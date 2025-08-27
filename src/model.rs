@@ -373,8 +373,8 @@ impl EmbeddingModel {
 
         debug!("Tokenized text into {} tokens", tokens.len());
 
-        // Process tokens to get embeddings
-        let embeddings = self.process_tokens(&tokens)?;
+        // Process tokens to get embeddings for all tokens
+        let embeddings = self.process_tokens_internal(&tokens)?;
         
         // Apply pooling strategy
         let pooled = self.apply_pooling(&embeddings, &self.config.pooling_strategy)?;
@@ -399,9 +399,28 @@ impl EmbeddingModel {
     ///
     /// # Returns
     ///
-    /// Returns the raw embeddings for all tokens.
+    /// Returns the processed embedding vector.
     #[instrument(skip(self, tokens), fields(token_count = tokens.len()))]
-    pub(crate) fn process_tokens(&mut self, tokens: &[LlamaToken]) -> Result<Vec<Vec<f32>>> {
+    pub fn process_tokens(&mut self, tokens: &[i32]) -> Result<Vec<f32>> {
+        // Convert i32 tokens to LlamaToken and process
+        let llama_tokens: Vec<LlamaToken> = tokens.iter().map(|&t| LlamaToken(t)).collect();
+        let embeddings = self.process_tokens_internal(&llama_tokens)?;
+        
+        // Apply pooling strategy
+        let pooled = self.apply_pooling(&embeddings, &self.config.pooling_strategy)?;
+        
+        // Normalize if configured
+        let final_embedding = if self.config.normalize_embeddings {
+            self.normalize_embedding(pooled)?
+        } else {
+            pooled
+        };
+        
+        Ok(final_embedding)
+    }
+
+    /// Internal method to process LlamaToken vectors.
+    fn process_tokens_internal(&mut self, tokens: &[LlamaToken]) -> Result<Vec<Vec<f32>>> {
         if tokens.is_empty() {
             return Err(Error::InvalidInput {
                 message: "Cannot process empty token list".to_string(),
