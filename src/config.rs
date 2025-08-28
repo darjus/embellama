@@ -69,7 +69,7 @@ impl ModelConfig {
             )));
         }
 
-        if self.model_name.is_empty() {
+        if self.model_name.trim().is_empty() {
             return Err(Error::config("Model name cannot be empty"));
         }
 
@@ -94,9 +94,9 @@ impl Default for ModelConfig {
         Self {
             model_path: PathBuf::new(),
             model_name: String::new(),
-            n_ctx: Some(2048),
+            n_ctx: None,
             n_threads: None,
-            n_gpu_layers: Some(0),
+            n_gpu_layers: None,
             use_mmap: true,
             use_mlock: false,
             normalize_embeddings: true,
@@ -265,12 +265,12 @@ impl Default for EngineConfig {
             model_name: String::new(),
             context_size: None,
             n_threads: None,
-            use_gpu: true,
-            n_gpu_layers: Some(0),
-            batch_size: Some(32),
-            normalize_embeddings: true,
+            use_gpu: false,
+            n_gpu_layers: None,
+            batch_size: None,
+            normalize_embeddings: false,
             pooling_strategy: PoolingStrategy::default(),
-            max_tokens: Some(512),
+            max_tokens: None,
             memory_limit_mb: None,
             verbose: false,
             seed: None,
@@ -300,7 +300,7 @@ impl EngineConfig {
             )));
         }
 
-        if self.model_name.is_empty() {
+        if self.model_name.trim().is_empty() {
             return Err(Error::config("Model name cannot be empty"));
         }
 
@@ -661,5 +661,269 @@ mod tests {
     #[test]
     fn test_pooling_strategy_default() {
         assert_eq!(PoolingStrategy::default(), PoolingStrategy::Mean);
+    }
+
+    #[test]
+    fn test_engine_config_full_builder() {
+        let dir = tempdir().unwrap();
+        let model_path = dir.path().join("model.gguf");
+        fs::write(&model_path, b"dummy").unwrap();
+
+        let config = EngineConfig::builder()
+            .with_model_path(&model_path)
+            .with_model_name("full-test")
+            .with_context_size(2048)
+            .with_n_threads(16)
+            .with_use_gpu(true)
+            .with_n_gpu_layers(32)
+            .with_normalize_embeddings(true)
+            .with_pooling_strategy(PoolingStrategy::Cls)
+            .with_batch_size(128)
+            .build()
+            .unwrap();
+
+        assert_eq!(config.context_size, Some(2048));
+        assert_eq!(config.n_threads, Some(16));
+        assert!(config.use_gpu);
+        assert_eq!(config.n_gpu_layers, Some(32));
+        assert!(config.normalize_embeddings);
+        assert_eq!(config.pooling_strategy, PoolingStrategy::Cls);
+        assert_eq!(config.batch_size, Some(128));
+    }
+
+    #[test]
+    fn test_model_config_defaults() {
+        let dir = tempdir().unwrap();
+        let model_path = dir.path().join("model.gguf");
+        fs::write(&model_path, b"dummy").unwrap();
+
+        let config = ModelConfig::builder()
+            .with_model_path(&model_path)
+            .with_model_name("test")
+            .build()
+            .unwrap();
+
+        // Check that defaults are None
+        assert!(config.n_ctx.is_none());
+        assert!(config.n_threads.is_none());
+        assert!(config.n_gpu_layers.is_none());
+    }
+
+    #[test]
+    fn test_engine_config_defaults() {
+        let dir = tempdir().unwrap();
+        let model_path = dir.path().join("model.gguf");
+        fs::write(&model_path, b"dummy").unwrap();
+
+        let config = EngineConfig::builder()
+            .with_model_path(&model_path)
+            .with_model_name("test")
+            .build()
+            .unwrap();
+
+        // Check defaults
+        assert!(config.context_size.is_none());
+        assert!(config.n_threads.is_none());
+        assert!(!config.use_gpu);
+        assert!(config.n_gpu_layers.is_none());
+        assert!(!config.normalize_embeddings);
+        assert_eq!(config.pooling_strategy, PoolingStrategy::Mean);
+        assert!(config.batch_size.is_none());
+    }
+
+    #[test]
+    fn test_all_pooling_strategies() {
+        let strategies = vec![
+            PoolingStrategy::Mean,
+            PoolingStrategy::Cls,
+            PoolingStrategy::Max,
+            PoolingStrategy::MeanSqrt,
+        ];
+
+        for strategy in strategies {
+            let dir = tempdir().unwrap();
+            let model_path = dir.path().join("model.gguf");
+            fs::write(&model_path, b"dummy").unwrap();
+
+            let config = EngineConfig::builder()
+                .with_model_path(&model_path)
+                .with_model_name(format!("test-{:?}", strategy))
+                .with_pooling_strategy(strategy.clone())
+                .build()
+                .unwrap();
+
+            assert_eq!(config.pooling_strategy, strategy);
+        }
+    }
+
+    #[test]
+    fn test_model_config_path_types() {
+        let dir = tempdir().unwrap();
+        
+        // Test with PathBuf
+        let model_path_buf = dir.path().join("model1.gguf");
+        fs::write(&model_path_buf, b"dummy").unwrap();
+        
+        let config = ModelConfig::builder()
+            .with_model_path(&model_path_buf)
+            .with_model_name("test1")
+            .build()
+            .unwrap();
+        assert_eq!(config.model_path, model_path_buf);
+
+        // Test with &Path
+        let model_path = dir.path().join("model2.gguf");
+        fs::write(&model_path, b"dummy").unwrap();
+        
+        let config = ModelConfig::builder()
+            .with_model_path(model_path.as_path())
+            .with_model_name("test2")
+            .build()
+            .unwrap();
+        assert_eq!(config.model_path, model_path);
+
+        // Test with String
+        let model_path_str = dir.path().join("model3.gguf");
+        fs::write(&model_path_str, b"dummy").unwrap();
+        
+        let config = ModelConfig::builder()
+            .with_model_path(model_path_str.to_str().unwrap())
+            .with_model_name("test3")
+            .build()
+            .unwrap();
+        assert_eq!(config.model_path, model_path_str);
+    }
+
+    #[test]
+    fn test_config_validation_large_values() {
+        let dir = tempdir().unwrap();
+        let model_path = dir.path().join("model.gguf");
+        fs::write(&model_path, b"dummy").unwrap();
+
+        // Test with very large context size
+        let config = EngineConfig::builder()
+            .with_model_path(&model_path)
+            .with_model_name("test")
+            .with_context_size(1_000_000)
+            .build()
+            .unwrap();
+        assert_eq!(config.context_size, Some(1_000_000));
+
+        // Test with large thread count
+        let config = EngineConfig::builder()
+            .with_model_path(&model_path)
+            .with_model_name("test")
+            .with_n_threads(256)
+            .build()
+            .unwrap();
+        assert_eq!(config.n_threads, Some(256));
+
+        // Test with large batch size
+        let config = EngineConfig::builder()
+            .with_model_path(&model_path)
+            .with_model_name("test")
+            .with_batch_size(10000)
+            .build()
+            .unwrap();
+        assert_eq!(config.batch_size, Some(10000));
+    }
+
+    #[test]
+    fn test_config_clone() {
+        let dir = tempdir().unwrap();
+        let model_path = dir.path().join("model.gguf");
+        fs::write(&model_path, b"dummy").unwrap();
+
+        let original = EngineConfig::builder()
+            .with_model_path(&model_path)
+            .with_model_name("test")
+            .with_context_size(512)
+            .build()
+            .unwrap();
+
+        let cloned = original.clone();
+        assert_eq!(cloned.model_path, original.model_path);
+        assert_eq!(cloned.model_name, original.model_name);
+        assert_eq!(cloned.context_size, original.context_size);
+    }
+
+    #[test]
+    fn test_model_config_debug_format() {
+        let dir = tempdir().unwrap();
+        let model_path = dir.path().join("model.gguf");
+        fs::write(&model_path, b"dummy").unwrap();
+
+        let config = ModelConfig::builder()
+            .with_model_path(&model_path)
+            .with_model_name("debug-test")
+            .build()
+            .unwrap();
+
+        let debug_str = format!("{:?}", config);
+        assert!(debug_str.contains("ModelConfig"));
+        assert!(debug_str.contains("debug-test"));
+    }
+
+    #[test]
+    fn test_special_characters_in_name() {
+        let dir = tempdir().unwrap();
+        let model_path = dir.path().join("model.gguf");
+        fs::write(&model_path, b"dummy").unwrap();
+
+        // Test with special characters in name
+        let config = EngineConfig::builder()
+            .with_model_path(&model_path)
+            .with_model_name("test-model_v2.0")
+            .build()
+            .unwrap();
+        assert_eq!(config.model_name, "test-model_v2.0");
+
+        // Test with Unicode characters
+        let config = EngineConfig::builder()
+            .with_model_path(&model_path)
+            .with_model_name("模型-测试")
+            .build()
+            .unwrap();
+        assert_eq!(config.model_name, "模型-测试");
+    }
+
+    #[test]
+    fn test_whitespace_in_model_name() {
+        let dir = tempdir().unwrap();
+        let model_path = dir.path().join("model.gguf");
+        fs::write(&model_path, b"dummy").unwrap();
+
+        // Empty name should fail
+        let result = EngineConfig::builder()
+            .with_model_path(&model_path)
+            .with_model_name("")
+            .build();
+        assert!(result.is_err());
+
+        // Whitespace-only name should fail
+        let result = EngineConfig::builder()
+            .with_model_path(&model_path)
+            .with_model_name("   ")
+            .build();
+        assert!(result.is_err());
+    }
+
+    #[test]
+    fn test_gpu_config_consistency() {
+        let dir = tempdir().unwrap();
+        let model_path = dir.path().join("model.gguf");
+        fs::write(&model_path, b"dummy").unwrap();
+
+        // GPU layers without GPU flag should still be valid
+        let config = EngineConfig::builder()
+            .with_model_path(&model_path)
+            .with_model_name("test")
+            .with_use_gpu(false)
+            .with_n_gpu_layers(10)
+            .build()
+            .unwrap();
+
+        assert!(!config.use_gpu);
+        assert_eq!(config.n_gpu_layers, Some(10));
     }
 }
