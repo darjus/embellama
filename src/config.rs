@@ -48,6 +48,10 @@ pub struct ModelConfig {
     
     /// Pooling strategy for embeddings
     pub pooling_strategy: PoolingStrategy,
+    
+    /// Whether to add BOS (beginning-of-sequence) token during tokenization
+    /// None = auto-detect based on model type (encoder models like BERT/E5/BGE/GTE = false, decoder models = true)
+    pub add_bos_token: Option<bool>,
 }
 
 impl ModelConfig {
@@ -101,6 +105,7 @@ impl Default for ModelConfig {
             use_mlock: false,
             normalize_embeddings: true,
             pooling_strategy: PoolingStrategy::default(),
+            add_bos_token: None,
         }
     }
 }
@@ -171,6 +176,13 @@ impl ModelConfigBuilder {
         self.config.pooling_strategy = strategy;
         self
     }
+    
+    /// Set whether to add BOS token during tokenization
+    /// None = auto-detect based on model type
+    pub fn with_add_bos_token(mut self, add_bos: Option<bool>) -> Self {
+        self.config.add_bos_token = add_bos;
+        self
+    }
 
     /// Build the configuration
     pub fn build(self) -> Result<ModelConfig> {
@@ -237,6 +249,10 @@ pub struct EngineConfig {
     /// Use memory locking to prevent swapping
     /// NOTE: This setting is not yet supported by llama-cpp-2 API
     pub use_mlock: bool,
+    
+    /// Whether to add BOS (beginning-of-sequence) token during tokenization
+    /// None = auto-detect based on model type
+    pub add_bos_token: Option<bool>,
 }
 
 /// Pooling strategy for combining token embeddings
@@ -277,6 +293,7 @@ impl Default for EngineConfig {
             temperature: None,
             use_mmap: true,
             use_mlock: false,
+            add_bos_token: None,
         }
     }
 }
@@ -379,6 +396,7 @@ impl EngineConfig {
             use_mlock: self.use_mlock,
             normalize_embeddings: self.normalize_embeddings,
             pooling_strategy: self.pooling_strategy,
+            add_bos_token: self.add_bos_token,
         }
     }
 }
@@ -489,6 +507,13 @@ impl EngineConfigBuilder {
     /// Set whether to use memory locking
     pub fn with_use_mlock(mut self, use_mlock: bool) -> Self {
         self.config.use_mlock = use_mlock;
+        self
+    }
+    
+    /// Set whether to add BOS token during tokenization
+    /// None = auto-detect based on model type
+    pub fn with_add_bos_token(mut self, add_bos: Option<bool>) -> Self {
+        self.config.add_bos_token = add_bos;
         self
     }
 

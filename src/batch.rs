@@ -30,12 +30,15 @@ use tracing::{debug, instrument};
 /// Represents a batch of texts to be processed.
 pub struct BatchProcessor {
     /// Maximum number of texts to process in a single batch
+    #[allow(dead_code)]
     max_batch_size: usize,
     /// Optional progress callback for tracking batch processing
     progress_callback: Option<Arc<dyn Fn(usize, usize) + Send + Sync>>,
     /// Whether to normalize embeddings
+    #[allow(dead_code)]
     normalize: bool,
     /// Pooling strategy to apply
+    #[allow(dead_code)]
     pooling_strategy: PoolingStrategy,
 }
 

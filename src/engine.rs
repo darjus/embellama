@@ -18,7 +18,7 @@
 //! the primary interface for the library, managing model lifecycle and
 //! providing high-level embedding generation APIs.
 
-use crate::batch::{BatchProcessor, BatchProcessorBuilder};
+use crate::batch::BatchProcessorBuilder;
 use crate::config::EngineConfig;
 use crate::error::{Error, Result};
 use crate::model::EmbeddingModel;
@@ -28,7 +28,7 @@ use std::collections::HashMap;
 use std::sync::Arc;
 use tracing::{debug, info, instrument};
 
-/// Thread-local storage for models due to !Send constraint of LlamaContext
+// Thread-local storage for models due to !Send constraint of LlamaContext
 thread_local! {
     static THREAD_MODELS: RefCell<HashMap<String, EmbeddingModel>> = RefCell::new(HashMap::new());
 }
@@ -150,18 +150,20 @@ impl EmbeddingEngine {
         Ok(())
     }
 
-    /// Unloads a model by name.
+    /// Unregisters a model from the registry, preventing future loads.
+    ///
+    /// This removes the model configuration from the registry but does not
+    /// affect already-loaded model instances in threads.
     ///
     /// # Arguments
     ///
-    /// * `model_name` - The name of the model to unload
+    /// * `model_name` - The name of the model to unregister
     ///
     /// # Errors
     ///
-    /// This function will return an error if:
-    /// - The model is not found
+    /// Returns an error if the model is not found in the registry.
     #[instrument(skip(self))]
-    pub fn unload_model(&mut self, model_name: &str) -> Result<()> {
+    pub fn unregister_model(&mut self, model_name: &str) -> Result<()> {
         // Remove from config registry
         {
             let mut configs = self.model_configs.write();
@@ -173,19 +175,75 @@ impl EmbeddingEngine {
             configs.remove(model_name);
         }
         
-        // Remove from thread-local storage
-        THREAD_MODELS.with(|models| {
-            let mut models = models.borrow_mut();
-            models.remove(model_name);
-        });
-        
         // Update default model if needed
         if self.default_model.as_ref() == Some(&model_name.to_string()) {
             let configs = self.model_configs.read();
             self.default_model = configs.keys().next().cloned();
         }
         
-        info!("Model '{}' unloaded", model_name);
+        info!("Model '{}' unregistered from config registry", model_name);
+        Ok(())
+    }
+    
+    /// Drops a model from the current thread's cache.
+    ///
+    /// This removes the model instance from the current thread but keeps
+    /// its configuration in the registry, allowing it to be reloaded later.
+    ///
+    /// # Arguments
+    ///
+    /// * `model_name` - The name of the model to drop from thread
+    ///
+    /// # Errors
+    ///
+    /// Returns an error if the model is not registered.
+    #[instrument(skip(self))]
+    pub fn drop_model_from_thread(&self, model_name: &str) -> Result<()> {
+        // First check if model is registered
+        {
+            let configs = self.model_configs.read();
+            if !configs.contains_key(model_name) {
+                return Err(Error::ModelNotFound {
+                    name: model_name.to_string(),
+                });
+            }
+        }
+        
+        // Remove from thread-local storage
+        THREAD_MODELS.with(|models| {
+            let mut models = models.borrow_mut();
+            if models.remove(model_name).is_some() {
+                info!("Model '{}' dropped from current thread", model_name);
+            } else {
+                debug!("Model '{}' was not loaded in current thread", model_name);
+            }
+        });
+        
+        Ok(())
+    }
+    
+    /// Unloads a model completely (unregisters and drops from thread).
+    ///
+    /// This is a convenience method that combines `unregister_model` and
+    /// `drop_model_from_thread`. It maintains backward compatibility with
+    /// the original unload_model behavior.
+    ///
+    /// # Arguments
+    ///
+    /// * `model_name` - The name of the model to unload
+    ///
+    /// # Errors
+    ///
+    /// Returns an error if the model is not found.
+    #[instrument(skip(self))]
+    pub fn unload_model(&mut self, model_name: &str) -> Result<()> {
+        // Drop from current thread first (while config still exists)
+        self.drop_model_from_thread(model_name)?;
+        
+        // Then unregister from config
+        self.unregister_model(model_name)?;
+        
+        info!("Model '{}' fully unloaded", model_name);
         Ok(())
     }
 
@@ -341,7 +399,7 @@ impl EmbeddingEngine {
         configs.keys().cloned().collect()
     }
 
-    /// Checks if a model is loaded.
+    /// Checks if a model is registered in the config registry.
     ///
     /// # Arguments
     ///
@@ -349,10 +407,45 @@ impl EmbeddingEngine {
     ///
     /// # Returns
     ///
-    /// Returns true if the model is loaded, false otherwise.
-    pub fn is_model_loaded(&self, model_name: &str) -> bool {
+    /// Returns true if the model is registered, false otherwise.
+    pub fn is_model_registered(&self, model_name: &str) -> bool {
         let configs = self.model_configs.read();
         configs.contains_key(model_name)
+    }
+    
+    /// Checks if a model is loaded in the current thread.
+    ///
+    /// # Arguments
+    ///
+    /// * `model_name` - The name of the model to check
+    ///
+    /// # Returns
+    ///
+    /// Returns true if the model is loaded in the current thread, false otherwise.
+    pub fn is_model_loaded_in_thread(&self, model_name: &str) -> bool {
+        THREAD_MODELS.with(|models| {
+            let models = models.borrow();
+            models.contains_key(model_name)
+        })
+    }
+    
+    /// Checks if a model is loaded (deprecated, use is_model_registered).
+    ///
+    /// # Deprecated
+    ///
+    /// This method has been deprecated in favor of `is_model_registered` for clarity.
+    /// The original name was misleading as it only checked registration, not actual loading.
+    ///
+    /// # Arguments
+    ///
+    /// * `model_name` - The name of the model to check
+    ///
+    /// # Returns
+    ///
+    /// Returns true if the model is registered, false otherwise.
+    #[deprecated(since = "0.2.0", note = "Use is_model_registered instead for clarity")]
+    pub fn is_model_loaded(&self, model_name: &str) -> bool {
+        self.is_model_registered(model_name)
     }
 
     /// Gets the default model name.
@@ -374,7 +467,7 @@ impl EmbeddingEngine {
     ///
     /// Returns an error if the model is not loaded.
     pub fn set_default_model(&mut self, model_name: &str) -> Result<()> {
-        if !self.is_model_loaded(model_name) {
+        if !self.is_model_registered(model_name) {
             return Err(Error::ModelNotFound {
                 name: model_name.to_string(),
             });

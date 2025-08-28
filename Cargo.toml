@@ -37,6 +37,7 @@ serial_test = "3.0"
 tempfile = "3.8"
 tokio-test = "0.4"
 pretty_assertions = "1.4"
+proptest = "1.4"
 
 [features]
 default = []
@@ -46,6 +47,10 @@ server = ["dep:axum", "dep:tokio", "dep:clap", "dep:tower", "dep:tower-http"]
 name = "embellama-server"
 required-features = ["server"]
 path = "src/bin/server.rs"
+
+[[bench]]
+name = "embeddings_bench"
+harness = false
 
 [profile.release]
 opt-level = 3

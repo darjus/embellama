@@ -42,28 +42,23 @@ fn create_test_config(model_path: PathBuf, name: &str) -> EngineConfig {
 }
 
 #[test]
-#[ignore] // Requires actual GGUF model file
 #[serial]
 fn test_engine_creation_and_embedding() {
-    // This test would require a real GGUF model file
-    // Set EMBELLAMA_TEST_MODEL environment variable to point to a real model
+    // This test requires a real GGUF model file - no mocks, no fallbacks
     let model_path = std::env::var("EMBELLAMA_TEST_MODEL")
-        .ok()
-        .map(PathBuf::from)
-        .unwrap_or_else(|| {
-            eprintln!("Skipping test: EMBELLAMA_TEST_MODEL not set");
-            return PathBuf::from("test.gguf");
-        });
+        .expect("EMBELLAMA_TEST_MODEL must be set - run 'just download-test-model' first");
     
-    if !model_path.exists() {
-        eprintln!("Skipping test: Model file does not exist at {:?}", model_path);
-        return;
-    }
+    let model_path = PathBuf::from(model_path);
+    assert!(model_path.exists(), 
+        "Model file not found at {:?}. Run 'just download-test-model' to download it.", 
+        model_path);
 
+    let normalize = true; // Store this before moving config
     let config = EngineConfig::builder()
         .with_model_path(model_path)
         .with_model_name("test-model")
         .with_context_size(512)
+        .with_normalize_embeddings(normalize)
         .build()
         .unwrap();
 
@@ -76,27 +71,27 @@ fn test_engine_creation_and_embedding() {
     assert!(!embedding.is_empty());
     assert!(embedding.len() > 0);
     
-    // Check that embeddings are normalized (L2 norm should be close to 1.0)
+    // Check that embeddings are not all zeros (norm should be non-zero)
+    // Note: Some models like MiniLM don't normalize by default
     let norm: f32 = embedding.iter().map(|x| x * x).sum::<f32>().sqrt();
-    assert!((norm - 1.0).abs() < 0.01, "Embedding should be normalized, got norm: {}", norm);
+    assert!(norm > 0.1, "Embedding norm too low (likely zeros), got norm: {}", norm);
+    
+    // If normalization is enabled in config, check it's close to 1.0
+    if normalize {
+        assert!((norm - 1.0).abs() < 0.01, "Embedding should be normalized to 1.0, got norm: {}", norm);
+    }
 }
 
 #[test]
-#[ignore] // Requires actual GGUF model file
 #[serial]
 fn test_batch_embeddings() {
     let model_path = std::env::var("EMBELLAMA_TEST_MODEL")
-        .ok()
-        .map(PathBuf::from)
-        .unwrap_or_else(|| {
-            eprintln!("Skipping test: EMBELLAMA_TEST_MODEL not set");
-            return PathBuf::from("test.gguf");
-        });
+        .expect("EMBELLAMA_TEST_MODEL must be set - run 'just download-test-model' first");
     
-    if !model_path.exists() {
-        eprintln!("Skipping test: Model file does not exist at {:?}", model_path);
-        return;
-    }
+    let model_path = PathBuf::from(model_path);
+    assert!(model_path.exists(), 
+        "Model file not found at {:?}. Run 'just download-test-model' to download it.", 
+        model_path);
 
     let config = EngineConfig::builder()
         .with_model_path(model_path)
@@ -125,21 +120,15 @@ fn test_batch_embeddings() {
 }
 
 #[test]
-#[ignore] // Requires actual GGUF model file
 #[serial]
 fn test_multiple_models() {
     let model_path = std::env::var("EMBELLAMA_TEST_MODEL")
-        .ok()
-        .map(PathBuf::from)
-        .unwrap_or_else(|| {
-            eprintln!("Skipping test: EMBELLAMA_TEST_MODEL not set");
-            return PathBuf::from("test.gguf");
-        });
+        .expect("EMBELLAMA_TEST_MODEL must be set - run 'just download-test-model' first");
     
-    if !model_path.exists() {
-        eprintln!("Skipping test: Model file does not exist at {:?}", model_path);
-        return;
-    }
+    let model_path = PathBuf::from(model_path);
+    assert!(model_path.exists(), 
+        "Model file not found at {:?}. Run 'just download-test-model' to download it.", 
+        model_path);
 
     // Create engine with first model
     let config1 = EngineConfig::builder()
@@ -176,21 +165,15 @@ fn test_multiple_models() {
 }
 
 #[test]
-#[ignore] // Requires actual GGUF model file  
 #[serial]
 fn test_error_handling() {
     let model_path = std::env::var("EMBELLAMA_TEST_MODEL")
-        .ok()
-        .map(PathBuf::from)
-        .unwrap_or_else(|| {
-            eprintln!("Skipping test: EMBELLAMA_TEST_MODEL not set");
-            return PathBuf::from("test.gguf");
-        });
+        .expect("EMBELLAMA_TEST_MODEL must be set - run 'just download-test-model' first");
     
-    if !model_path.exists() {
-        eprintln!("Skipping test: Model file does not exist at {:?}", model_path);
-        return;
-    }
+    let model_path = PathBuf::from(model_path);
+    assert!(model_path.exists(), 
+        "Model file not found at {:?}. Run 'just download-test-model' to download it.", 
+        model_path);
 
     let config = EngineConfig::builder()
         .with_model_path(model_path)
@@ -210,21 +193,220 @@ fn test_error_handling() {
 }
 
 #[test]
-#[ignore] // Requires actual GGUF model file
+#[serial]
+fn test_bos_token_configuration() {
+    let model_path = std::env::var("EMBELLAMA_TEST_MODEL")
+        .expect("EMBELLAMA_TEST_MODEL must be set - run 'just download-test-model' first");
+    
+    let model_path = PathBuf::from(model_path);
+    assert!(model_path.exists(), 
+        "Model file not found at {:?}. Run 'just download-test-model' to download it.", 
+        model_path);
+
+    // Test with explicit add_bos_token = false (encoder behavior)
+    let config_no_bos = EngineConfig::builder()
+        .with_model_path(model_path.clone())
+        .with_model_name("test-bert-model")
+        .with_add_bos_token(Some(false))
+        .build()
+        .unwrap();
+
+    let engine_no_bos = EmbeddingEngine::new(config_no_bos).expect("Failed to create engine");
+    let emb_no_bos = engine_no_bos.embed(None, "test text").expect("Failed to generate embedding");
+    
+    // Test with explicit add_bos_token = true (decoder behavior)
+    let config_with_bos = EngineConfig::builder()
+        .with_model_path(model_path.clone())
+        .with_model_name("test-llama-model")
+        .with_add_bos_token(Some(true))
+        .build()
+        .unwrap();
+
+    let engine_with_bos = EmbeddingEngine::new(config_with_bos).expect("Failed to create engine");
+    let emb_with_bos = engine_with_bos.embed(None, "test text").expect("Failed to generate embedding");
+    
+    // Both should produce valid embeddings
+    assert!(!emb_no_bos.is_empty());
+    assert!(!emb_with_bos.is_empty());
+    
+    // Test auto-detection with BERT-like name
+    let config_bert_auto = EngineConfig::builder()
+        .with_model_path(model_path.clone())
+        .with_model_name("all-minilm-l6-v2")
+        .build()
+        .unwrap();
+
+    let engine_bert_auto = EmbeddingEngine::new(config_bert_auto).expect("Failed to create engine");
+    let emb_bert = engine_bert_auto.embed(None, "test text").expect("Failed to generate embedding");
+    assert!(!emb_bert.is_empty());
+    
+    // Test auto-detection with LLaMA-like name
+    let config_llama_auto = EngineConfig::builder()
+        .with_model_path(model_path)
+        .with_model_name("llama-2-7b-embeddings")
+        .build()
+        .unwrap();
+
+    let engine_llama_auto = EmbeddingEngine::new(config_llama_auto).expect("Failed to create engine");
+    let emb_llama = engine_llama_auto.embed(None, "test text").expect("Failed to generate embedding");
+    assert!(!emb_llama.is_empty());
+}
+
+#[test]
+#[serial]
+fn test_granular_unload_operations() {
+    let model_path = std::env::var("EMBELLAMA_TEST_MODEL")
+        .expect("EMBELLAMA_TEST_MODEL must be set - run 'just download-test-model' first");
+    
+    let model_path = PathBuf::from(model_path);
+    assert!(model_path.exists(), 
+        "Model file not found at {:?}. Run 'just download-test-model' to download it.", 
+        model_path);
+
+    // Create engine with a model
+    let config = EngineConfig::builder()
+        .with_model_path(model_path.clone())
+        .with_model_name("test-model")
+        .build()
+        .unwrap();
+
+    let mut engine = EmbeddingEngine::new(config).expect("Failed to create engine");
+    
+    // Load a second model
+    let config2 = EngineConfig::builder()
+        .with_model_path(model_path.clone())
+        .with_model_name("test-model-2")
+        .build()
+        .unwrap();
+    
+    engine.load_model(config2).expect("Failed to load second model");
+    
+    // Verify both models are listed
+    assert_eq!(engine.list_models().len(), 2);
+    
+    // Test drop_model_from_thread - model should still be registered
+    engine.drop_model_from_thread("test-model").expect("Failed to drop from thread");
+    assert_eq!(engine.list_models().len(), 2); // Still registered
+    
+    // Should be able to use the model again (it will reload)
+    let emb = engine.embed(Some("test-model"), "test text").expect("Failed to embed after drop");
+    assert!(!emb.is_empty());
+    
+    // Test unregister_model - removes from registry but not necessarily from thread
+    engine.unregister_model("test-model-2").expect("Failed to unregister");
+    assert_eq!(engine.list_models().len(), 1); // Only one model left
+    assert!(!engine.list_models().contains(&"test-model-2".to_string()));
+    
+    // Should not be able to use unregistered model
+    let result = engine.embed(Some("test-model-2"), "test text");
+    assert!(result.is_err());
+    
+    // Test full unload_model (backward compatibility)
+    let config3 = EngineConfig::builder()
+        .with_model_path(model_path)
+        .with_model_name("test-model-3")
+        .build()
+        .unwrap();
+    
+    engine.load_model(config3).expect("Failed to load third model");
+    assert_eq!(engine.list_models().len(), 2);
+    
+    engine.unload_model("test-model-3").expect("Failed to unload");
+    assert_eq!(engine.list_models().len(), 1);
+    assert!(!engine.list_models().contains(&"test-model-3".to_string()));
+    
+    // Should not be able to use unloaded model
+    let result = engine.embed(Some("test-model-3"), "test text");
+    assert!(result.is_err());
+}
+
+#[test]
+#[serial]
+fn test_model_registration_checking() {
+    let model_path = std::env::var("EMBELLAMA_TEST_MODEL")
+        .expect("EMBELLAMA_TEST_MODEL must be set - run 'just download-test-model' first");
+    
+    let model_path = PathBuf::from(model_path);
+    assert!(model_path.exists(), 
+        "Model file not found at {:?}. Run 'just download-test-model' to download it.", 
+        model_path);
+
+    // Create engine with a model
+    let config = EngineConfig::builder()
+        .with_model_path(model_path.clone())
+        .with_model_name("test-model")
+        .build()
+        .unwrap();
+
+    let mut engine = EmbeddingEngine::new(config).expect("Failed to create engine");
+    
+    // Check model is registered
+    assert!(engine.is_model_registered("test-model"));
+    assert!(!engine.is_model_registered("non-existent"));
+    
+    // The first model (from EmbeddingEngine::new) is loaded immediately
+    assert!(engine.is_model_loaded_in_thread("test-model"));
+    
+    // Generate embedding (model is already loaded)
+    let _ = engine.embed(Some("test-model"), "test text").expect("Failed to embed");
+    
+    // Model should still be loaded in thread
+    assert!(engine.is_model_loaded_in_thread("test-model"));
+    assert!(engine.is_model_registered("test-model"));
+    
+    // Drop from thread
+    engine.drop_model_from_thread("test-model").expect("Failed to drop from thread");
+    assert!(!engine.is_model_loaded_in_thread("test-model"));
+    assert!(engine.is_model_registered("test-model")); // Still registered
+    
+    // Unregister model
+    engine.unregister_model("test-model").expect("Failed to unregister");
+    assert!(!engine.is_model_registered("test-model"));
+    assert!(!engine.is_model_loaded_in_thread("test-model"));
+    
+    // Test with multiple models - additional models are lazy loaded
+    let config1 = EngineConfig::builder()
+        .with_model_path(model_path.clone())
+        .with_model_name("model1")
+        .build()
+        .unwrap();
+    
+    let config2 = EngineConfig::builder()
+        .with_model_path(model_path)
+        .with_model_name("model2")
+        .build()
+        .unwrap();
+    
+    engine.load_model(config1).expect("Failed to load model1");
+    engine.load_model(config2).expect("Failed to load model2");
+    
+    assert!(engine.is_model_registered("model1"));
+    assert!(engine.is_model_registered("model2"));
+    // Additional models loaded via load_model() are lazy - not loaded in thread yet
+    assert!(!engine.is_model_loaded_in_thread("model1"));
+    assert!(!engine.is_model_loaded_in_thread("model2"));
+    
+    // Load model1 in thread
+    let _ = engine.embed(Some("model1"), "test").expect("Failed to embed");
+    assert!(engine.is_model_loaded_in_thread("model1"));
+    assert!(!engine.is_model_loaded_in_thread("model2"));
+    
+    // Load model2 in thread
+    let _ = engine.embed(Some("model2"), "test").expect("Failed to embed");
+    assert!(engine.is_model_loaded_in_thread("model1"));
+    assert!(engine.is_model_loaded_in_thread("model2"));
+}
+
+#[test]
 #[serial]
 fn test_pooling_strategies() {
     let model_path = std::env::var("EMBELLAMA_TEST_MODEL")
-        .ok()
-        .map(PathBuf::from)
-        .unwrap_or_else(|| {
-            eprintln!("Skipping test: EMBELLAMA_TEST_MODEL not set");
-            return PathBuf::from("test.gguf");
-        });
+        .expect("EMBELLAMA_TEST_MODEL must be set - run 'just download-test-model' first");
     
-    if !model_path.exists() {
-        eprintln!("Skipping test: Model file does not exist at {:?}", model_path);
-        return;
-    }
+    let model_path = PathBuf::from(model_path);
+    assert!(model_path.exists(), 
+        "Model file not found at {:?}. Run 'just download-test-model' to download it.", 
+        model_path);
 
     // Test different pooling strategies
     let strategies = vec![
@@ -252,21 +434,15 @@ fn test_pooling_strategies() {
 }
 
 #[test]
-#[ignore] // Requires actual GGUF model file
 #[serial]
 fn test_model_warmup() {
     let model_path = std::env::var("EMBELLAMA_TEST_MODEL")
-        .ok()
-        .map(PathBuf::from)
-        .unwrap_or_else(|| {
-            eprintln!("Skipping test: EMBELLAMA_TEST_MODEL not set");
-            return PathBuf::from("test.gguf");
-        });
+        .expect("EMBELLAMA_TEST_MODEL must be set - run 'just download-test-model' first");
     
-    if !model_path.exists() {
-        eprintln!("Skipping test: Model file does not exist at {:?}", model_path);
-        return;
-    }
+    let model_path = PathBuf::from(model_path);
+    assert!(model_path.exists(), 
+        "Model file not found at {:?}. Run 'just download-test-model' to download it.", 
+        model_path);
 
     let config = EngineConfig::builder()
         .with_model_path(model_path)
@@ -285,21 +461,16 @@ fn test_model_warmup() {
 }
 
 #[test]
-#[ignore] // Requires actual GGUF model file
+
 #[serial]
 fn test_model_info() {
     let model_path = std::env::var("EMBELLAMA_TEST_MODEL")
-        .ok()
-        .map(PathBuf::from)
-        .unwrap_or_else(|| {
-            eprintln!("Skipping test: EMBELLAMA_TEST_MODEL not set");
-            return PathBuf::from("test.gguf");
-        });
+        .expect("EMBELLAMA_TEST_MODEL must be set - run 'just download-test-model' first");
     
-    if !model_path.exists() {
-        eprintln!("Skipping test: Model file does not exist at {:?}", model_path);
-        return;
-    }
+    let model_path = PathBuf::from(model_path);
+    assert!(model_path.exists(), 
+        "Model file not found at {:?}. Run 'just download-test-model' to download it.", 
+        model_path);
 
     let config = EngineConfig::builder()
         .with_model_path(model_path)
@@ -336,24 +507,19 @@ fn test_configuration_validation() {
 }
 
 #[test]
-#[ignore] // Requires actual GGUF model file
+
 #[serial]
 fn test_thread_safety() {
     use std::thread;
     use std::sync::Arc;
     
     let model_path = std::env::var("EMBELLAMA_TEST_MODEL")
-        .ok()
-        .map(PathBuf::from)
-        .unwrap_or_else(|| {
-            eprintln!("Skipping test: EMBELLAMA_TEST_MODEL not set");
-            return PathBuf::from("test.gguf");
-        });
+        .expect("EMBELLAMA_TEST_MODEL must be set - run 'just download-test-model' first");
     
-    if !model_path.exists() {
-        eprintln!("Skipping test: Model file does not exist at {:?}", model_path);
-        return;
-    }
+    let model_path = PathBuf::from(model_path);
+    assert!(model_path.exists(), 
+        "Model file not found at {:?}. Run 'just download-test-model' to download it.", 
+        model_path);
 
     let config = EngineConfig::builder()
         .with_model_path(model_path)
@@ -383,21 +549,16 @@ fn test_thread_safety() {
 
 /// Performance benchmark for single embedding
 #[test]
-#[ignore] // Requires actual GGUF model file
+
 #[serial]
 fn bench_single_embedding() {
     let model_path = std::env::var("EMBELLAMA_TEST_MODEL")
-        .ok()
-        .map(PathBuf::from)
-        .unwrap_or_else(|| {
-            eprintln!("Skipping test: EMBELLAMA_TEST_MODEL not set");
-            return PathBuf::from("test.gguf");
-        });
+        .expect("EMBELLAMA_TEST_MODEL must be set - run 'just download-test-model' first");
     
-    if !model_path.exists() {
-        eprintln!("Skipping test: Model file does not exist at {:?}", model_path);
-        return;
-    }
+    let model_path = PathBuf::from(model_path);
+    assert!(model_path.exists(), 
+        "Model file not found at {:?}. Run 'just download-test-model' to download it.", 
+        model_path);
 
     let config = EngineConfig::builder()
         .with_model_path(model_path)
@@ -433,7 +594,7 @@ fn bench_single_embedding() {
 // ============================================================================
 
 #[test]
-#[ignore] // Requires actual GGUF model file
+
 #[serial]
 fn test_batch_processing_basic() {
     let model_path = std::env::var("EMBELLAMA_TEST_MODEL")
@@ -468,7 +629,7 @@ fn test_batch_processing_basic() {
 }
 
 #[test]
-#[ignore] // Requires actual GGUF model file
+
 #[serial]
 fn test_batch_processing_large() {
     let model_path = std::env::var("EMBELLAMA_TEST_MODEL")
@@ -496,7 +657,7 @@ fn test_batch_processing_large() {
 }
 
 #[test]
-#[ignore] // Requires actual GGUF model file
+
 #[serial]
 fn test_batch_processing_empty() {
     let model_path = std::env::var("EMBELLAMA_TEST_MODEL")
@@ -514,7 +675,7 @@ fn test_batch_processing_empty() {
 }
 
 #[test]
-#[ignore] // Requires actual GGUF model file
+
 #[serial]
 fn test_batch_processing_single_item() {
     let model_path = std::env::var("EMBELLAMA_TEST_MODEL")
@@ -536,7 +697,7 @@ fn test_batch_processing_single_item() {
 }
 
 #[test]
-#[ignore] // Requires actual GGUF model file
+
 #[serial]
 fn test_batch_processing_order_preservation() {
     let model_path = std::env::var("EMBELLAMA_TEST_MODEL")
@@ -571,7 +732,7 @@ fn test_batch_processing_order_preservation() {
 }
 
 #[test]
-#[ignore] // Requires actual GGUF model file
+
 #[serial]
 fn test_batch_vs_sequential_performance() {
     let model_path = std::env::var("EMBELLAMA_TEST_MODEL")

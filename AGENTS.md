@@ -10,6 +10,40 @@
 - **Use message passing, not shared state** - Channel-based communication between threads
 - **Worker pool architecture for server** - Each worker thread owns a model instance
 
+## Model Architecture Differences
+
+### BERT vs LLaMA Models
+The library supports both BERT-style and LLaMA-style embedding models, which require different handling:
+
+#### BERT Models (e.g., MiniLM, Jina)
+- Have `pooling_type` metadata indicating pre-pooled embeddings
+- Use `embeddings_seq_ith(0)` to extract the pooled embedding
+- May not normalize embeddings by default (check model-specific behavior)
+- llama.cpp automatically calls `encode()` internally when `decode()` is called
+
+#### LLaMA Models
+- Generate token-level embeddings
+- Use `embeddings_ith(i)` to extract embeddings for each token
+- Require manual pooling (mean, CLS, max, etc.)
+- Generally normalize embeddings by default
+
+#### Detection and Handling
+```rust
+// Check if model returns pre-pooled embeddings
+if let Ok(seq_embeddings) = ctx.embeddings_seq_ith(0) {
+    // BERT model with pooling - single embedding for sequence
+    Ok(vec![seq_embeddings.to_vec()])
+} else {
+    // LLaMA model - token-wise embeddings
+    let mut token_embeddings = Vec::with_capacity(n_tokens);
+    for i in 0..n_tokens {
+        let embeddings = ctx.embeddings_ith(i as i32)?;
+        token_embeddings.push(embeddings.to_vec());
+    }
+    Ok(token_embeddings)
+}
+```
+
 
 
 ## Project Overview
@@ -329,6 +363,15 @@ embellama/
 
 ## Testing Requirements
 
+### Test Infrastructure
+The project uses `just` for test automation. Key commands:
+- `just test` - Run all tests
+- `just test-unit` - Unit tests only
+- `just test-integration` - Integration tests with real models
+- `just test-concurrency` - Concurrency and thread safety tests
+- `just bench` - Performance benchmarks
+- `just bench-quick` - Quick benchmark subset
+
 ### Unit Tests
 - Test each module in isolation
 - Mock external dependencies
@@ -336,10 +379,14 @@ embellama/
 - Use `#[tracing_test::traced_test]` for tests with logging
 
 ### Integration Tests
-- Test against real GGUF models
+- **MUST use real GGUF models** - No mocks or fallbacks
+- Tests should fail loudly if models aren't available
+- Supported models:
+  - MiniLM-L6-v2 (Q4_K_M) - For integration tests (~15MB)
+  - Jina Embeddings v2 Base Code (Q4_K_M) - For benchmarks (~110MB)
+- **Model-specific handling**: BERT models need `embeddings_seq_ith()` instead of `embeddings_ith()`
 - Verify batch processing correctness
 - Test model loading/unloading cycles
-- Validate OpenAI API compatibility
 
 ### Concurrency Tests (Critical)
 - **Test worker pool message passing**
@@ -347,13 +394,16 @@ embellama/
 - **Test concurrent request handling**
 - **Validate channel-based communication**
 - **Ensure no data races or deadlocks**
+- Use `serial_test::serial` for tests that need exclusive access
 
 ### Performance Tests
 - Benchmark single embedding generation
-- Benchmark batch processing
+- Benchmark batch processing with various sizes
+- Test different pooling strategies
 - Memory usage under load (per worker)
 - Concurrent request handling
 - Worker pool scaling characteristics
+- Thread scaling benchmarks
 
 ## Security Considerations
 
@@ -412,11 +462,41 @@ pub fn embed(&self, model_name: &str, text: &str) -> Result<Vec<f32>, EmbellamaE
 
 ## Development Workflow
 
+### Quick Development Loop with `just`
+```bash
+# View all available commands
+just
+
+# Quick development cycle
+just dev        # Run fix, fmt, clippy, and unit tests
+just test       # Run all test suites
+just bench-quick # Quick benchmark validation
+
+# Pre-commit validation
+just pre-commit # Full validation before committing
+
+# Model management
+just download-test-model   # Get MiniLM for tests
+just download-bench-model  # Get Jina for benchmarks
+just models-status        # Check cached models
+```
+
+### Standard Workflow
 1. **Planning**: Use zen:thinkdeeper for design decisions
 2. **Research**: Use Fetch/Brave for documentation lookup
 3. **Implementation**: Follow Rust best practices
-4. **Debugging**: Use zen:debug for complex issues
-5. **Testing**: Write comprehensive tests
+4. **Testing**: 
+   - Run `just test-unit` for quick feedback
+   - Run `just test-integration` for real model testing
+   - Run `just test-concurrency` for thread safety
+5. **Debugging**: Use zen:debug for complex issues
 6. **Review**: Run rust code review agent
-7. **Commit**: Update changelog with clog, write clear message
-8. **Document**: Update rustdoc and ARCHITECTURE.md if needed
+7. **Pre-commit**: Run `just pre-commit`
+8. **Commit**: Update changelog with clog, write clear message
+9. **Document**: Update rustdoc and ARCHITECTURE.md if needed
+
+### Key Testing Philosophy
+- **Test with real models** - No mocks for integration tests
+- **Fail loudly** - Tests should clearly indicate what's wrong
+- **Automated downloads** - Models are cached automatically via justfile
+- **Fast feedback** - Use `just dev` for rapid iteration

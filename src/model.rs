@@ -20,11 +20,12 @@
 use crate::config::{ModelConfig, PoolingStrategy};
 use crate::error::{Error, Result};
 use llama_cpp_2::context::LlamaContext;
+use llama_cpp_2::LogOptions;
 use llama_cpp_2::{
     context::params::LlamaContextParams,
     llama_backend::LlamaBackend,
     llama_batch::LlamaBatch,
-    model::{params::LlamaModelParams, AddBos, LlamaModel, Special},
+    model::{params::LlamaModelParams, AddBos, LlamaModel},
     token::LlamaToken,
 };
 use self_cell::self_cell;
@@ -50,6 +51,7 @@ fn init_backend() -> Result<&'static LlamaBackend> {
     if let Some(backend) = BACKEND.get() {
         return Ok(backend);
     }
+    llama_cpp_2::send_logs_to_tracing(LogOptions::default().with_logs_enabled(true));
 
     let backend = LlamaBackend::init().map_err(|e| Error::ModelInitError {
         message: "Failed to initialize llama backend".to_string(),
@@ -112,6 +114,8 @@ pub struct EmbeddingModel {
     embedding_dimensions: usize,
     /// Maximum context size
     max_context_size: usize,
+    /// Whether to add BOS token during tokenization
+    add_bos_token: bool,
 }
 
 impl EmbeddingModel {
@@ -199,6 +203,18 @@ impl EmbeddingModel {
                 source: anyhow::anyhow!("Failed to create context: {}", e),
             }))?;
 
+        // Determine whether to add BOS token
+        let add_bos_token = if let Some(add_bos) = config.add_bos_token {
+            // Use explicitly configured value
+            debug!("Using configured add_bos_token: {}", add_bos);
+            add_bos
+        } else {
+            // Auto-detect based on model type
+            let detected = Self::detect_add_bos_token(&config.model_path, &config.model_name);
+            debug!("Auto-detected add_bos_token: {} for model: {}", detected, config.model_name);
+            detected
+        };
+
         Ok(Self {
             cell,
             config: config.clone(),
@@ -206,6 +222,7 @@ impl EmbeddingModel {
             model_name: config.model_name.clone(),
             embedding_dimensions,
             max_context_size: ctx_size as usize,
+            add_bos_token,
         })
     }
 
@@ -304,6 +321,76 @@ impl EmbeddingModel {
         &self.model_path
     }
 
+    /// Detects whether to add BOS token based on model type.
+    ///
+    /// Encoder-only models (BERT, E5, BGE, GTE, etc.) typically don't use BOS tokens
+    /// as they have their own special token handling (CLS/SEP tokens).
+    /// Decoder models (LLaMA-style) typically do use BOS tokens.
+    ///
+    /// # Arguments
+    ///
+    /// * `model_path` - Path to the model file (for potential metadata inspection)
+    /// * `model_name` - Name of the model (used for pattern matching)
+    ///
+    /// # Returns
+    ///
+    /// Returns false for known encoder models, true otherwise (default to decoder behavior)
+    fn detect_add_bos_token(model_path: &PathBuf, model_name: &str) -> bool {
+        // Convert model name to lowercase for case-insensitive matching
+        let name_lower = model_name.to_lowercase();
+        let path_str = model_path.to_string_lossy().to_lowercase();
+        
+        // Check for known encoder model patterns
+        let encoder_patterns = [
+            "bert",      // BERT and variants (RoBERTa, DistilBERT, etc.)
+            "e5",        // E5 embeddings
+            "bge",       // BGE embeddings  
+            "gte",       // GTE embeddings
+            "minilm",    // MiniLM models
+            "mpnet",     // MPNet models
+            "sentence",  // Sentence transformers
+            "all-minilm", // All-MiniLM variants
+            "all-mpnet", // All-MPNet variants
+            "paraphrase", // Paraphrase models (usually BERT-based)
+            "msmarco",   // MS MARCO models (usually BERT-based)
+            "contriever", // Contriever models
+            "simcse",    // SimCSE models
+            "instructor", // Instructor models
+            "unsup-simcse", // Unsupervised SimCSE
+            "sup-simcse", // Supervised SimCSE
+        ];
+        
+        // Check if model name or path contains encoder patterns
+        for pattern in &encoder_patterns {
+            if name_lower.contains(pattern) || path_str.contains(pattern) {
+                return false; // Encoder model - don't add BOS
+            }
+        }
+        
+        // Check for known decoder model patterns (add BOS)
+        let decoder_patterns = [
+            "llama",
+            "mistral",
+            "mixtral",
+            "vicuna",
+            "alpaca",
+            "wizardlm",
+            "openhermes",
+            "zephyr",
+            "phi",
+        ];
+        
+        for pattern in &decoder_patterns {
+            if name_lower.contains(pattern) || path_str.contains(pattern) {
+                return true; // Decoder model - add BOS
+            }
+        }
+        
+        // Default to true (decoder behavior) for unknown models
+        // This maintains backward compatibility
+        true
+    }
+
     /// Tokenizes the input text.
     ///
     /// # Arguments
@@ -357,8 +444,8 @@ impl EmbeddingModel {
             });
         }
 
-        // Tokenize the text
-        let tokens = self.tokenize(text, true)?;
+        // Tokenize the text (using configured/detected add_bos_token setting)
+        let tokens = self.tokenize(text, self.add_bos_token)?;
         
         // Check token limit
         if tokens.len() > self.max_context_size {
@@ -373,11 +460,18 @@ impl EmbeddingModel {
 
         debug!("Tokenized text into {} tokens", tokens.len());
 
-        // Process tokens to get embeddings for all tokens
+        // Process tokens to get embeddings
         let embeddings = self.process_tokens_internal(&tokens)?;
         
-        // Apply pooling strategy
-        let pooled = self.apply_pooling(&embeddings, &self.config.pooling_strategy)?;
+        // Check if we got a single pre-pooled embedding (BERT models with pooling)
+        let pooled = if embeddings.len() == 1 && tokens.len() > 1 {
+            // This is already pooled by the model (BERT with pooling_type)
+            debug!("Using pre-pooled embedding from BERT model");
+            embeddings[0].clone()
+        } else {
+            // Apply our pooling strategy for multi-token outputs
+            self.apply_pooling(&embeddings, &self.config.pooling_strategy)?
+        };
         
         // Normalize if configured
         let final_embedding = if self.config.normalize_embeddings {
@@ -430,42 +524,43 @@ impl EmbeddingModel {
         // Create a batch for processing
         let n_tokens = tokens.len();
         let mut batch = LlamaBatch::new(n_tokens, 1);
-        
-        // Add tokens to batch
-        for (i, &token) in tokens.iter().enumerate() {
-            let is_last = i == n_tokens - 1;
-            batch.add(token, i as i32, &[0], is_last).map_err(|e| {
+        batch.add_sequence(tokens, 0, true).map_err(|e| {
                 Error::EmbeddingGenerationError {
-                    message: format!("Failed to add token to batch: {}", e),
+                    message: format!("Failed to add tokens to batch: {}", e),
                     source: Some(anyhow::anyhow!(e)),
-                }
-            })?;
-        }
+                }})?;
 
         // Process the batch through the model
         self.cell.with_dependent_mut(|_, ctx| {
-            ctx.decode(&mut batch).map_err(|e| {
+            ctx.encode(&mut batch).map_err(|e| {
                 Error::EmbeddingGenerationError {
-                    message: format!("Failed to decode batch: {}", e),
+                    message: format!("Failed to encode batch: {}", e),
                     source: Some(anyhow::anyhow!(e)),
                 }
             })
         })?;
 
-        // Extract embeddings for all tokens
-        let mut all_embeddings = Vec::with_capacity(n_tokens);
-
-        for i in 0..n_tokens {
-            let embeddings = self.cell.with_dependent(|_, ctx| {
-                ctx.embeddings_ith(i as i32)
-                    .or_else(|e| Err(Error::EmbeddingGenerationError {
-                        message: format!("Failed to get embeddings for token {}", i),
-                        source: Some(anyhow::anyhow!(e)),
-                    }))
-            })?;
-            
-            all_embeddings.push(embeddings.to_vec());
-        }
+        // Extract embeddings - try sequence embeddings first for BERT models
+        // If that fails, fall back to token-wise embeddings
+        let all_embeddings = self.cell.with_dependent(|_, ctx| -> Result<Vec<Vec<f32>>> {
+            // Try to get sequence embeddings (for BERT models)
+            if let Ok(seq_embeddings) = ctx.embeddings_seq_ith(0) {
+                // For BERT models with pooling, we get one embedding for the whole sequence
+                Ok(vec![seq_embeddings.to_vec()])
+            } else {
+                // Fall back to token-wise embeddings (for LLaMA-style models)
+                let mut token_embeddings = Vec::with_capacity(n_tokens);
+                for i in 0..n_tokens {
+                    let embeddings = ctx.embeddings_ith(i as i32)
+                        .map_err(|e| Error::EmbeddingGenerationError {
+                            message: format!("Failed to get embeddings for token {}", i),
+                            source: Some(anyhow::anyhow!(e)),
+                        })?;
+                    token_embeddings.push(embeddings.to_vec());
+                }
+                Ok(token_embeddings)
+            }
+        })?;
 
         Ok(all_embeddings)
     }
@@ -605,8 +700,6 @@ pub(crate) fn create_test_config() -> ModelConfig {
 
 #[cfg(test)]
 mod tests {
-    use std::str::FromStr;
-
     use super::*;
 
     #[test]
@@ -629,6 +722,92 @@ mod tests {
         // We can't load a real model in tests without a GGUF file,
         // but we can test the structure compiles correctly
         // Real integration tests would use actual model files
+    }
+    
+    #[test]
+    fn test_detect_add_bos_token_encoder_models() {
+        use std::path::PathBuf;
+        
+        // Test various encoder model patterns
+        let encoder_cases = vec![
+            ("bert-base", "models/bert-base.gguf"),
+            ("all-MiniLM-L6-v2", "sentence-transformers/all-MiniLM-L6-v2.gguf"),
+            ("bge-large-en", "BAAI/bge-large-en-v1.5.gguf"),
+            ("e5-base", "intfloat/e5-base-v2.gguf"),
+            ("gte-base", "thenlper/gte-base.gguf"),
+            ("all-mpnet-base-v2", "sentence-transformers/all-mpnet-base-v2.gguf"),
+            ("msmarco-bert", "cross-encoder/ms-marco-MiniLM-L-6-v2.gguf"),
+            ("contriever-msmarco", "facebook/contriever-msmarco.gguf"),
+            ("simcse-bert", "princeton-nlp/unsup-simcse-bert-base.gguf"),
+            ("instructor-base", "hkunlp/instructor-base.gguf"),
+        ];
+        
+        for (model_name, model_path) in encoder_cases {
+            let path = PathBuf::from(model_path);
+            let result = EmbeddingModel::detect_add_bos_token(&path, model_name);
+            assert!(!result, "Expected false (no BOS) for encoder model: {}", model_name);
+        }
+    }
+    
+    #[test]
+    fn test_detect_add_bos_token_decoder_models() {
+        use std::path::PathBuf;
+        
+        // Test various decoder model patterns
+        let decoder_cases = vec![
+            ("llama-2-7b", "meta-llama/Llama-2-7b.gguf"),
+            ("mistral-7b", "mistralai/Mistral-7B-v0.1.gguf"),
+            ("mixtral-8x7b", "mistralai/Mixtral-8x7B-v0.1.gguf"),
+            ("vicuna-7b", "lmsys/vicuna-7b-v1.5.gguf"),
+            ("alpaca-7b", "tatsu-lab/alpaca-7b.gguf"),
+            ("wizardlm-13b", "WizardLM/WizardLM-13B-V1.2.gguf"),
+            ("openhermes-2.5", "teknium/OpenHermes-2.5-Mistral-7B.gguf"),
+            ("zephyr-7b", "HuggingFaceH4/zephyr-7b-beta.gguf"),
+            ("phi-2", "microsoft/phi-2.gguf"),
+        ];
+        
+        for (model_name, model_path) in decoder_cases {
+            let path = PathBuf::from(model_path);
+            let result = EmbeddingModel::detect_add_bos_token(&path, model_name);
+            assert!(result, "Expected true (add BOS) for decoder model: {}", model_name);
+        }
+    }
+    
+    #[test]
+    fn test_detect_add_bos_token_unknown_models() {
+        use std::path::PathBuf;
+        
+        // Test unknown model patterns (should default to true for backward compatibility)
+        let unknown_cases = vec![
+            ("custom-model", "custom/custom-model.gguf"),
+            ("my-embeddings", "embeddings/my-embeddings.gguf"),
+            ("unknown-arch", "models/unknown-arch.gguf"),
+        ];
+        
+        for (model_name, model_path) in unknown_cases {
+            let path = PathBuf::from(model_path);
+            let result = EmbeddingModel::detect_add_bos_token(&path, model_name);
+            assert!(result, "Expected true (default) for unknown model: {}", model_name);
+        }
+    }
+    
+    #[test]
+    fn test_detect_add_bos_token_case_insensitive() {
+        use std::path::PathBuf;
+        
+        // Test case-insensitive matching
+        let cases = vec![
+            ("BERT-Base", "models/BERT.GGUF", false),
+            ("ALL-MINILM-L6", "SENTENCE-TRANSFORMERS/ALL-MINILM.gguf", false),
+            ("LLAMA-2-7B", "META-LLAMA/LLAMA-2.GGUF", true),
+            ("MISTRAL-7B", "MISTRALAI/MISTRAL.gguf", true),
+        ];
+        
+        for (model_name, model_path, expected) in cases {
+            let path = PathBuf::from(model_path);
+            let result = EmbeddingModel::detect_add_bos_token(&path, model_name);
+            assert_eq!(result, expected, "Case-insensitive test failed for: {}", model_name);
+        }
     }
 
     #[test]

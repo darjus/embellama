@@ -35,6 +35,14 @@ let texts = vec!["Text 1", "Text 2", "Text 3"];
 let embeddings = engine.embed_batch(None, texts)?;
 ```
 
+## Tested Models
+
+The library has been tested with the following GGUF models:
+- **MiniLM-L6-v2** (Q4_K_M): ~15MB, 384-dimensional embeddings - used for integration tests
+- **Jina Embeddings v2 Base Code** (Q4_K_M): ~110MB, 768-dimensional embeddings - used for benchmarks
+
+Both BERT-style and LLaMA-style embedding models are supported.
+
 ## Installation
 
 Add this to your `Cargo.toml`:
@@ -142,33 +150,63 @@ EMBELLAMA_BENCH_MODEL=/path/to/model.gguf cargo bench
 3. **GPU Acceleration**: Enable GPU for larger models
 4. **Warmup**: Call `warmup_model()` before processing
 
-## Testing
+## Development
 
-### Unit Tests
+This project uses [just](https://github.com/casey/just) for task automation. 
+
+### Available Commands
 
 ```bash
-cargo test
+just               # Show all available commands
+just test          # Run all tests (unit + integration + concurrency)
+just test-unit     # Run unit tests only
+just test-integration # Run integration tests with real model
+just test-concurrency # Run concurrency tests
+just bench         # Run full benchmarks
+just bench-quick   # Run quick benchmark subset
+just dev           # Run fix, fmt, clippy, and unit tests
+just pre-commit    # Run all checks before committing
+just clean-all     # Clean build artifacts and models
 ```
 
-### Integration Tests
+### Testing
 
-Set the test model environment variable:
+The project includes comprehensive test suites:
+
+#### Unit Tests
+```bash
+just test-unit
+```
+
+#### Integration Tests
+Tests with real GGUF models (downloads MiniLM automatically):
+```bash
+just test-integration
+```
+
+#### Concurrency Tests
+Tests thread safety and parallel processing:
+```bash
+just test-concurrency
+```
+
+### Model Management
+
+Test models are automatically downloaded and cached:
+- **Test model** (MiniLM-L6-v2): ~15MB, for integration tests
+- **Benchmark model** (Jina Embeddings v2): ~110MB, for performance testing
 
 ```bash
-EMBELLAMA_TEST_MODEL=/path/to/model.gguf cargo test --test integration_tests
+just download-test-model   # Download test model
+just download-bench-model  # Download benchmark model
+just models-status        # Check cached models
 ```
 
 ### Environment Variables
 
-- `EMBELLAMA_TEST_MODEL`: Path to a GGUF model file for integration tests
-- `EMBELLAMA_BENCH_MODEL`: Path to a GGUF model file for benchmarks
-- `EMBELLAMA_MODEL`: Path to a GGUF model file for examples
-
-### Concurrency Tests
-
-```bash
-cargo test --test concurrency_tests
-```
+- `EMBELLAMA_TEST_MODEL`: Path to test model (auto-set by justfile)
+- `EMBELLAMA_BENCH_MODEL`: Path to benchmark model (auto-set by justfile)
+- `EMBELLAMA_MODEL`: Path to model for examples
 
 ## Examples
 
