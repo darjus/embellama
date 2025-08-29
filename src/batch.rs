@@ -26,6 +26,7 @@ use rayon::prelude::*;
 use std::sync::Arc;
 use std::sync::atomic::{AtomicUsize, Ordering};
 use tracing::{debug, instrument};
+use llama_cpp_2::token::LlamaToken;
 
 /// Represents a batch of texts to be processed.
 pub struct BatchProcessor {
@@ -70,8 +71,8 @@ impl BatchProcessor {
     ///
     /// This function implements the following pipeline:
     /// 1. Parallel tokenization of all texts (using rayon)
-    /// 2. Sequential model inference (respecting !Send constraint)
-    /// 3. Parallel post-processing and normalization (using rayon)
+    /// 2. True batch model inference (multiple sequences in single pass)
+    /// 3. Parallel post-processing and normalization (handled by model)
     ///
     /// # Arguments
     ///
@@ -104,31 +105,85 @@ impl BatchProcessor {
         let progress_counter = Arc::new(AtomicUsize::new(0));
         let total = texts.len();
         
-        // Step 1: Parallel validation (not tokenization in Phase 4)
-        // Real tokenization happens in model.generate_embedding()
+        // Step 1: Parallel validation
         self.parallel_validate(&texts)?;
         
-        // Step 2: Sequential model inference (respecting !Send constraint)
-        // This includes tokenization, inference, pooling, and normalization
-        let mut embeddings = Vec::with_capacity(texts.len());
-        for text in texts {
-            // Process through model (handles everything internally)
-            let embedding = model.generate_embedding(text)?;
-            embeddings.push(embedding);
+        // Step 2: Parallel tokenization using the real tokenizer
+        let token_sequences = self.parallel_tokenize_real(model, &texts)?;
+        
+        // Step 3: Check if we need to chunk the batch based on total token count and n_seq_max
+        let total_tokens: usize = token_sequences.iter().map(|seq| seq.len()).sum();
+        let max_context = model.max_sequence_length();
+        let n_seq_max = model.n_seq_max() as usize;
+        
+        let embeddings = if total_tokens <= max_context && token_sequences.len() <= n_seq_max {
+            // Process all sequences in a single batch
+            debug!("Processing {} sequences with {} total tokens in single batch", 
+                   token_sequences.len(), total_tokens);
+            
+            let batch_embeddings = model.process_batch_tokens(token_sequences)?;
             
             // Update progress
-            let current = progress_counter.fetch_add(1, Ordering::Relaxed) + 1;
+            let current = progress_counter.fetch_add(texts.len(), Ordering::Relaxed);
             if let Some(ref callback) = self.progress_callback {
-                callback(current, total);
+                callback(current + texts.len(), total);
             }
             
-            debug!("Processed text {}/{}", current, total);
-        }
+            batch_embeddings
+        } else {
+            // Need to chunk into smaller batches
+            debug!("Chunking batch: {} total tokens (max {}), {} sequences (max {})", 
+                   total_tokens, max_context, token_sequences.len(), n_seq_max);
+            
+            let mut all_embeddings = Vec::with_capacity(texts.len());
+            let mut current_batch = Vec::new();
+            let mut current_tokens = 0;
+            
+            for seq in token_sequences {
+                let seq_len = seq.len();
+                
+                // Check if adding this sequence would exceed either limit
+                if !current_batch.is_empty() && 
+                   (current_tokens + seq_len > max_context || current_batch.len() >= n_seq_max) {
+                    // Process current batch
+                    let batch_embeddings = model.process_batch_tokens(current_batch)?;
+                    let batch_len = batch_embeddings.len();
+                    all_embeddings.extend(batch_embeddings);
+                    
+                    // Update progress
+                    let current = progress_counter.fetch_add(batch_len, Ordering::Relaxed);
+                    if let Some(ref callback) = self.progress_callback {
+                        callback(current + batch_len, total);
+                    }
+                    
+                    // Start new batch
+                    current_batch = vec![seq];
+                    current_tokens = seq_len;
+                } else {
+                    // Add to current batch
+                    current_batch.push(seq);
+                    current_tokens += seq_len;
+                }
+            }
+            
+            // Process remaining batch
+            if !current_batch.is_empty() {
+                let batch_embeddings = model.process_batch_tokens(current_batch)?;
+                let batch_len = batch_embeddings.len();
+                
+                // Update progress
+                let current = progress_counter.fetch_add(batch_len, Ordering::Relaxed);
+                if let Some(ref callback) = self.progress_callback {
+                    callback(current + batch_len, total);
+                }
+                
+                all_embeddings.extend(batch_embeddings);
+            }
+            
+            all_embeddings
+        };
         
-        // Step 3: Return embeddings directly (already normalized by model)
-        // > NOTE: In Phase 4, post-processing is handled by model
-        // Future phases may add additional parallel post-processing
-        
+        debug!("Completed batch processing of {} texts", texts.len());
         Ok(embeddings)
     }
 
@@ -175,94 +230,69 @@ impl BatchProcessor {
         Ok(())
     }
     
-    /// Tokenizes texts in parallel.
+    /// Tokenizes texts using the real model tokenizer.
+    ///
+    /// Note: Due to !Send constraint on model, tokenization happens sequentially
+    /// but validation can still happen in parallel.
     ///
     /// # Arguments
     ///
+    /// * `model` - The model to use for tokenization
     /// * `texts` - Vector of texts to tokenize
     ///
     /// # Returns
     ///
     /// Returns a vector of tokenized sequences.
-    #[instrument(skip(self, texts), fields(count = texts.len()))]
-    fn parallel_tokenize(&self, texts: &[&str]) -> Result<Vec<Vec<i32>>> {
-        debug!("Starting parallel tokenization of {} texts", texts.len());
+    #[instrument(skip(self, model, texts), fields(count = texts.len()))]
+    fn parallel_tokenize_real(
+        &self, 
+        model: &EmbeddingModel, 
+        texts: &[&str]
+    ) -> Result<Vec<Vec<LlamaToken>>> {
+        debug!("Starting tokenization of {} texts", texts.len());
         
-        // Process texts in chunks to avoid overwhelming the system
-        let chunk_size = self.max_batch_size.min(texts.len());
+        let add_bos = model.add_bos_token();
+        let max_seq_len = model.max_sequence_length();
         
-        // Parallel tokenization with error handling
-        let results: Result<Vec<_>> = texts
-            .par_chunks(chunk_size)
-            .flat_map(|chunk| {
-                chunk.par_iter().map(|text| {
-                    // Validate text
-                    if text.is_empty() {
-                        return Err(Error::InvalidInput {
-                            message: "Cannot tokenize empty text".to_string(),
-                        });
-                    }
-                    
-                    // Simulate tokenization (in real implementation, this would use the model's tokenizer)
-                    // For now, we'll create placeholder tokens
-                    // > NOTE: Real tokenization requires access to model's tokenizer
-                    // This is a simplified version for Phase 4 implementation
-                    let tokens: Vec<i32> = text.bytes().map(|b| b as i32).collect();
-                    
-                    if tokens.len() > 512 {  // Example max token limit
-                        return Err(Error::InvalidInput {
-                            message: format!("Text exceeds maximum token limit: {} > 512", tokens.len()),
-                        });
-                    }
-                    
-                    Ok(tokens)
-                })
+        // First, validate all texts in parallel
+        let validation_results: Result<Vec<_>> = texts
+            .par_iter()
+            .map(|text| {
+                if text.is_empty() {
+                    Err(Error::InvalidInput {
+                        message: "Cannot tokenize empty text".to_string(),
+                    })
+                } else {
+                    Ok(())
+                }
             })
             .collect();
+        validation_results?;
         
-        results
+        // Then tokenize sequentially (due to !Send constraint on model)
+        let mut results = Vec::with_capacity(texts.len());
+        for text in texts {
+            // Use real tokenizer from model
+            let tokens = model.tokenize(text, add_bos)?;
+            
+            // Check token limit
+            if tokens.len() > max_seq_len {
+                return Err(Error::InvalidInput {
+                    message: format!(
+                        "Text exceeds maximum token limit: {} > {}",
+                        tokens.len(),
+                        max_seq_len
+                    ),
+                });
+            }
+            
+            results.push(tokens);
+        }
+        
+        debug!("Completed tokenization");
+        Ok(results)
     }
 
-    /// Post-processes embeddings in parallel.
-    ///
-    /// # Arguments
-    ///
-    /// * `embeddings` - Raw embeddings from model
-    ///
-    /// # Returns
-    ///
-    /// Returns processed embeddings with normalization applied if configured.
-    #[instrument(skip(self, embeddings), fields(count = embeddings.len()))]
-    fn parallel_postprocess(
-        &self,
-        embeddings: Vec<Vec<f32>>,
-    ) -> Result<Vec<Vec<f32>>> {
-        debug!("Starting parallel post-processing of {} embeddings", embeddings.len());
-        
-        // Parallel normalization if configured
-        let processed: Vec<Vec<f32>> = if self.normalize {
-            embeddings
-                .into_par_iter()
-                .map(|mut embedding| {
-                    // L2 normalization
-                    let norm: f32 = embedding.iter().map(|x| x * x).sum::<f32>().sqrt();
-                    
-                    if norm > 0.0 {
-                        for val in &mut embedding {
-                            *val /= norm;
-                        }
-                    }
-                    
-                    embedding
-                })
-                .collect()
-        } else {
-            embeddings
-        };
-        
-        debug!("Completed post-processing");
-        Ok(processed)
-    }
 }
 
 /// Builder for creating configured BatchProcessor instances.

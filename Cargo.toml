@@ -11,7 +11,7 @@ categories = ["science", "api-bindings", "text-processing"]
 license = "Apache-2.0"
 
 [dependencies]
-llama-cpp-2 = "0.1.117"
+llama-cpp-2 = { path = "../llama-cpp-rs/llama-cpp-2" }
 thiserror = "1.0"
 anyhow = "1.0"
 tracing = "0.1"
@@ -38,6 +38,7 @@ tempfile = "3.8"
 tokio-test = "0.4"
 pretty_assertions = "1.4"
 proptest = "1.4"
+test-log = { version = "0.2.18", features = ["trace"] }
 
 [features]
 default = []

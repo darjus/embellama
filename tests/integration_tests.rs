@@ -15,6 +15,7 @@
 //! Integration tests for the embellama library
 
 use embellama::{EmbeddingEngine, EngineConfig, ModelConfig, PoolingStrategy};
+use test_log::test;
 use serial_test::serial;
 use std::fs;
 use std::path::PathBuf;

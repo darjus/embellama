@@ -116,6 +116,8 @@ pub struct EmbeddingModel {
     max_context_size: usize,
     /// Whether to add BOS token during tokenization
     add_bos_token: bool,
+    /// Maximum number of sequences for batch processing
+    n_seq_max: u32,
 }
 
 impl EmbeddingModel {
@@ -174,7 +176,11 @@ impl EmbeddingModel {
             threads
         }) as i32;
 
+        // Get n_seq_max from config (default to 1)
+        let n_seq_max = config.n_seq_max.unwrap_or(1);
+
         let mut ctx_params = LlamaContextParams::default();
+        ctx_params = ctx_params.with_n_seq_max(n_seq_max);
         
         // Set context size
         let n_ctx = NonZeroU32::new(ctx_size);
@@ -223,6 +229,7 @@ impl EmbeddingModel {
             embedding_dimensions,
             max_context_size: ctx_size as usize,
             add_bos_token,
+            n_seq_max,
         })
     }
 
@@ -319,6 +326,16 @@ impl EmbeddingModel {
     /// Returns the path to the model file.
     pub fn path(&self) -> &PathBuf {
         &self.model_path
+    }
+    
+    /// Returns whether BOS token should be added during tokenization.
+    pub fn add_bos_token(&self) -> bool {
+        self.add_bos_token
+    }
+    
+    /// Returns the maximum number of sequences for batch processing.
+    pub fn n_seq_max(&self) -> u32 {
+        self.n_seq_max
     }
 
     /// Detects whether to add BOS token based on model type.
@@ -481,6 +498,139 @@ impl EmbeddingModel {
         };
 
         Ok(final_embedding)
+    }
+
+    /// Processes multiple token sequences as a batch through the model.
+    ///
+    /// This method enables true batch processing by encoding multiple sequences
+    /// in a single model pass using unique sequence IDs. If the number of sequences
+    /// exceeds n_seq_max, it will automatically chunk them.
+    ///
+    /// # Arguments
+    ///
+    /// * `token_sequences` - Vector of token sequences to process
+    ///
+    /// # Returns
+    ///
+    /// Returns a vector of embedding vectors, one for each input sequence.
+    #[instrument(skip(self, token_sequences), fields(batch_size = token_sequences.len()))]
+    pub fn process_batch_tokens(&mut self, token_sequences: Vec<Vec<LlamaToken>>) -> Result<Vec<Vec<f32>>> {
+        if token_sequences.is_empty() {
+            return Ok(Vec::new());
+        }
+        
+        debug!("Processing batch of {} sequences with n_seq_max={}", 
+               token_sequences.len(), self.n_seq_max);
+        
+        // If we have more sequences than n_seq_max, process in chunks
+        if token_sequences.len() > self.n_seq_max as usize {
+            debug!("Batch size {} exceeds n_seq_max {}, chunking", 
+                   token_sequences.len(), self.n_seq_max);
+            
+            let mut all_embeddings = Vec::with_capacity(token_sequences.len());
+            
+            // Process sequences in chunks of n_seq_max
+            for chunk in token_sequences.chunks(self.n_seq_max as usize) {
+                debug!("Processing chunk of {} sequences", chunk.len());
+                let chunk_embeddings = self.process_batch_tokens_internal(chunk.to_vec())?;
+                all_embeddings.extend(chunk_embeddings);
+            }
+            
+            return Ok(all_embeddings);
+        }
+        
+        // Process all sequences in a single batch
+        self.process_batch_tokens_internal(token_sequences)
+    }
+    
+    /// Internal method to process a batch of token sequences that fits within n_seq_max.
+    fn process_batch_tokens_internal(&mut self, token_sequences: Vec<Vec<LlamaToken>>) -> Result<Vec<Vec<f32>>> {
+        // Calculate total tokens needed for batch
+        let total_tokens: usize = token_sequences.iter().map(|seq| seq.len()).sum();
+        
+        // Check if total tokens exceed context size
+        if total_tokens > self.max_context_size {
+            return Err(Error::InvalidInput {
+                message: format!(
+                    "Total tokens {} exceeds maximum context size {}",
+                    total_tokens, self.max_context_size
+                ),
+            });
+        }
+        
+        // Create a batch with all sequences (using actual n_seq_max)
+        let mut batch = LlamaBatch::new(total_tokens, self.n_seq_max as i32);
+
+        // Add each sequence with unique ID
+        for (seq_id, tokens) in token_sequences.iter().enumerate() {
+            batch.add_sequence(tokens, seq_id as i32, true).map_err(|e| {
+                Error::EmbeddingGenerationError {
+                    message: format!("Failed to add sequence {} to batch: {}", seq_id, e),
+                    source: Some(anyhow::anyhow!(e)),
+                }
+            })?;
+        }
+        
+        // Process the entire batch in one model pass
+        self.cell.with_dependent_mut(|_, ctx| {
+            ctx.encode(&mut batch).map_err(|e| {
+                Error::EmbeddingGenerationError {
+                    message: format!("Failed to encode batch: {}", e),
+                    source: Some(anyhow::anyhow!(e)),
+                }
+            })
+        })?;
+        
+        // Extract embeddings for each sequence
+        let mut all_embeddings = Vec::with_capacity(token_sequences.len());
+        
+        for seq_id in 0..token_sequences.len() {
+            let embeddings = self.cell.with_dependent(|_, ctx| -> Result<Vec<Vec<f32>>> {
+                // Try to get sequence embeddings first (for BERT models)
+                if let Ok(seq_embeddings) = ctx.embeddings_seq_ith(seq_id as i32) {
+                    // For BERT models with pooling, we get one embedding for the whole sequence
+                    Ok(vec![seq_embeddings.to_vec()])
+                } else {
+                    // Fall back to token-wise embeddings (for LLaMA-style models)
+                    // Need to extract tokens for this specific sequence
+                    let seq_tokens = &token_sequences[seq_id];
+                    let mut token_embeddings = Vec::with_capacity(seq_tokens.len());
+                    
+                    // Calculate token offset for this sequence
+                    let token_offset: usize = token_sequences[..seq_id].iter().map(|s| s.len()).sum();
+                    
+                    for i in 0..seq_tokens.len() {
+                        let global_idx = token_offset + i;
+                        let embeddings = ctx.embeddings_ith(global_idx as i32)
+                            .map_err(|e| Error::EmbeddingGenerationError {
+                                message: format!("Failed to get embeddings for token {} in sequence {}", i, seq_id),
+                                source: Some(anyhow::anyhow!(e)),
+                            })?;
+                        token_embeddings.push(embeddings.to_vec());
+                    }
+                    Ok(token_embeddings)
+                }
+            })?;
+            
+            // Apply pooling and normalization
+            let pooled = if embeddings.len() == 1 && token_sequences[seq_id].len() > 1 {
+                // Pre-pooled by model
+                embeddings[0].clone()
+            } else {
+                // Apply our pooling strategy
+                self.apply_pooling(&embeddings, &self.config.pooling_strategy)?
+            };
+            
+            let final_embedding = if self.config.normalize_embeddings {
+                self.normalize_embedding(pooled)?
+            } else {
+                pooled
+            };
+            
+            all_embeddings.push(final_embedding);
+        }
+        
+        Ok(all_embeddings)
     }
 
     /// Processes a batch of tokens through the model.

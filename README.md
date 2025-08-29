@@ -76,6 +76,7 @@ let config = EngineConfig::builder()
     .with_batch_size(64)               // Batch processing size (usize)
     .with_normalize_embeddings(true)   // L2 normalize embeddings
     .with_pooling_strategy(PoolingStrategy::Mean)  // Pooling method
+    .with_add_bos_token(Some(false))   // Disable BOS for encoder models (Option<bool>)
     .build()?;
 ```
 
@@ -85,6 +86,44 @@ let config = EngineConfig::builder()
 - **CLS**: Use the CLS token embedding
 - **Max**: Maximum pooling across dimensions
 - **MeanSqrt**: Mean pooling with square root of sequence length normalization
+
+## Model-Specific Configuration
+
+### BOS Token Handling
+
+The library automatically detects model types and applies appropriate BOS token handling:
+
+**Encoder Models** (BERT, E5, BGE, GTE, MiniLM, etc.):
+- BOS token is **not** added (these models use CLS/SEP tokens)
+- Auto-detected by model name patterns
+
+**Decoder Models** (LLaMA, Mistral, Vicuna, etc.):
+- BOS token **is** added (standard for autoregressive models)
+- Default behavior for unknown models
+
+**Manual Override**:
+```rust
+// Force disable BOS for a specific model
+let config = EngineConfig::builder()
+    .with_model_path("/path/to/model.gguf")
+    .with_model_name("custom-encoder")
+    .with_add_bos_token(Some(false))  // Explicitly disable BOS
+    .build()?;
+
+// Force enable BOS
+let config = EngineConfig::builder()
+    .with_model_path("/path/to/model.gguf")
+    .with_model_name("custom-decoder")
+    .with_add_bos_token(Some(true))   // Explicitly enable BOS
+    .build()?;
+
+// Auto-detect (default)
+let config = EngineConfig::builder()
+    .with_model_path("/path/to/model.gguf")
+    .with_model_name("some-model")
+    .with_add_bos_token(None)         // Let the library decide
+    .build()?;
+```
 
 ## Thread Safety
 
@@ -124,6 +163,69 @@ for handle in handles {
     let embedding = handle.join().unwrap()?;
     // Process embedding
 }
+```
+
+## API Reference
+
+### Model Management
+
+The library provides granular control over model lifecycle:
+
+#### Registration vs Loading
+
+- **Registration**: Model configuration stored in registry
+- **Loading**: Model actually loaded in thread-local memory
+
+```rust
+// Check if model is registered (has configuration)
+if engine.is_model_registered("my-model") {
+    println!("Model configuration exists");
+}
+
+// Check if model is loaded in current thread
+if engine.is_model_loaded_in_thread("my-model") {
+    println!("Model is ready to use in this thread");
+}
+
+// Deprecated - use is_model_registered() for clarity
+#[deprecated]
+engine.is_model_loaded("my-model");  // Same as is_model_registered()
+```
+
+#### Granular Unload Operations
+
+```rust
+// Remove only from current thread (keeps registration)
+engine.drop_model_from_thread("my-model")?;
+// Model can be reloaded on next use
+
+// Remove only from registry (prevents future loads)
+engine.unregister_model("my-model")?;
+// Existing thread-local instances continue working
+
+// Full unload - removes from both registry and thread
+engine.unload_model("my-model")?;
+// Completely removes the model
+```
+
+### Model Loading Behavior
+
+- **Initial model** (via `EmbeddingEngine::new()`): Loaded immediately in current thread
+- **Additional models** (via `load_model()`): Lazy-loaded on first use
+
+```rust
+// First model - loaded immediately
+let engine = EmbeddingEngine::new(config)?;  
+assert!(engine.is_model_loaded_in_thread("model1"));
+
+// Additional model - lazy loaded
+engine.load_model(config2)?;
+assert!(engine.is_model_registered("model2"));
+assert!(!engine.is_model_loaded_in_thread("model2"));  // Not yet loaded
+
+// Triggers actual loading in thread
+engine.embed(Some("model2"), "text")?;
+assert!(engine.is_model_loaded_in_thread("model2"));  // Now loaded
 ```
 
 ## Performance

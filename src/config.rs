@@ -52,6 +52,10 @@ pub struct ModelConfig {
     /// Whether to add BOS (beginning-of-sequence) token during tokenization
     /// None = auto-detect based on model type (encoder models like BERT/E5/BGE/GTE = false, decoder models = true)
     pub add_bos_token: Option<bool>,
+    
+    /// Maximum number of sequences for batch processing
+    /// Default: 1, max: 64 (llama.cpp limit)
+    pub n_seq_max: Option<u32>,
 }
 
 impl ModelConfig {
@@ -89,6 +93,15 @@ impl ModelConfig {
             }
         }
 
+        if let Some(n_seq) = self.n_seq_max {
+            if n_seq == 0 {
+                return Err(Error::config("n_seq_max must be greater than 0"));
+            }
+            if n_seq > 64 {
+                return Err(Error::config("n_seq_max cannot exceed 64 (llama.cpp limit)"));
+            }
+        }
+
         Ok(())
     }
 }
@@ -106,6 +119,7 @@ impl Default for ModelConfig {
             normalize_embeddings: true,
             pooling_strategy: PoolingStrategy::default(),
             add_bos_token: None,
+            n_seq_max: None,
         }
     }
 }
@@ -183,6 +197,13 @@ impl ModelConfigBuilder {
         self.config.add_bos_token = add_bos;
         self
     }
+    
+    /// Set the maximum number of sequences for batch processing
+    /// Default: 1, max: 64 (llama.cpp limit)
+    pub fn with_n_seq_max(mut self, n_seq_max: u32) -> Self {
+        self.config.n_seq_max = Some(n_seq_max);
+        self
+    }
 
     /// Build the configuration
     pub fn build(self) -> Result<ModelConfig> {
@@ -253,6 +274,10 @@ pub struct EngineConfig {
     /// Whether to add BOS (beginning-of-sequence) token during tokenization
     /// None = auto-detect based on model type
     pub add_bos_token: Option<bool>,
+    
+    /// Maximum number of sequences for batch processing
+    /// Default: 1, max: 64 (llama.cpp limit)
+    pub n_seq_max: Option<u32>,
 }
 
 /// Pooling strategy for combining token embeddings
@@ -294,6 +319,7 @@ impl Default for EngineConfig {
             use_mmap: true,
             use_mlock: false,
             add_bos_token: None,
+            n_seq_max: None,
         }
     }
 }
@@ -342,6 +368,15 @@ impl EngineConfig {
         if let Some(max_tokens) = self.max_tokens {
             if max_tokens == 0 {
                 return Err(Error::config("Max tokens must be greater than 0"));
+            }
+        }
+        
+        if let Some(n_seq) = self.n_seq_max {
+            if n_seq == 0 {
+                return Err(Error::config("n_seq_max must be greater than 0"));
+            }
+            if n_seq > 64 {
+                return Err(Error::config("n_seq_max cannot exceed 64 (llama.cpp limit)"));
             }
         }
 
@@ -397,6 +432,7 @@ impl EngineConfig {
             normalize_embeddings: self.normalize_embeddings,
             pooling_strategy: self.pooling_strategy,
             add_bos_token: self.add_bos_token,
+            n_seq_max: self.n_seq_max,
         }
     }
 }
@@ -514,6 +550,13 @@ impl EngineConfigBuilder {
     /// None = auto-detect based on model type
     pub fn with_add_bos_token(mut self, add_bos: Option<bool>) -> Self {
         self.config.add_bos_token = add_bos;
+        self
+    }
+    
+    /// Set the maximum number of sequences for batch processing
+    /// Default: 1, max: 64 (llama.cpp limit)
+    pub fn with_n_seq_max(mut self, n_seq_max: u32) -> Self {
+        self.config.n_seq_max = Some(n_seq_max);
         self
     }
 
