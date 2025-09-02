@@ -1,0 +1,12 @@
+[clog]
+repository = "https://github.com/darjus/embellama"
+from-latest-tag = false
+changelog = "CHANGELOG.md"
+
+[sections]
+"Features" = ["feat"]
+"Bug Fixes" = ["fix"]
+"Performance" = ["perf"]
+"Documentation" = ["docs"]
+"Breaking Changes" = ["breaking"]
+"Refactors" = ["refactor"]
