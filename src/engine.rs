@@ -35,6 +35,9 @@ static INSTANCE: RwLock<Option<Arc<Mutex<EmbeddingEngine>>>> = RwLock::new(None)
 // Lock to protect singleton initialization
 static INIT_LOCK: Mutex<()> = Mutex::new(());
 
+// Global singleton backend instance
+static BACKEND: OnceLock<Arc<Mutex<LlamaBackend>>> = OnceLock::new();
+
 // Thread-local storage for models due to !Send constraint of LlamaContext
 thread_local! {
     static THREAD_MODELS: RefCell<HashMap<String, EmbeddingModel>> = RefCell::new(HashMap::new());
@@ -68,8 +71,8 @@ thread_local! {
 /// let embedding = engine.embed("my-model", "Hello, world!")?;
 /// ```
 pub struct EmbeddingEngine {
-    /// The llama backend instance
-    backend: LlamaBackend,
+    /// Shared reference to the llama backend instance
+    backend: Arc<Mutex<LlamaBackend>>,
     /// Registry of model configurations
     model_configs: Arc<RwLock<HashMap<String, EngineConfig>>>,
     /// Default model name if none specified
@@ -77,6 +80,39 @@ pub struct EmbeddingEngine {
 }
 
 impl EmbeddingEngine {
+    /// Gets or creates the singleton LlamaBackend instance.
+    ///
+    /// This ensures only one backend is created per process, avoiding the
+    /// "BackendAlreadyInitialized" error when creating multiple engines.
+    fn get_or_create_backend() -> Result<Arc<Mutex<LlamaBackend>>> {
+        if let Some(backend) = BACKEND.get() {
+            return Ok(Arc::clone(backend));
+        }
+        
+        // Initialize the backend for the first time
+        let mut backend = LlamaBackend::init().map_err(|e| {
+            let error_str = format!("{}", e);
+            if error_str.contains("BackendAlreadyInitialized") {
+                Error::ConfigurationError {
+                    message: "LlamaBackend already initialized. This is an internal error.".to_string(),
+                }
+            } else {
+                Error::ModelInitError {
+                    message: "Failed to initialize llama backend".to_string(),
+                    source: Some(anyhow::anyhow!("{}", e)),
+                }
+            }
+        })?;
+        backend.void_logs();
+        
+        let backend_arc = Arc::new(Mutex::new(backend));
+        // Try to set it, but if another thread beat us to it, use theirs
+        match BACKEND.set(Arc::clone(&backend_arc)) {
+            Ok(_) => Ok(backend_arc),
+            Err(_) => Ok(Arc::clone(BACKEND.get().unwrap())),
+        }
+    }
+
     /// Gets or initializes the singleton embedding engine with the given configuration.
     ///
     /// If the engine is already initialized, returns the existing instance.
@@ -198,22 +234,8 @@ impl EmbeddingEngine {
         let model_name = config.model_name.clone();
         info!("Initializing embedding engine with model: {}", model_name);
         
-        // Initialize the llama backend
-        let mut backend = LlamaBackend::init().map_err(|e| {
-            let error_str = format!("{}", e);
-            if error_str.contains("BackendAlreadyInitialized") {
-                // This means a previous engine wasn't properly cleaned up
-                Error::ConfigurationError {
-                    message: "LlamaBackend already initialized. In tests, call EmbeddingEngine::reset() at the start of each test.".to_string(),
-                }
-            } else {
-                Error::ModelInitError {
-                    message: "Failed to initialize llama backend".to_string(),
-                    source: Some(anyhow::anyhow!("{}", e)),
-                }
-            }
-        })?;
-        backend.void_logs();
+        // Get or create the shared backend
+        let backend = Self::get_or_create_backend()?;
         info!("Llama backend ready");
         
         // Create the engine with the initial model config
@@ -419,7 +441,9 @@ impl EmbeddingEngine {
             
             // Convert EngineConfig to ModelConfig and create model
             let model_config = config.to_model_config();
-            let model = EmbeddingModel::new(&self.backend, &model_config)?;
+            let backend_guard = self.backend.lock().unwrap();
+            let model = EmbeddingModel::new(&*backend_guard, &model_config)?;
+            drop(backend_guard); // Release lock as soon as we're done
             
             // Store in thread-local map
             models.insert(model_name.to_string(), model);
