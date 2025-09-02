@@ -23,7 +23,7 @@ let config = EngineConfig::builder()
     .with_normalize_embeddings(true)
     .build()?;
 
-// Create engine
+// Create engine (uses singleton pattern internally)
 let engine = EmbeddingEngine::new(config)?;
 
 // Generate single embedding
@@ -33,6 +33,21 @@ let embedding = engine.embed(None, text)?;
 // Generate batch embeddings
 let texts = vec!["Text 1", "Text 2", "Text 3"];
 let embeddings = engine.embed_batch(None, texts)?;
+```
+
+### Singleton Pattern (Advanced)
+
+The engine can optionally use a singleton pattern for shared access:
+
+```rust
+use std::sync::{Arc, Mutex};
+
+// Get or initialize singleton instance
+let engine = EmbeddingEngine::get_or_init(config)?;
+
+// Access from multiple places
+let engine_clone = EmbeddingEngine::instance()
+    .expect("Engine not initialized");
 ```
 
 ## Tested Models
@@ -292,6 +307,27 @@ Tests thread safety and parallel processing:
 just test-concurrency
 ```
 
+#### Testing Considerations
+
+**Important**: Integration tests use the `serial_test` crate to ensure tests run sequentially. This is necessary because:
+- The `LlamaBackend` can only be initialized once per process
+- Each `EmbeddingEngine` owns its backend instance
+- Tests must run serially to avoid backend initialization conflicts
+
+When writing tests that create multiple engines, use a single engine with `load_model()` for different configurations:
+
+```rust
+#[test]
+#[serial]  // Required for all integration tests
+fn test_multiple_configurations() {
+    let mut engine = EmbeddingEngine::new(initial_config)?;
+    
+    // Load additional models instead of creating new engines
+    engine.load_model(config2)?;
+    engine.load_model(config3)?;
+}
+```
+
 ### Model Management
 
 Test models are automatically downloaded and cached:
@@ -327,6 +363,15 @@ cargo run --example simple
 ```
 
 ## Architecture
+
+### Backend and Engine Management
+
+The library manages the LlamaBackend lifecycle:
+
+- Each `EmbeddingEngine` owns its `LlamaBackend` instance
+- Backend is initialized when the engine is created
+- Backend is dropped when the engine is dropped
+- Singleton pattern available for shared engine access
 
 ### Model Management
 

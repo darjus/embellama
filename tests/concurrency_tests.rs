@@ -111,6 +111,9 @@ fn test_concurrent_batch_processing() {
                 assert!(result.is_ok());
                 let embeddings = result.unwrap();
                 assert_eq!(embeddings.len(), 3);
+                
+                // Clean up thread-local models before thread ends
+                engine.cleanup_thread_models();
             })
         })
         .collect();

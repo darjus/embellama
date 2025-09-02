@@ -22,11 +22,18 @@ use crate::batch::BatchProcessorBuilder;
 use crate::config::EngineConfig;
 use crate::error::{Error, Result};
 use crate::model::EmbeddingModel;
+use llama_cpp_2::llama_backend::LlamaBackend;
 use parking_lot::RwLock;
 use std::cell::RefCell;
 use std::collections::HashMap;
-use std::sync::Arc;
+use std::sync::{Arc, Mutex, OnceLock};
 use tracing::{debug, info, instrument};
+
+// Global singleton instance of the engine
+static INSTANCE: RwLock<Option<Arc<Mutex<EmbeddingEngine>>>> = RwLock::new(None);
+
+// Lock to protect singleton initialization
+static INIT_LOCK: Mutex<()> = Mutex::new(());
 
 // Thread-local storage for models due to !Send constraint of LlamaContext
 thread_local! {
@@ -61,6 +68,8 @@ thread_local! {
 /// let embedding = engine.embed("my-model", "Hello, world!")?;
 /// ```
 pub struct EmbeddingEngine {
+    /// The llama backend instance
+    backend: LlamaBackend,
     /// Registry of model configurations
     model_configs: Arc<RwLock<HashMap<String, EngineConfig>>>,
     /// Default model name if none specified
@@ -68,34 +77,151 @@ pub struct EmbeddingEngine {
 }
 
 impl EmbeddingEngine {
-    /// Creates a new embedding engine with the given configuration.
+    /// Gets or initializes the singleton embedding engine with the given configuration.
+    ///
+    /// If the engine is already initialized, returns the existing instance.
+    /// The configuration is only used for the first initialization.
     ///
     /// # Arguments
     ///
-    /// * `config` - The engine configuration
+    /// * `config` - The engine configuration (used only on first call)
     ///
     /// # Returns
     ///
-    /// Returns a `Result` containing the initialized engine or an error.
+    /// Returns a `Result` containing the engine instance or an error.
     ///
     /// # Errors
     ///
     /// This function will return an error if:
-    /// - The configuration is invalid
-    /// - Model loading fails
+    /// - The configuration is invalid (on first initialization)
+    /// - Model loading fails (on first initialization)
     #[instrument(skip(config), fields(model_name = %config.model_name))]
-    pub fn new(config: EngineConfig) -> Result<Self> {
+    pub fn get_or_init(config: EngineConfig) -> Result<Arc<Mutex<Self>>> {
+        // Fast path: check if already initialized
+        {
+            let instance_guard = INSTANCE.read();
+            if let Some(ref instance) = *instance_guard {
+                debug!("Returning existing engine instance");
+                return Ok(Arc::clone(instance));
+            }
+        }
+
+        // Slow path: initialize the singleton
+        let _lock = INIT_LOCK.lock().unwrap();
+        
+        // Double-check after acquiring lock
+        {
+            let instance_guard = INSTANCE.read();
+            if let Some(ref instance) = *instance_guard {
+                debug!("Returning existing engine instance (after lock)");
+                return Ok(Arc::clone(instance));
+            }
+        }
+
+        // Create new instance
+        info!("Initializing singleton embedding engine");
+        let engine = Self::new_internal(config)?;
+        let arc_engine = Arc::new(Mutex::new(engine));
+        
+        // Store the instance
+        {
+            let mut instance_guard = INSTANCE.write();
+            *instance_guard = Some(Arc::clone(&arc_engine));
+        }
+        
+        Ok(arc_engine)
+    }
+
+    /// Gets the existing engine instance if it has been initialized.
+    ///
+    /// # Returns
+    ///
+    /// Returns `Some(engine)` if initialized, `None` otherwise.
+    pub fn instance() -> Option<Arc<Mutex<Self>>> {
+        let instance_guard = INSTANCE.read();
+        instance_guard.as_ref().map(Arc::clone)
+    }
+
+    /// Resets the singleton instance (test-only).
+    ///
+    /// This method is only available in test builds and should be called
+    /// at the start of tests that need a fresh engine state.
+    ///
+    /// # Safety
+    ///
+    /// This method should only be called when no other code is using the engine.
+    /// Tests using this must be marked with `#[serial]` to prevent parallel execution.
+    #[cfg(test)]
+    pub fn reset() {
+        let _lock = INIT_LOCK.lock().unwrap();
+        
+        // Clear thread-local models first
+        THREAD_MODELS.with(|models| {
+            models.borrow_mut().clear();
+        });
+        
+        // Take and drop the instance to ensure backend is dropped
+        let mut instance_guard = INSTANCE.write();
+        if let Some(instance) = instance_guard.take() {
+            // Check if we're the only reference
+            if Arc::strong_count(&instance) > 1 {
+                // Other references exist - this is likely a test error
+                // Put it back and panic
+                *instance_guard = Some(instance);
+                panic!("Cannot reset engine: other references exist. Ensure tests are marked with #[serial]");
+            }
+            // Explicitly drop the instance (and its backend)
+            drop(instance);
+            debug!("Dropped engine instance and backend");
+        }
+        
+        // instance_guard is now None
+        info!("Engine singleton reset - backend dropped");
+    }
+
+    /// Convenience method for tests to get a fresh instance.
+    ///
+    /// Resets the singleton and initializes with the given config.
+    #[cfg(test)]
+    pub fn fresh_instance(config: EngineConfig) -> Result<Arc<Mutex<Self>>> {
+        Self::reset();
+        Self::get_or_init(config)
+    }
+
+    /// Internal method to create a new engine instance.
+    ///
+    /// This is the actual implementation, separated from the singleton logic.
+    fn new_internal(config: EngineConfig) -> Result<Self> {
         // Validate configuration
         config.validate()?;
         
         let model_name = config.model_name.clone();
         info!("Initializing embedding engine with model: {}", model_name);
         
+        // Initialize the llama backend
+        let mut backend = LlamaBackend::init().map_err(|e| {
+            let error_str = format!("{}", e);
+            if error_str.contains("BackendAlreadyInitialized") {
+                // This means a previous engine wasn't properly cleaned up
+                Error::ConfigurationError {
+                    message: "LlamaBackend already initialized. In tests, call EmbeddingEngine::reset() at the start of each test.".to_string(),
+                }
+            } else {
+                Error::ModelInitError {
+                    message: "Failed to initialize llama backend".to_string(),
+                    source: Some(anyhow::anyhow!("{}", e)),
+                }
+            }
+        })?;
+        backend.void_logs();
+        info!("Llama backend ready");
+        
         // Create the engine with the initial model config
         let mut model_configs = HashMap::new();
         model_configs.insert(model_name.clone(), config);
         
         let engine = Self {
+            backend,
             model_configs: Arc::new(RwLock::new(model_configs)),
             default_model: Some(model_name.clone()),
         };
@@ -105,6 +231,24 @@ impl EmbeddingEngine {
         
         info!("Embedding engine initialized successfully");
         Ok(engine)
+    }
+
+    /// Creates a new embedding engine with the given configuration.
+    ///
+    /// **Note**: This now uses the singleton pattern internally. Use `get_or_init()` 
+    /// for explicit singleton access.
+    ///
+    /// # Arguments
+    ///
+    /// * `config` - The engine configuration
+    ///
+    /// # Returns
+    ///
+    /// Returns a `Result` containing the engine or an error.
+    pub fn new(config: EngineConfig) -> Result<Self> {
+        // Use the internal method directly for backward compatibility
+        // This allows tests to create instances without singleton
+        Self::new_internal(config)
     }
 
     /// Loads a model with the given configuration.
@@ -275,7 +419,7 @@ impl EmbeddingEngine {
             
             // Convert EngineConfig to ModelConfig and create model
             let model_config = config.to_model_config();
-            let model = EmbeddingModel::new(&model_config)?;
+            let model = EmbeddingModel::new(&self.backend, &model_config)?;
             
             // Store in thread-local map
             models.insert(model_name.to_string(), model);
@@ -523,6 +667,24 @@ impl EmbeddingEngine {
         let _ = self.embed(model_name, test_text)?;
         debug!("Model warmed up successfully");
         Ok(())
+    }
+    
+    /// Performs explicit cleanup of all models in the current thread.
+    ///
+    /// With global tracing subscriber, this method is now optional but can
+    /// still be useful for explicit resource management in tests.
+    pub fn cleanup_thread_models(&self) {
+        THREAD_MODELS.with(|models| {
+            let mut models = models.borrow_mut();
+            
+            // Clear all models from the thread
+            let count = models.len();
+            models.clear();
+            
+            if count > 0 {
+                info!("Cleared {} thread-local models", count);
+            }
+        });
     }
 }
 

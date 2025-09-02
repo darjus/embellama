@@ -15,11 +15,27 @@
 //! Integration tests for the embellama library
 
 use embellama::{EmbeddingEngine, EngineConfig, ModelConfig, PoolingStrategy};
-use test_log::test;
 use serial_test::serial;
 use std::fs;
 use std::path::PathBuf;
 use tempfile::tempdir;
+use std::sync::Once;
+
+// Initialize global tracing once for all tests
+static INIT: Once = Once::new();
+
+fn init_test_tracing() {
+    INIT.call_once(|| {
+        // Use global tracing subscriber for tests
+        let filter = tracing_subscriber::EnvFilter::try_from_default_env()
+            .unwrap_or_else(|_| tracing_subscriber::EnvFilter::new("info"));
+        
+        tracing_subscriber::fmt()
+            .with_env_filter(filter)
+            .with_test_writer()
+            .init();
+    });
+}
 
 /// Creates a dummy model file for testing
 fn create_test_model_file() -> PathBuf {
@@ -45,6 +61,8 @@ fn create_test_config(model_path: PathBuf, name: &str) -> EngineConfig {
 #[test]
 #[serial]
 fn test_engine_creation_and_embedding() {
+    init_test_tracing();
+    
     // This test requires a real GGUF model file - no mocks, no fallbacks
     let model_path = std::env::var("EMBELLAMA_TEST_MODEL")
         .expect("EMBELLAMA_TEST_MODEL must be set - run 'just download-test-model' first");
@@ -81,11 +99,15 @@ fn test_engine_creation_and_embedding() {
     if normalize {
         assert!((norm - 1.0).abs() < 0.01, "Embedding should be normalized to 1.0, got norm: {}", norm);
     }
+    
+    // Clean up thread-local models before test ends
+    engine.cleanup_thread_models();
 }
 
 #[test]
 #[serial]
 fn test_batch_embeddings() {
+    init_test_tracing();
     let model_path = std::env::var("EMBELLAMA_TEST_MODEL")
         .expect("EMBELLAMA_TEST_MODEL must be set - run 'just download-test-model' first");
     
@@ -118,11 +140,15 @@ fn test_batch_embeddings() {
     for (i, emb) in embeddings.iter().enumerate() {
         assert_eq!(emb.len(), dim, "Embedding {} has different dimension", i);
     }
+    
+    // Clean up thread-local models before test ends
+    engine.cleanup_thread_models();
 }
 
 #[test]
 #[serial]
 fn test_multiple_models() {
+    init_test_tracing();
     let model_path = std::env::var("EMBELLAMA_TEST_MODEL")
         .expect("EMBELLAMA_TEST_MODEL must be set - run 'just download-test-model' first");
     
@@ -163,11 +189,15 @@ fn test_multiple_models() {
     
     assert!(!emb1.is_empty());
     assert!(!emb2.is_empty());
+    
+    // Clean up thread-local models before test ends
+    engine.cleanup_thread_models();
 }
 
 #[test]
 #[serial]
 fn test_error_handling() {
+    init_test_tracing();
     let model_path = std::env::var("EMBELLAMA_TEST_MODEL")
         .expect("EMBELLAMA_TEST_MODEL must be set - run 'just download-test-model' first");
     
@@ -191,11 +221,16 @@ fn test_error_handling() {
     // Test non-existent model
     let result = engine.embed(Some("non-existent"), "test");
     assert!(result.is_err());
+    
+    // Clean up thread-local models before test ends
+    engine.cleanup_thread_models();
 }
 
 #[test]
 #[serial]
 fn test_bos_token_configuration() {
+    init_test_tracing();
+        
     let model_path = std::env::var("EMBELLAMA_TEST_MODEL")
         .expect("EMBELLAMA_TEST_MODEL must be set - run 'just download-test-model' first");
     
@@ -204,27 +239,29 @@ fn test_bos_token_configuration() {
         "Model file not found at {:?}. Run 'just download-test-model' to download it.", 
         model_path);
 
-    // Test with explicit add_bos_token = false (encoder behavior)
-    let config_no_bos = EngineConfig::builder()
+    // Create a single engine with initial model
+    let config_initial = EngineConfig::builder()
         .with_model_path(model_path.clone())
         .with_model_name("test-bert-model")
-        .with_add_bos_token(Some(false))
+        .with_add_bos_token(Some(false))  // Encoder behavior
         .build()
         .unwrap();
 
-    let engine_no_bos = EmbeddingEngine::new(config_no_bos).expect("Failed to create engine");
-    let emb_no_bos = engine_no_bos.embed(None, "test text").expect("Failed to generate embedding");
+    let mut engine = EmbeddingEngine::new(config_initial).expect("Failed to create engine");
     
-    // Test with explicit add_bos_token = true (decoder behavior)
+    // Test with explicit add_bos_token = false (encoder behavior)
+    let emb_no_bos = engine.embed(None, "test text").expect("Failed to generate embedding");
+    
+    // Load model with explicit add_bos_token = true (decoder behavior)
     let config_with_bos = EngineConfig::builder()
         .with_model_path(model_path.clone())
         .with_model_name("test-llama-model")
         .with_add_bos_token(Some(true))
         .build()
         .unwrap();
-
-    let engine_with_bos = EmbeddingEngine::new(config_with_bos).expect("Failed to create engine");
-    let emb_with_bos = engine_with_bos.embed(None, "test text").expect("Failed to generate embedding");
+    
+    engine.load_model(config_with_bos).expect("Failed to load model with BOS");
+    let emb_with_bos = engine.embed(Some("test-llama-model"), "test text").expect("Failed to generate embedding");
     
     // Both should produce valid embeddings
     assert!(!emb_no_bos.is_empty());
@@ -236,9 +273,9 @@ fn test_bos_token_configuration() {
         .with_model_name("all-minilm-l6-v2")
         .build()
         .unwrap();
-
-    let engine_bert_auto = EmbeddingEngine::new(config_bert_auto).expect("Failed to create engine");
-    let emb_bert = engine_bert_auto.embed(None, "test text").expect("Failed to generate embedding");
+    
+    engine.load_model(config_bert_auto).expect("Failed to load BERT model");
+    let emb_bert = engine.embed(Some("all-minilm-l6-v2"), "test text").expect("Failed to generate embedding");
     assert!(!emb_bert.is_empty());
     
     // Test auto-detection with LLaMA-like name
@@ -247,15 +284,16 @@ fn test_bos_token_configuration() {
         .with_model_name("llama-2-7b-embeddings")
         .build()
         .unwrap();
-
-    let engine_llama_auto = EmbeddingEngine::new(config_llama_auto).expect("Failed to create engine");
-    let emb_llama = engine_llama_auto.embed(None, "test text").expect("Failed to generate embedding");
+    
+    engine.load_model(config_llama_auto).expect("Failed to load LLaMA model");
+    let emb_llama = engine.embed(Some("llama-2-7b-embeddings"), "test text").expect("Failed to generate embedding");
     assert!(!emb_llama.is_empty());
 }
 
 #[test]
 #[serial]
 fn test_granular_unload_operations() {
+    init_test_tracing();
     let model_path = std::env::var("EMBELLAMA_TEST_MODEL")
         .expect("EMBELLAMA_TEST_MODEL must be set - run 'just download-test-model' first");
     
@@ -324,6 +362,7 @@ fn test_granular_unload_operations() {
 #[test]
 #[serial]
 fn test_model_registration_checking() {
+    init_test_tracing();
     let model_path = std::env::var("EMBELLAMA_TEST_MODEL")
         .expect("EMBELLAMA_TEST_MODEL must be set - run 'just download-test-model' first");
     
@@ -401,6 +440,7 @@ fn test_model_registration_checking() {
 #[test]
 #[serial]
 fn test_pooling_strategies() {
+    init_test_tracing();
     let model_path = std::env::var("EMBELLAMA_TEST_MODEL")
         .expect("EMBELLAMA_TEST_MODEL must be set - run 'just download-test-model' first");
     
@@ -417,7 +457,23 @@ fn test_pooling_strategies() {
         PoolingStrategy::MeanSqrt,
     ];
     
-    for strategy in strategies {
+    // Create initial engine
+    let config_initial = EngineConfig::builder()
+        .with_model_path(model_path.clone())
+        .with_model_name("model-Mean")
+        .with_pooling_strategy(PoolingStrategy::Mean)
+        .build()
+        .unwrap();
+    
+    let mut engine = EmbeddingEngine::new(config_initial).expect("Failed to create engine");
+    
+    // Test first strategy with initial model
+    let text = "Testing pooling strategy";
+    let embedding = engine.embed(None, text).expect("Failed to generate embedding");
+    assert!(!embedding.is_empty(), "Embedding empty for strategy {:?}", PoolingStrategy::Mean);
+    
+    // Test remaining strategies by loading new models
+    for strategy in strategies.into_iter().skip(1) {
         let config = EngineConfig::builder()
             .with_model_path(model_path.clone())
             .with_model_name(format!("model-{:?}", strategy))
@@ -425,10 +481,10 @@ fn test_pooling_strategies() {
             .build()
             .unwrap();
             
-        let engine = EmbeddingEngine::new(config).expect("Failed to create engine");
+        engine.load_model(config).expect("Failed to load model");
         
-        let text = "Testing pooling strategy";
-        let embedding = engine.embed(None, text).expect("Failed to generate embedding");
+        let embedding = engine.embed(Some(&format!("model-{:?}", strategy)), text)
+            .expect("Failed to generate embedding");
         
         assert!(!embedding.is_empty(), "Embedding empty for strategy {:?}", strategy);
     }
@@ -437,6 +493,7 @@ fn test_pooling_strategies() {
 #[test]
 #[serial]
 fn test_model_warmup() {
+    init_test_tracing();
     let model_path = std::env::var("EMBELLAMA_TEST_MODEL")
         .expect("EMBELLAMA_TEST_MODEL must be set - run 'just download-test-model' first");
     
@@ -465,6 +522,7 @@ fn test_model_warmup() {
 
 #[serial]
 fn test_model_info() {
+    init_test_tracing();
     let model_path = std::env::var("EMBELLAMA_TEST_MODEL")
         .expect("EMBELLAMA_TEST_MODEL must be set - run 'just download-test-model' first");
     
@@ -598,6 +656,7 @@ fn bench_single_embedding() {
 
 #[serial]
 fn test_batch_processing_basic() {
+    init_test_tracing();
     let model_path = std::env::var("EMBELLAMA_TEST_MODEL")
         .expect("Set EMBELLAMA_TEST_MODEL to run this test");
     let model_path = PathBuf::from(model_path);
@@ -633,6 +692,7 @@ fn test_batch_processing_basic() {
 
 #[serial]
 fn test_batch_processing_large() {
+    init_test_tracing();
     let model_path = std::env::var("EMBELLAMA_TEST_MODEL")
         .expect("Set EMBELLAMA_TEST_MODEL to run this test");
     let model_path = PathBuf::from(model_path);
@@ -661,6 +721,7 @@ fn test_batch_processing_large() {
 
 #[serial]
 fn test_batch_processing_empty() {
+    init_test_tracing();
     let model_path = std::env::var("EMBELLAMA_TEST_MODEL")
         .expect("Set EMBELLAMA_TEST_MODEL to run this test");
     let model_path = PathBuf::from(model_path);
@@ -679,6 +740,7 @@ fn test_batch_processing_empty() {
 
 #[serial]
 fn test_batch_processing_single_item() {
+    init_test_tracing();
     let model_path = std::env::var("EMBELLAMA_TEST_MODEL")
         .expect("Set EMBELLAMA_TEST_MODEL to run this test");
     let model_path = PathBuf::from(model_path);
@@ -701,6 +763,7 @@ fn test_batch_processing_single_item() {
 
 #[serial]
 fn test_batch_processing_order_preservation() {
+    init_test_tracing();
     let model_path = std::env::var("EMBELLAMA_TEST_MODEL")
         .expect("Set EMBELLAMA_TEST_MODEL to run this test");
     let model_path = PathBuf::from(model_path);
@@ -736,6 +799,7 @@ fn test_batch_processing_order_preservation() {
 
 #[serial]
 fn test_batch_vs_sequential_performance() {
+    init_test_tracing();
     let model_path = std::env::var("EMBELLAMA_TEST_MODEL")
         .expect("Set EMBELLAMA_TEST_MODEL to run this test");
     let model_path = PathBuf::from(model_path);

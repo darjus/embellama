@@ -54,7 +54,7 @@ test-unit:
 # Run integration tests with real model
 test-integration: download-test-model
     @echo "Running integration tests with real model..."
-    EMBELLAMA_TEST_MODEL={{test_model_file}} \
+    RUST_BACKTRACE=1 EMBELLAMA_TEST_MODEL={{test_model_file}} \
     cargo test --test integration_tests -- --nocapture
 
 # Run concurrency tests

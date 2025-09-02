@@ -61,19 +61,19 @@
 //! ```
 
 /// Error handling module
-pub mod error;
+mod error;
 
 /// Configuration module
-pub mod config;
+mod config;
 
 /// Model management module
-pub mod model;
+mod model;
 
 /// Embedding engine module
-pub mod engine;
+mod engine;
 
 /// Batch processing module
-pub mod batch;
+mod batch;
 
 // Re-export main types
 pub use batch::{BatchProcessor, BatchProcessorBuilder};
@@ -82,14 +82,23 @@ pub use engine::{EmbeddingEngine, ModelInfo};
 pub use error::{Error, Result};
 pub use model::EmbeddingModel;
 
+use llama_cpp_2::LogOptions;
+
 use tracing::{debug, info};
+use std::sync::Once;
 
 /// Library version
 pub const VERSION: &str = env!("CARGO_PKG_VERSION");
 
+/// Global initialization guard to ensure tracing is only initialized once
+static INIT: Once = Once::new();
+
 /// Initialize the library with default tracing subscriber
 ///
-/// This function sets up tracing for the library with sensible defaults.
+/// This function sets up a global tracing subscriber for the library.
+/// It uses a global subscriber to ensure logging infrastructure outlives
+/// all threads, preventing thread-local storage panics during cleanup.
+///
 /// Call this once at the start of your application.
 ///
 /// # Example
@@ -103,7 +112,9 @@ pub fn init() {
 
 /// Initialize the library with a custom environment filter
 ///
-/// This function sets up tracing with a custom filter string.
+/// This function sets up a global tracing subscriber with a custom filter string.
+/// The global subscriber ensures logging is available during all cleanup operations,
+/// preventing thread-local storage issues.
 ///
 /// # Arguments
 ///
@@ -115,18 +126,24 @@ pub fn init() {
 /// embellama::init_with_env_filter("embellama=debug,info");
 /// ```
 pub fn init_with_env_filter(filter: &str) {
-    use tracing_subscriber::{fmt, prelude::*, EnvFilter};
+    use tracing_subscriber::{fmt, EnvFilter};
 
-    let env_filter = EnvFilter::try_from_default_env()
-        .unwrap_or_else(|_| EnvFilter::new(filter));
+    INIT.call_once(|| {
+        let env_filter = EnvFilter::try_from_default_env()
+            .unwrap_or_else(|_| EnvFilter::new(filter));
 
-    tracing_subscriber::registry()
-        .with(fmt::layer())
-        .with(env_filter)
-        .init();
+        // Use init() to set a global default subscriber
+        // This ensures the subscriber outlives all threads
+        fmt()
+            .with_env_filter(env_filter)
+            .init();
+    
+        // Enable logging - with global tracing subscriber, this is safe
+        llama_cpp_2::send_logs_to_tracing(LogOptions::default().with_logs_enabled(true));
 
-    info!("Embellama library initialized v{}", VERSION);
-    debug!("Debug logging enabled");
+        info!("Embellama library initialized v{}", VERSION);
+        debug!("Debug logging enabled");
+    });
 }
 
 /// Get library version information

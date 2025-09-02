@@ -30,38 +30,8 @@ use llama_cpp_2::{
 };
 use self_cell::self_cell;
 use std::path::PathBuf;
-use std::sync::{Mutex, OnceLock};
 use std::num::NonZeroU32;
 use tracing::{debug, info, instrument};
-
-/// Initialize the llama backend once per process
-static BACKEND: OnceLock<LlamaBackend> = OnceLock::new();
-
-/// Lock to protect backend initialization
-static BACKEND_INIT_LOCK: Mutex<()> = Mutex::new(());
-
-/// Initialize the llama backend
-fn init_backend() -> Result<&'static LlamaBackend> {
-    if let Some(backend) = BACKEND.get() {
-        return Ok(backend);
-    }
-
-    let _guard = BACKEND_INIT_LOCK.lock().unwrap();
-
-    if let Some(backend) = BACKEND.get() {
-        return Ok(backend);
-    }
-    llama_cpp_2::send_logs_to_tracing(LogOptions::default().with_logs_enabled(true));
-
-    let backend = LlamaBackend::init().map_err(|e| Error::ModelInitError {
-        message: "Failed to initialize llama backend".to_string(),
-        source: Some(anyhow::anyhow!("{}", e)),
-    })?;
-
-    info!("Initialized llama backend");
-    let _ = BACKEND.set(backend);
-    Ok(BACKEND.get().unwrap())
-}
 
 self_cell! {
     struct ModelCell {
@@ -125,6 +95,7 @@ impl EmbeddingModel {
     ///
     /// # Arguments
     ///
+    /// * `backend` - The llama backend to use for model loading
     /// * `config` - The model configuration containing path and parameters
     ///
     /// # Returns
@@ -137,11 +108,8 @@ impl EmbeddingModel {
     /// - The model file cannot be loaded
     /// - The context creation fails
     /// - Invalid configuration parameters are provided
-    #[instrument(skip(config), fields(model_path = %config.model_path.display()))]
-    pub fn new(config: &ModelConfig) -> Result<Self> {
-        // Initialize the backend if not already done
-        let backend = init_backend()?;
-
+    #[instrument(skip(backend, config), fields(model_path = %config.model_path.display()))]
+    pub fn new(backend: &LlamaBackend, config: &ModelConfig) -> Result<Self> {
         info!("Loading model from {:?}", config.model_path);
 
         // Set up model parameters
@@ -240,13 +208,14 @@ impl EmbeddingModel {
     ///
     /// # Arguments
     ///
+    /// * `backend` - The llama backend to use for model loading
     /// * `config` - The model configuration
     ///
     /// # Returns
     ///
     /// Returns a `Result` containing the loaded model or an error.
-    pub fn load(config: &ModelConfig) -> Result<Self> {
-        Self::new(config)
+    pub fn load(backend: &LlamaBackend, config: &ModelConfig) -> Result<Self> {
+        Self::new(backend, config)
     }
 
     /// Consumes the model and explicitly frees resources.
@@ -822,7 +791,9 @@ impl EmbeddingModel {
 impl Drop for EmbeddingModel {
     /// Ensures proper cleanup of model resources.
     fn drop(&mut self) {
+        // With global tracing subscriber, we can safely log during cleanup
         debug!("Dropping model: {}", self.model_name);
+
         // The self_cell will handle dropping both the model and context in the correct order
     }
 }
@@ -851,14 +822,6 @@ pub(crate) fn create_test_config() -> ModelConfig {
 #[cfg(test)]
 mod tests {
     use super::*;
-
-    #[test]
-    fn test_backend_initialization() {
-        // Test that backend initialization works
-        let _backend = init_backend();
-        // Calling it again should be safe (Once ensures single initialization)
-        let _backend2 = init_backend();
-    }
 
     #[test]
     fn test_model_not_send() {
@@ -972,7 +935,10 @@ mod tests {
             .build()
             .unwrap();
 
-        match EmbeddingModel::new(&config) {
+        // Initialize backend for testing
+        let backend = LlamaBackend::init().unwrap();
+        
+        match EmbeddingModel::new(&backend, &config) {
             Ok(model) => {
                 assert!(model.is_loaded());
                 assert!(model.embedding_dimensions() > 0);

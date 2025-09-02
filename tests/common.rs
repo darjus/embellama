@@ -60,14 +60,20 @@ pub fn should_run_model_tests() -> bool {
 }
 
 /// Initialize test logging
+/// Uses global tracing subscriber to prevent TLS issues
 pub fn init_test_logger() {
-    let _ = tracing_subscriber::fmt()
-        .with_env_filter(
-            tracing_subscriber::EnvFilter::from_default_env()
-                .add_directive("embellama=debug".parse().unwrap())
-        )
-        .with_test_writer()
-        .try_init();
+    use std::sync::Once;
+    static INIT: Once = Once::new();
+    
+    INIT.call_once(|| {
+        tracing_subscriber::fmt()
+            .with_env_filter(
+                tracing_subscriber::EnvFilter::from_default_env()
+                    .add_directive("embellama=debug".parse().unwrap())
+            )
+            .with_test_writer()
+            .init();
+    });
 }
 
 /// Generate sample texts for batch testing
