@@ -72,7 +72,7 @@ Embellama is a high-performance Rust crate and server for generating text embedd
 2. **Lint Code**: Run `cargo clippy` and address ALL warnings
 3. **Code Review**: Use the rust code review agent to validate changes
 4. **Test**: Run `cargo test` to ensure all tests pass
-5. **Update Changelog**: Use `clog` CLI to update the changelog
+5. **Update Changelog**: Use `git-cliff` CLI to update the changelog
 
 ### Error Handling
 
@@ -257,19 +257,22 @@ impl fmt::Debug for ModelConfig {
    - `test:` Adding missing tests
    - `chore:` Maintenance tasks
 
-### Using `clog` CLI
+### Using `git-cliff` CLI
 
 Before committing, update the changelog:
 
 ```bash
-# Install clog-cli if not present
-cargo install clog-cli
+# Install git-cliff if not present
+cargo install git-cliff
 
 # Generate/update changelog
-clog -r https://github.com/yourusername/embellama -o CHANGELOG.md
+git-cliff -o CHANGELOG.md
 
-# For specific version
-clog --setversion v0.1.0
+# For specific version/tag range
+git-cliff --tag v0.1.0 -o CHANGELOG.md
+
+# Generate unreleased changes only
+git-cliff --unreleased -o CHANGELOG.md
 ```
 
 ### Pre-Commit Checklist
@@ -278,7 +281,7 @@ clog --setversion v0.1.0
 2. ✅ Run `cargo clippy` and fix ALL warnings
 3. ✅ Run `cargo test`
 4. ✅ Use rust code review agent
-5. ✅ Update changelog with `clog`
+5. ✅ Update changelog with `git-cliff`
 6. ✅ Ensure no secrets or API keys
 7. ✅ Verify commit message follows guidelines
 
@@ -343,7 +346,7 @@ If persistent bug → Use zen:debug
 ```
 embellama/
 ├── Cargo.toml          # Dependencies and features
-├── CHANGELOG.md        # Maintained with clog
+├── CHANGELOG.md        # Maintained with git-cliff
 ├── AGENTS.md          # This file
 ├── ARCHITECTURE.md    # Design documentation
 └── src/
@@ -485,7 +488,7 @@ just pre-commit # Full validation before committing
 5. **Debugging**: Use zen:debug for complex issues
 6. **Review**: Run rust code review agent
 7. **Pre-commit**: Run `just pre-commit`
-8. **Commit**: Update changelog with clog, write clear message
+8. **Commit**: Update changelog with git-cliff, write clear message
 9. **Document**: Update rustdoc and ARCHITECTURE.md if needed
 
 ### Key Testing Philosophy
