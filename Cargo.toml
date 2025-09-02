@@ -4,14 +4,14 @@ version = "0.1.0"
 edition = "2024"
 authors = ["Embellama Contributors"]
 description = "High-performance Rust library for generating text embeddings using llama-cpp"
-repository = "https://github.com/embellama/embellama"
+repository = "https://github.com/darjus/embellama"
 readme = "README.md"
 keywords = ["embeddings", "llama", "nlp", "machine-learning", "ai"]
 categories = ["science", "api-bindings", "text-processing"]
 license = "Apache-2.0"
 
 [dependencies]
-llama-cpp-2 = { path = "../llama-cpp-rs/llama-cpp-2" }
+llama-cpp-2 = { version = "0.1.119" }
 thiserror = "1.0"
 anyhow = "1.0"
 tracing = "0.1"
