@@ -51,7 +51,7 @@
 //! // Generate batch embeddings
 //! let texts = vec![
 //!     "First document",
-//!     "Second document", 
+//!     "Second document",
 //!     "Third document",
 //! ];
 //! let embeddings = engine.embed_batch("minilm", texts)?;
@@ -77,15 +77,17 @@ mod batch;
 
 // Re-export main types
 pub use batch::{BatchProcessor, BatchProcessorBuilder};
-pub use config::{EngineConfig, EngineConfigBuilder, ModelConfig, ModelConfigBuilder, PoolingStrategy};
+pub use config::{
+    EngineConfig, EngineConfigBuilder, ModelConfig, ModelConfigBuilder, PoolingStrategy,
+};
 pub use engine::{EmbeddingEngine, ModelInfo};
 pub use error::{Error, Result};
 pub use model::EmbeddingModel;
 
 use llama_cpp_2::LogOptions;
 
-use tracing::{debug, info};
 use std::sync::Once;
+use tracing::{debug, info};
 
 /// Library version
 pub const VERSION: &str = env!("CARGO_PKG_VERSION");
@@ -126,18 +128,16 @@ pub fn init() {
 /// embellama::init_with_env_filter("embellama=debug,info");
 /// ```
 pub fn init_with_env_filter(filter: &str) {
-    use tracing_subscriber::{fmt, EnvFilter};
+    use tracing_subscriber::{EnvFilter, fmt};
 
     INIT.call_once(|| {
-        let env_filter = EnvFilter::try_from_default_env()
-            .unwrap_or_else(|_| EnvFilter::new(filter));
+        let env_filter =
+            EnvFilter::try_from_default_env().unwrap_or_else(|_| EnvFilter::new(filter));
 
         // Use init() to set a global default subscriber
         // This ensures the subscriber outlives all threads
-        fmt()
-            .with_env_filter(env_filter)
-            .init();
-    
+        fmt().with_env_filter(env_filter).init();
+
         // Enable logging - with global tracing subscriber, this is safe
         llama_cpp_2::send_logs_to_tracing(LogOptions::default().with_logs_enabled(true));
 
@@ -186,7 +186,15 @@ impl std::fmt::Display for VersionInfo {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         writeln!(f, "Embellama v{}", self.version)?;
         writeln!(f, "  Target: {}-{}", self.target_arch, self.target_os)?;
-        writeln!(f, "  Server: {}", if self.server_enabled { "enabled" } else { "disabled" })?;
+        writeln!(
+            f,
+            "  Server: {}",
+            if self.server_enabled {
+                "enabled"
+            } else {
+                "disabled"
+            }
+        )?;
         Ok(())
     }
 }
@@ -208,7 +216,7 @@ mod tests {
         assert!(!info.target_os.is_empty());
     }
 
-    #[test] 
+    #[test]
     fn test_version_display() {
         let info = version_info();
         let display = info.to_string();

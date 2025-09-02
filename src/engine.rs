@@ -88,13 +88,14 @@ impl EmbeddingEngine {
         if let Some(backend) = BACKEND.get() {
             return Ok(Arc::clone(backend));
         }
-        
+
         // Initialize the backend for the first time
         let mut backend = LlamaBackend::init().map_err(|e| {
             let error_str = format!("{}", e);
             if error_str.contains("BackendAlreadyInitialized") {
                 Error::ConfigurationError {
-                    message: "LlamaBackend already initialized. This is an internal error.".to_string(),
+                    message: "LlamaBackend already initialized. This is an internal error."
+                        .to_string(),
                 }
             } else {
                 Error::ModelInitError {
@@ -104,7 +105,7 @@ impl EmbeddingEngine {
             }
         })?;
         backend.void_logs();
-        
+
         let backend_arc = Arc::new(Mutex::new(backend));
         // Try to set it, but if another thread beat us to it, use theirs
         match BACKEND.set(Arc::clone(&backend_arc)) {
@@ -144,7 +145,7 @@ impl EmbeddingEngine {
 
         // Slow path: initialize the singleton
         let _lock = INIT_LOCK.lock().unwrap();
-        
+
         // Double-check after acquiring lock
         {
             let instance_guard = INSTANCE.read();
@@ -158,13 +159,13 @@ impl EmbeddingEngine {
         info!("Initializing singleton embedding engine");
         let engine = Self::new_internal(config)?;
         let arc_engine = Arc::new(Mutex::new(engine));
-        
+
         // Store the instance
         {
             let mut instance_guard = INSTANCE.write();
             *instance_guard = Some(Arc::clone(&arc_engine));
         }
-        
+
         Ok(arc_engine)
     }
 
@@ -190,12 +191,12 @@ impl EmbeddingEngine {
     #[cfg(test)]
     pub fn reset() {
         let _lock = INIT_LOCK.lock().unwrap();
-        
+
         // Clear thread-local models first
         THREAD_MODELS.with(|models| {
             models.borrow_mut().clear();
         });
-        
+
         // Take and drop the instance to ensure backend is dropped
         let mut instance_guard = INSTANCE.write();
         if let Some(instance) = instance_guard.take() {
@@ -204,13 +205,15 @@ impl EmbeddingEngine {
                 // Other references exist - this is likely a test error
                 // Put it back and panic
                 *instance_guard = Some(instance);
-                panic!("Cannot reset engine: other references exist. Ensure tests are marked with #[serial]");
+                panic!(
+                    "Cannot reset engine: other references exist. Ensure tests are marked with #[serial]"
+                );
             }
             // Explicitly drop the instance (and its backend)
             drop(instance);
             debug!("Dropped engine instance and backend");
         }
-        
+
         // instance_guard is now None
         info!("Engine singleton reset - backend dropped");
     }
@@ -230,34 +233,34 @@ impl EmbeddingEngine {
     fn new_internal(config: EngineConfig) -> Result<Self> {
         // Validate configuration
         config.validate()?;
-        
+
         let model_name = config.model_name.clone();
         info!("Initializing embedding engine with model: {}", model_name);
-        
+
         // Get or create the shared backend
         let backend = Self::get_or_create_backend()?;
         info!("Llama backend ready");
-        
+
         // Create the engine with the initial model config
         let mut model_configs = HashMap::new();
         model_configs.insert(model_name.clone(), config);
-        
+
         let engine = Self {
             backend,
             model_configs: Arc::new(RwLock::new(model_configs)),
             default_model: Some(model_name.clone()),
         };
-        
+
         // Load the model in the current thread
         engine.ensure_model_loaded(&model_name)?;
-        
+
         info!("Embedding engine initialized successfully");
         Ok(engine)
     }
 
     /// Creates a new embedding engine with the given configuration.
     ///
-    /// **Note**: This now uses the singleton pattern internally. Use `get_or_init()` 
+    /// **Note**: This now uses the singleton pattern internally. Use `get_or_init()`
     /// for explicit singleton access.
     ///
     /// # Arguments
@@ -288,9 +291,9 @@ impl EmbeddingEngine {
     pub fn load_model(&mut self, config: EngineConfig) -> Result<()> {
         // Validate configuration
         config.validate()?;
-        
+
         let model_name = config.model_name.clone();
-        
+
         // Check if model already exists
         {
             let configs = self.model_configs.read();
@@ -300,18 +303,18 @@ impl EmbeddingEngine {
                 });
             }
         }
-        
+
         // Add configuration to registry
         {
             let mut configs = self.model_configs.write();
             configs.insert(model_name.clone(), config);
         }
-        
+
         // Set as default if it's the first model
         if self.default_model.is_none() {
             self.default_model = Some(model_name.clone());
         }
-        
+
         info!("Model '{}' configuration added to registry", model_name);
         Ok(())
     }
@@ -340,17 +343,17 @@ impl EmbeddingEngine {
             }
             configs.remove(model_name);
         }
-        
+
         // Update default model if needed
         if self.default_model.as_ref() == Some(&model_name.to_string()) {
             let configs = self.model_configs.read();
             self.default_model = configs.keys().next().cloned();
         }
-        
+
         info!("Model '{}' unregistered from config registry", model_name);
         Ok(())
     }
-    
+
     /// Drops a model from the current thread's cache.
     ///
     /// This removes the model instance from the current thread but keeps
@@ -374,7 +377,7 @@ impl EmbeddingEngine {
                 });
             }
         }
-        
+
         // Remove from thread-local storage
         THREAD_MODELS.with(|models| {
             let mut models = models.borrow_mut();
@@ -384,10 +387,10 @@ impl EmbeddingEngine {
                 debug!("Model '{}' was not loaded in current thread", model_name);
             }
         });
-        
+
         Ok(())
     }
-    
+
     /// Unloads a model completely (unregisters and drops from thread).
     ///
     /// This is a convenience method that combines `unregister_model` and
@@ -405,10 +408,10 @@ impl EmbeddingEngine {
     pub fn unload_model(&mut self, model_name: &str) -> Result<()> {
         // Drop from current thread first (while config still exists)
         self.drop_model_from_thread(model_name)?;
-        
+
         // Then unregister from config
         self.unregister_model(model_name)?;
-        
+
         info!("Model '{}' fully unloaded", model_name);
         Ok(())
     }
@@ -419,13 +422,13 @@ impl EmbeddingEngine {
     fn ensure_model_loaded(&self, model_name: &str) -> Result<()> {
         THREAD_MODELS.with(|models| {
             let mut models = models.borrow_mut();
-            
+
             // Check if model is already loaded in this thread
             if models.contains_key(model_name) {
                 debug!("Model '{}' already loaded in current thread", model_name);
                 return Ok(());
             }
-            
+
             // Get configuration from registry
             let config = {
                 let configs = self.model_configs.read();
@@ -436,19 +439,22 @@ impl EmbeddingEngine {
                     })?
                     .clone()
             };
-            
+
             info!("Loading model '{}' in current thread", model_name);
-            
+
             // Convert EngineConfig to ModelConfig and create model
             let model_config = config.to_model_config();
             let backend_guard = self.backend.lock().unwrap();
             let model = EmbeddingModel::new(&*backend_guard, &model_config)?;
             drop(backend_guard); // Release lock as soon as we're done
-            
+
             // Store in thread-local map
             models.insert(model_name.to_string(), model);
-            
-            info!("Model '{}' loaded successfully in current thread", model_name);
+
+            info!(
+                "Model '{}' loaded successfully in current thread",
+                model_name
+            );
             Ok(())
         })
     }
@@ -478,19 +484,19 @@ impl EmbeddingEngine {
             .ok_or_else(|| Error::ConfigurationError {
                 message: "No model specified and no default model set".to_string(),
             })?;
-        
+
         // Ensure model is loaded in current thread
         self.ensure_model_loaded(&model_name)?;
-        
+
         // Generate embedding using thread-local model
         THREAD_MODELS.with(|models| {
             let mut models = models.borrow_mut();
-            let model = models.get_mut(&model_name).ok_or_else(|| {
-                Error::ModelNotFound {
+            let model = models
+                .get_mut(&model_name)
+                .ok_or_else(|| Error::ModelNotFound {
                     name: model_name.clone(),
-                }
-            })?;
-            
+                })?;
+
             model.generate_embedding(text)
         })
     }
@@ -524,32 +530,36 @@ impl EmbeddingEngine {
             .ok_or_else(|| Error::ConfigurationError {
                 message: "No model specified and no default model set".to_string(),
             })?;
-        
+
         // Ensure model is loaded in current thread
         self.ensure_model_loaded(&model_name)?;
-        
+
         // Get model configuration for batch processing
-        let config = self.model_configs.read()
+        let config = self
+            .model_configs
+            .read()
             .get(&model_name)
-            .ok_or_else(|| Error::ModelNotFound { name: model_name.clone() })?
+            .ok_or_else(|| Error::ModelNotFound {
+                name: model_name.clone(),
+            })?
             .clone();
-        
+
         // Create batch processor with model configuration
         let batch_processor = BatchProcessorBuilder::default()
-            .with_max_batch_size(64)  // Default batch size
+            .with_max_batch_size(64) // Default batch size
             .with_normalization(config.normalize_embeddings)
             .with_pooling_strategy(config.pooling_strategy.clone())
             .build();
-        
+
         // Process batch using the BatchProcessor
         THREAD_MODELS.with(|models| {
             let mut models = models.borrow_mut();
-            let model = models.get_mut(&model_name).ok_or_else(|| {
-                Error::ModelNotFound {
+            let model = models
+                .get_mut(&model_name)
+                .ok_or_else(|| Error::ModelNotFound {
                     name: model_name.clone(),
-                }
-            })?;
-            
+                })?;
+
             batch_processor.process_batch(model, texts)
         })
     }
@@ -580,7 +590,7 @@ impl EmbeddingEngine {
         let configs = self.model_configs.read();
         configs.contains_key(model_name)
     }
-    
+
     /// Checks if a model is loaded in the current thread.
     ///
     /// # Arguments
@@ -596,7 +606,7 @@ impl EmbeddingEngine {
             models.contains_key(model_name)
         })
     }
-    
+
     /// Checks if a model is loaded (deprecated, use is_model_registered).
     ///
     /// # Deprecated
@@ -656,15 +666,13 @@ impl EmbeddingEngine {
     pub fn model_info(&self, model_name: &str) -> Result<ModelInfo> {
         // Ensure model is loaded in current thread
         self.ensure_model_loaded(model_name)?;
-        
+
         THREAD_MODELS.with(|models| {
             let models = models.borrow();
-            let model = models.get(model_name).ok_or_else(|| {
-                Error::ModelNotFound {
-                    name: model_name.to_string(),
-                }
+            let model = models.get(model_name).ok_or_else(|| Error::ModelNotFound {
+                name: model_name.to_string(),
             })?;
-            
+
             Ok(ModelInfo {
                 name: model_name.to_string(),
                 dimensions: model.embedding_dimensions(),
@@ -692,7 +700,7 @@ impl EmbeddingEngine {
         debug!("Model warmed up successfully");
         Ok(())
     }
-    
+
     /// Performs explicit cleanup of all models in the current thread.
     ///
     /// With global tracing subscriber, this method is now optional but can
@@ -700,11 +708,11 @@ impl EmbeddingEngine {
     pub fn cleanup_thread_models(&self) {
         THREAD_MODELS.with(|models| {
             let mut models = models.borrow_mut();
-            
+
             // Clear all models from the thread
             let count = models.len();
             models.clear();
-            
+
             if count > 0 {
                 info!("Cleared {} thread-local models", count);
             }
@@ -735,7 +743,7 @@ mod tests {
         let dir = tempdir().unwrap();
         let model_path = dir.path().join("test_model.gguf");
         fs::write(&model_path, b"dummy model file").unwrap();
-        
+
         EngineConfig::builder()
             .with_model_path(model_path)
             .with_model_name("test-model")
@@ -759,10 +767,10 @@ mod tests {
     fn test_embedding_generation() {
         let config = create_test_config();
         let engine = EmbeddingEngine::new(config).unwrap();
-        
+
         let text = "Hello, world!";
         let embedding = engine.embed(None, text).unwrap();
-        
+
         assert!(!embedding.is_empty());
     }
 }

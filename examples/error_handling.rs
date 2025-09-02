@@ -37,13 +37,13 @@ fn run_examples() -> Result<(), Box<dyn std::error::Error>> {
 
     // Example 1: Handle missing model file
     handle_missing_model()?;
-    
+
     // Example 2: Handle invalid configuration
     handle_invalid_config()?;
-    
+
     // Example 3: Handle embedding errors with retry
     handle_embedding_errors()?;
-    
+
     // Example 4: Handle batch processing errors
     handle_batch_errors()?;
 
@@ -54,27 +54,27 @@ fn run_examples() -> Result<(), Box<dyn std::error::Error>> {
 fn handle_missing_model() -> Result<(), Box<dyn std::error::Error>> {
     println!("1. Handling Missing Model File:");
     println!("-------------------------------");
-    
+
     // Try to load a non-existent model
     let result = EngineConfig::builder()
         .with_model_path("/non/existent/model.gguf")
         .with_model_name("test")
         .build();
-    
+
     match result {
         Ok(_) => {
             println!("  Unexpected: Config created with non-existent model");
         }
         Err(e) => {
             println!("  Expected error caught: {}", e);
-            
+
             // Check if it's a configuration error
             if e.is_configuration_error() {
                 println!("  -> This is a configuration error (as expected)");
             }
         }
     }
-    
+
     println!();
     Ok(())
 }
@@ -83,37 +83,46 @@ fn handle_missing_model() -> Result<(), Box<dyn std::error::Error>> {
 fn handle_invalid_config() -> Result<(), Box<dyn std::error::Error>> {
     println!("2. Handling Invalid Configuration:");
     println!("----------------------------------");
-    
+
     // Create a temporary model file for testing
     let temp_dir = tempfile::tempdir()?;
     let model_path = temp_dir.path().join("test.gguf");
     std::fs::write(&model_path, b"dummy model")?;
-    
+
     // Test various invalid configurations
     let invalid_configs = vec![
-        ("Empty name", EngineConfig::builder()
-            .with_model_path(&model_path)
-            .with_model_name("")
-            .build()),
-        ("Zero threads", EngineConfig::builder()
-            .with_model_path(&model_path)
-            .with_model_name("test")
-            .with_n_threads(0)
-            .build()),
-        ("Zero context", EngineConfig::builder()
-            .with_model_path(&model_path)
-            .with_model_name("test")
-            .with_context_size(0)
-            .build()),
+        (
+            "Empty name",
+            EngineConfig::builder()
+                .with_model_path(&model_path)
+                .with_model_name("")
+                .build(),
+        ),
+        (
+            "Zero threads",
+            EngineConfig::builder()
+                .with_model_path(&model_path)
+                .with_model_name("test")
+                .with_n_threads(0)
+                .build(),
+        ),
+        (
+            "Zero context",
+            EngineConfig::builder()
+                .with_model_path(&model_path)
+                .with_model_name("test")
+                .with_context_size(0)
+                .build(),
+        ),
     ];
-    
+
     for (desc, result) in invalid_configs {
         match result {
             Ok(_) => println!("  {}: Unexpected success", desc),
             Err(e) => println!("  {}: Caught error - {}", desc, e),
         }
     }
-    
+
     println!();
     Ok(())
 }
@@ -122,7 +131,7 @@ fn handle_invalid_config() -> Result<(), Box<dyn std::error::Error>> {
 fn handle_embedding_errors() -> Result<(), Box<dyn std::error::Error>> {
     println!("3. Handling Embedding Errors with Retry:");
     println!("----------------------------------------");
-    
+
     // Get model path from environment or skip
     let model_path = match env::var("EMBELLAMA_MODEL") {
         Ok(path) => PathBuf::from(path),
@@ -132,23 +141,23 @@ fn handle_embedding_errors() -> Result<(), Box<dyn std::error::Error>> {
             return Ok(());
         }
     };
-    
+
     let config = EngineConfig::builder()
         .with_model_path(model_path)
         .with_model_name("retry-example")
         .build()?;
-    
+
     let engine = EmbeddingEngine::new(config)?;
-    
+
     // Simulate retryable operations
     let texts = vec![
-        "",  // Empty text - will fail
+        "", // Empty text - will fail
         "Valid text for embedding",
     ];
-    
+
     for text in texts {
         println!("  Attempting to embed: \"{}\"", text);
-        
+
         let mut retries = 3;
         loop {
             match engine.embed(None, text) {
@@ -158,7 +167,7 @@ fn handle_embedding_errors() -> Result<(), Box<dyn std::error::Error>> {
                 }
                 Err(e) => {
                     println!("    Error: {}", e);
-                    
+
                     if e.is_retryable() && retries > 0 {
                         retries -= 1;
                         println!("    Retrying... ({} attempts left)", retries);
@@ -171,7 +180,7 @@ fn handle_embedding_errors() -> Result<(), Box<dyn std::error::Error>> {
             }
         }
     }
-    
+
     println!();
     Ok(())
 }
@@ -180,7 +189,7 @@ fn handle_embedding_errors() -> Result<(), Box<dyn std::error::Error>> {
 fn handle_batch_errors() -> Result<(), Box<dyn std::error::Error>> {
     println!("4. Handling Batch Processing Errors:");
     println!("------------------------------------");
-    
+
     // Get model path from environment or skip
     let model_path = match env::var("EMBELLAMA_MODEL") {
         Ok(path) => PathBuf::from(path),
@@ -190,41 +199,51 @@ fn handle_batch_errors() -> Result<(), Box<dyn std::error::Error>> {
             return Ok(());
         }
     };
-    
+
     let config = EngineConfig::builder()
         .with_model_path(model_path)
         .with_model_name("batch-error-example")
         .build()?;
-    
+
     let engine = EmbeddingEngine::new(config)?;
-    
+
     // Test batch with mixed valid/invalid inputs
     let texts = vec![
         "Valid document 1",
-        "",  // Invalid: empty
+        "", // Invalid: empty
         "Valid document 2",
-        "   ",  // Invalid: whitespace only
+        "   ", // Invalid: whitespace only
         "Valid document 3",
     ];
-    
-    println!("  Processing batch of {} texts (including invalid ones)...", texts.len());
-    
+
+    println!(
+        "  Processing batch of {} texts (including invalid ones)...",
+        texts.len()
+    );
+
     match engine.embed_batch(None, texts.clone()) {
         Ok(embeddings) => {
-            println!("  Batch succeeded! Generated {} embeddings", embeddings.len());
-            
+            println!(
+                "  Batch succeeded! Generated {} embeddings",
+                embeddings.len()
+            );
+
             for (i, (text, emb)) in texts.iter().zip(embeddings.iter()).enumerate() {
-                println!("    Text {}: \"{}\" -> {} dimensions", 
-                    i, 
-                    text.trim(), 
+                println!(
+                    "    Text {}: \"{}\" -> {} dimensions",
+                    i,
+                    text.trim(),
                     emb.len()
                 );
             }
         }
-        Err(Error::BatchError { message, failed_indices }) => {
+        Err(Error::BatchError {
+            message,
+            failed_indices,
+        }) => {
             println!("  Batch error: {}", message);
             println!("  Failed indices: {:?}", failed_indices);
-            
+
             // Process only the valid texts
             let valid_texts: Vec<&str> = texts
                 .iter()
@@ -232,12 +251,15 @@ fn handle_batch_errors() -> Result<(), Box<dyn std::error::Error>> {
                 .filter(|(i, _)| !failed_indices.contains(i))
                 .map(|(_, t)| &**t)
                 .collect();
-            
+
             if !valid_texts.is_empty() {
                 println!("  Retrying with only valid texts...");
                 match engine.embed_batch(None, valid_texts) {
                     Ok(embeddings) => {
-                        println!("  Retry succeeded! Generated {} embeddings", embeddings.len());
+                        println!(
+                            "  Retry succeeded! Generated {} embeddings",
+                            embeddings.len()
+                        );
                     }
                     Err(e) => {
                         println!("  Retry failed: {}", e);
@@ -247,7 +269,7 @@ fn handle_batch_errors() -> Result<(), Box<dyn std::error::Error>> {
         }
         Err(e) => {
             println!("  Unexpected error: {}", e);
-            
+
             // Check error type for appropriate handling
             match e {
                 Error::ModelNotFound { name } => {
@@ -266,7 +288,7 @@ fn handle_batch_errors() -> Result<(), Box<dyn std::error::Error>> {
             }
         }
     }
-    
+
     println!();
     println!("Error handling examples completed!");
     Ok(())

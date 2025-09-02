@@ -20,7 +20,7 @@ use thiserror::Error;
 pub enum Error {
     /// Error when model loading fails
     #[error("Failed to load model from path: {path}")]
-    ModelLoadError { 
+    ModelLoadError {
         /// Path to the model that failed to load
         path: PathBuf,
         #[source]
@@ -32,12 +32,12 @@ pub enum Error {
     #[error("Model not found: {name}")]
     ModelNotFound {
         /// Name of the model that was not found
-        name: String
+        name: String,
     },
 
     /// Error during embedding generation
     #[error("Failed to generate embedding: {message}")]
-    EmbeddingGenerationError { 
+    EmbeddingGenerationError {
         /// Description of what went wrong
         message: String,
         #[source]
@@ -49,19 +49,19 @@ pub enum Error {
     #[error("Configuration error: {message}")]
     ConfigurationError {
         /// Description of the configuration error
-        message: String
+        message: String,
     },
 
     /// Error for invalid input
     #[error("Invalid input: {message}")]
     InvalidInput {
         /// Description of what makes the input invalid
-        message: String
+        message: String,
     },
 
     /// Error during model initialization
     #[error("Model initialization failed: {message}")]
-    ModelInitError { 
+    ModelInitError {
         /// Description of initialization failure
         message: String,
         #[source]
@@ -81,12 +81,12 @@ pub enum Error {
     #[error("Tokenization failed: {message}")]
     TokenizationError {
         /// Description of tokenization failure
-        message: String
+        message: String,
     },
 
     /// Error during batch processing
     #[error("Batch processing error: {message}")]
-    BatchError { 
+    BatchError {
         /// Description of batch processing error
         message: String,
         /// Indices of texts that failed processing
@@ -107,7 +107,7 @@ pub enum Error {
 
     /// I/O operation error
     #[error("IO error: {message}")]
-    IoError { 
+    IoError {
         /// Description of I/O error
         message: String,
         #[source]
@@ -129,21 +129,21 @@ pub enum Error {
         /// Expected number of dimensions
         expected: usize,
         /// Actual number of dimensions
-        actual: usize
+        actual: usize,
     },
 
     /// Error when resource limits are exceeded
     #[error("Resource limit exceeded: {message}")]
     ResourceLimitExceeded {
         /// Description of which limit was exceeded
-        message: String
+        message: String,
     },
 
     /// Error when an operation times out
     #[error("Operation timeout: {message}")]
     Timeout {
         /// Description of what timed out
-        message: String
+        message: String,
     },
 
     /// Catch-all for other errors
@@ -191,9 +191,7 @@ impl Error {
     pub fn is_retryable(&self) -> bool {
         matches!(
             self,
-            Self::Timeout { .. } 
-            | Self::ThreadPoolError { .. }
-            | Self::LockPoisoned
+            Self::Timeout { .. } | Self::ThreadPoolError { .. } | Self::LockPoisoned
         )
     }
 
@@ -202,8 +200,8 @@ impl Error {
         matches!(
             self,
             Self::ConfigurationError { .. }
-            | Self::InvalidInput { .. }
-            | Self::ModelNotFound { .. }
+                | Self::InvalidInput { .. }
+                | Self::ModelNotFound { .. }
         )
     }
 }
@@ -253,12 +251,18 @@ mod tests {
             expected: 384,
             actual: 512,
         };
-        assert_eq!(err.to_string(), "Invalid model dimensions: expected 384, got 512");
+        assert_eq!(
+            err.to_string(),
+            "Invalid model dimensions: expected 384, got 512"
+        );
 
         let err = Error::ResourceLimitExceeded {
             message: "Memory limit reached".to_string(),
         };
-        assert_eq!(err.to_string(), "Resource limit exceeded: Memory limit reached");
+        assert_eq!(
+            err.to_string(),
+            "Resource limit exceeded: Memory limit reached"
+        );
 
         let err = Error::Timeout {
             message: "Request timed out".to_string(),
@@ -302,7 +306,7 @@ mod tests {
         let path = PathBuf::from("/path/to/model.gguf");
         let source = anyhow::anyhow!("File not found");
         let err = Error::model_load(path.clone(), source);
-        
+
         assert!(matches!(err, Error::ModelLoadError { .. }));
         assert!(!err.is_configuration_error());
         assert!(!err.is_retryable());
@@ -312,12 +316,24 @@ mod tests {
     #[test]
     fn test_embedding_errors() {
         let err = Error::embedding_failed("Model not ready");
-        assert!(matches!(err, Error::EmbeddingGenerationError { source: None, .. }));
-        assert_eq!(err.to_string(), "Failed to generate embedding: Model not ready");
+        assert!(matches!(
+            err,
+            Error::EmbeddingGenerationError { source: None, .. }
+        ));
+        assert_eq!(
+            err.to_string(),
+            "Failed to generate embedding: Model not ready"
+        );
 
         let source = anyhow::anyhow!("CUDA out of memory");
         let err = Error::embedding_failed_with_source("GPU error", source);
-        assert!(matches!(err, Error::EmbeddingGenerationError { source: Some(_), .. }));
+        assert!(matches!(
+            err,
+            Error::EmbeddingGenerationError {
+                source: Some(_),
+                ..
+            }
+        ));
         assert_eq!(err.to_string(), "Failed to generate embedding: GPU error");
     }
 
@@ -337,7 +353,7 @@ mod tests {
             failed_indices: vec![1, 3, 5],
         };
         assert_eq!(err.to_string(), "Batch processing error: Processing failed");
-        
+
         if let Error::BatchError { failed_indices, .. } = err {
             assert_eq!(failed_indices, vec![1, 3, 5]);
         } else {
@@ -351,7 +367,10 @@ mod tests {
             message: "Backend initialization failed".to_string(),
             source: None,
         };
-        assert_eq!(err.to_string(), "Model initialization failed: Backend initialization failed");
+        assert_eq!(
+            err.to_string(),
+            "Model initialization failed: Backend initialization failed"
+        );
         assert!(!err.is_configuration_error());
         assert!(!err.is_retryable());
 
@@ -360,7 +379,13 @@ mod tests {
             message: "GPU init failed".to_string(),
             source: Some(source),
         };
-        assert!(matches!(err, Error::ModelInitError { source: Some(_), .. }));
+        assert!(matches!(
+            err,
+            Error::ModelInitError {
+                source: Some(_),
+                ..
+            }
+        ));
     }
 
     #[test]
@@ -403,8 +428,12 @@ mod tests {
     fn test_retryable_errors() {
         // Test all retryable error types
         let retryable_errors = vec![
-            Error::Timeout { message: "timeout".to_string() },
-            Error::ThreadPoolError { source: anyhow::anyhow!("pool error") },
+            Error::Timeout {
+                message: "timeout".to_string(),
+            },
+            Error::ThreadPoolError {
+                source: anyhow::anyhow!("pool error"),
+            },
             Error::LockPoisoned,
         ];
 
@@ -414,9 +443,15 @@ mod tests {
 
         // Test non-retryable errors
         let non_retryable = vec![
-            Error::ModelNotFound { name: "model".to_string() },
-            Error::ConfigurationError { message: "config".to_string() },
-            Error::InvalidInput { message: "input".to_string() },
+            Error::ModelNotFound {
+                name: "model".to_string(),
+            },
+            Error::ConfigurationError {
+                message: "config".to_string(),
+            },
+            Error::InvalidInput {
+                message: "input".to_string(),
+            },
         ];
 
         for err in non_retryable {
@@ -458,7 +493,7 @@ mod tests {
 
         let result = returns_result();
         assert!(result.is_err());
-        
+
         if let Err(e) = result {
             assert!(matches!(e, Error::ConfigurationError { .. }));
         }

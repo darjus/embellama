@@ -14,7 +14,7 @@
 
 //! Performance benchmarks for embellama
 
-use criterion::{black_box, criterion_group, criterion_main, Criterion, BenchmarkId, Throughput};
+use criterion::{BenchmarkId, Criterion, Throughput, black_box, criterion_group, criterion_main};
 use embellama::{EmbeddingEngine, EngineConfig, PoolingStrategy};
 use std::time::Duration;
 
@@ -44,7 +44,7 @@ fn bench_single_embedding(c: &mut Criterion) {
         .expect("Failed to create config");
 
     let engine = EmbeddingEngine::new(config).expect("Failed to create engine");
-    
+
     // Warmup
     engine.warmup_model(None).expect("Warmup failed");
 
@@ -65,7 +65,8 @@ fn bench_single_embedding(c: &mut Criterion) {
             text,
             |b, text| {
                 b.iter(|| {
-                    let _ = engine.embed(None, black_box(text))
+                    let _ = engine
+                        .embed(None, black_box(text))
                         .expect("Embedding failed");
                 });
             },
@@ -92,7 +93,7 @@ fn bench_batch_embeddings(c: &mut Criterion) {
         .expect("Failed to create config");
 
     let engine = EmbeddingEngine::new(config).expect("Failed to create engine");
-    
+
     // Warmup
     engine.warmup_model(None).expect("Warmup failed");
 
@@ -113,7 +114,8 @@ fn bench_batch_embeddings(c: &mut Criterion) {
             &text_refs,
             |b, texts| {
                 b.iter(|| {
-                    let _ = engine.embed_batch(None, black_box(texts.clone()))
+                    let _ = engine
+                        .embed_batch(None, black_box(texts.clone()))
                         .expect("Batch embedding failed");
                 });
             },
@@ -140,7 +142,7 @@ fn bench_pooling_strategies(c: &mut Criterion) {
     ];
 
     let text = "Benchmark text for testing different pooling strategies and their performance characteristics";
-    
+
     let mut group = c.benchmark_group("pooling_strategies");
     group.measurement_time(Duration::from_secs(10));
 
@@ -160,7 +162,8 @@ fn bench_pooling_strategies(c: &mut Criterion) {
             &text,
             |b, text| {
                 b.iter(|| {
-                    let _ = engine.embed(None, black_box(text))
+                    let _ = engine
+                        .embed(None, black_box(text))
                         .expect("Embedding failed");
                 });
             },
@@ -180,7 +183,7 @@ fn bench_normalization(c: &mut Criterion) {
     };
 
     let text = "Test text for normalization benchmark";
-    
+
     let mut group = c.benchmark_group("normalization");
     group.measurement_time(Duration::from_secs(10));
 
@@ -192,13 +195,13 @@ fn bench_normalization(c: &mut Criterion) {
         .build()
         .expect("Failed to create config");
 
-    let engine_no_norm = EmbeddingEngine::new(config_no_norm)
-        .expect("Failed to create engine");
+    let engine_no_norm = EmbeddingEngine::new(config_no_norm).expect("Failed to create engine");
     engine_no_norm.warmup_model(None).expect("Warmup failed");
 
     group.bench_function("without_normalization", |b| {
         b.iter(|| {
-            let _ = engine_no_norm.embed(None, black_box(text))
+            let _ = engine_no_norm
+                .embed(None, black_box(text))
                 .expect("Embedding failed");
         });
     });
@@ -211,13 +214,13 @@ fn bench_normalization(c: &mut Criterion) {
         .build()
         .expect("Failed to create config");
 
-    let engine_norm = EmbeddingEngine::new(config_norm)
-        .expect("Failed to create engine");
+    let engine_norm = EmbeddingEngine::new(config_norm).expect("Failed to create engine");
     engine_norm.warmup_model(None).expect("Warmup failed");
 
     group.bench_function("with_normalization", |b| {
         b.iter(|| {
-            let _ = engine_norm.embed(None, black_box(text))
+            let _ = engine_norm
+                .embed(None, black_box(text))
                 .expect("Embedding failed");
         });
     });
@@ -242,7 +245,7 @@ fn bench_memory_patterns(c: &mut Criterion) {
         .expect("Failed to create config");
 
     let engine = EmbeddingEngine::new(config).expect("Failed to create engine");
-    
+
     let mut group = c.benchmark_group("memory_patterns");
     group.measurement_time(Duration::from_secs(10));
 
@@ -251,7 +254,8 @@ fn bench_memory_patterns(c: &mut Criterion) {
         b.iter(|| {
             for i in 0..10 {
                 let text = format!("Text {}", i);
-                let _ = engine.embed(None, black_box(&text))
+                let _ = engine
+                    .embed(None, black_box(&text))
                     .expect("Embedding failed");
             }
         });
@@ -259,13 +263,12 @@ fn bench_memory_patterns(c: &mut Criterion) {
 
     // Benchmark large batch allocation
     group.bench_function("single_large_batch", |b| {
-        let texts: Vec<String> = (0..100)
-            .map(|i| format!("Text {}", i))
-            .collect();
+        let texts: Vec<String> = (0..100).map(|i| format!("Text {}", i)).collect();
         let text_refs: Vec<&str> = texts.iter().map(|s| s.as_str()).collect();
-        
+
         b.iter(|| {
-            let _ = engine.embed_batch(None, black_box(text_refs.clone()))
+            let _ = engine
+                .embed_batch(None, black_box(text_refs.clone()))
                 .expect("Batch embedding failed");
         });
     });
@@ -295,8 +298,7 @@ fn bench_model_loading(c: &mut Criterion) {
                 .build()
                 .expect("Failed to create config");
 
-            let _engine = EmbeddingEngine::new(config)
-                .expect("Failed to create engine");
+            let _engine = EmbeddingEngine::new(config).expect("Failed to create engine");
             // Engine drops here
         });
     });
@@ -316,7 +318,7 @@ fn bench_thread_scaling(c: &mut Criterion) {
 
     let thread_counts = vec![1, 2, 4, 8, 16];
     let text = "Benchmark text for thread scaling test";
-    
+
     let mut group = c.benchmark_group("thread_scaling");
     group.measurement_time(Duration::from_secs(10));
 
@@ -331,16 +333,13 @@ fn bench_thread_scaling(c: &mut Criterion) {
         let engine = EmbeddingEngine::new(config).expect("Failed to create engine");
         engine.warmup_model(None).expect("Warmup failed");
 
-        group.bench_with_input(
-            BenchmarkId::new("threads", threads),
-            &text,
-            |b, text| {
-                b.iter(|| {
-                    let _ = engine.embed(None, black_box(text))
-                        .expect("Embedding failed");
-                });
-            },
-        );
+        group.bench_with_input(BenchmarkId::new("threads", threads), &text, |b, text| {
+            b.iter(|| {
+                let _ = engine
+                    .embed(None, black_box(text))
+                    .expect("Embedding failed");
+            });
+        });
     }
     group.finish();
 }

@@ -54,12 +54,15 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
     // Generate embedding for a single text
     let text = "This is a simple example of generating text embeddings with embellama.";
     println!("\nGenerating embedding for: \"{}\"", text);
-    
+
     let embedding = engine.embed(None, text)?;
-    
+
     println!("Embedding dimensions: {}", embedding.len());
-    println!("First 10 values: {:?}", &embedding[..10.min(embedding.len())]);
-    
+    println!(
+        "First 10 values: {:?}",
+        &embedding[..10.min(embedding.len())]
+    );
+
     // Calculate and display L2 norm (should be ~1.0 if normalized)
     let norm: f32 = embedding.iter().map(|x| x * x).sum::<f32>().sqrt();
     println!("L2 norm: {:.6}", norm);
@@ -79,7 +82,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
         println!("\nText {}: \"{}\"", i + 1, text);
         println!("  Dimensions: {}", emb.len());
         println!("  First 5 values: {:?}", &emb[..5.min(emb.len())]);
-        
+
         let norm: f32 = emb.iter().map(|x| x * x).sum::<f32>().sqrt();
         println!("  L2 norm: {:.6}", norm);
     }
@@ -87,9 +90,9 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
     // Calculate cosine similarity between embeddings
     println!("\n--- Cosine Similarity ---");
     for i in 0..embeddings.len() {
-        for j in i+1..embeddings.len() {
+        for j in i + 1..embeddings.len() {
             let similarity = cosine_similarity(&embeddings[i], &embeddings[j]);
-            println!("Text {} <-> Text {}: {:.4}", i+1, j+1, similarity);
+            println!("Text {} <-> Text {}: {:.4}", i + 1, j + 1, similarity);
         }
     }
 
@@ -100,10 +103,10 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
 /// Calculate cosine similarity between two vectors
 fn cosine_similarity(a: &[f32], b: &[f32]) -> f32 {
     assert_eq!(a.len(), b.len(), "Vectors must have same dimension");
-    
+
     let dot_product: f32 = a.iter().zip(b.iter()).map(|(x, y)| x * y).sum();
     let norm_a: f32 = a.iter().map(|x| x * x).sum::<f32>().sqrt();
     let norm_b: f32 = b.iter().map(|x| x * x).sum::<f32>().sqrt();
-    
+
     dot_product / (norm_a * norm_b)
 }

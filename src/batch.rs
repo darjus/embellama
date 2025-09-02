@@ -19,14 +19,14 @@
 //! for pre/post-processing while respecting the single-threaded constraint of
 //! model inference.
 
+use crate::config::PoolingStrategy;
 use crate::error::{Error, Result};
 use crate::model::EmbeddingModel;
-use crate::config::PoolingStrategy;
+use llama_cpp_2::token::LlamaToken;
 use rayon::prelude::*;
 use std::sync::Arc;
 use std::sync::atomic::{AtomicUsize, Ordering};
 use tracing::{debug, instrument};
-use llama_cpp_2::token::LlamaToken;
 
 /// Represents a batch of texts to be processed.
 pub struct BatchProcessor {
@@ -61,7 +61,7 @@ impl BatchProcessor {
             pooling_strategy: PoolingStrategy::Mean,
         }
     }
-    
+
     /// Creates a batch processor with custom configuration.
     pub fn builder() -> BatchProcessorBuilder {
         BatchProcessorBuilder::default()
@@ -98,64 +98,73 @@ impl BatchProcessor {
         if texts.is_empty() {
             return Ok(Vec::new());
         }
-        
+
         debug!("Processing batch of {} texts", texts.len());
-        
+
         // Progress tracking
         let progress_counter = Arc::new(AtomicUsize::new(0));
         let total = texts.len();
-        
+
         // Step 1: Parallel validation
         self.parallel_validate(&texts)?;
-        
+
         // Step 2: Parallel tokenization using the real tokenizer
         let token_sequences = self.parallel_tokenize_real(model, &texts)?;
-        
+
         // Step 3: Check if we need to chunk the batch based on total token count and n_seq_max
         let total_tokens: usize = token_sequences.iter().map(|seq| seq.len()).sum();
         let max_context = model.max_sequence_length();
         let n_seq_max = model.n_seq_max() as usize;
-        
+
         let embeddings = if total_tokens <= max_context && token_sequences.len() <= n_seq_max {
             // Process all sequences in a single batch
-            debug!("Processing {} sequences with {} total tokens in single batch", 
-                   token_sequences.len(), total_tokens);
-            
+            debug!(
+                "Processing {} sequences with {} total tokens in single batch",
+                token_sequences.len(),
+                total_tokens
+            );
+
             let batch_embeddings = model.process_batch_tokens(token_sequences)?;
-            
+
             // Update progress
             let current = progress_counter.fetch_add(texts.len(), Ordering::Relaxed);
             if let Some(ref callback) = self.progress_callback {
                 callback(current + texts.len(), total);
             }
-            
+
             batch_embeddings
         } else {
             // Need to chunk into smaller batches
-            debug!("Chunking batch: {} total tokens (max {}), {} sequences (max {})", 
-                   total_tokens, max_context, token_sequences.len(), n_seq_max);
-            
+            debug!(
+                "Chunking batch: {} total tokens (max {}), {} sequences (max {})",
+                total_tokens,
+                max_context,
+                token_sequences.len(),
+                n_seq_max
+            );
+
             let mut all_embeddings = Vec::with_capacity(texts.len());
             let mut current_batch = Vec::new();
             let mut current_tokens = 0;
-            
+
             for seq in token_sequences {
                 let seq_len = seq.len();
-                
+
                 // Check if adding this sequence would exceed either limit
-                if !current_batch.is_empty() && 
-                   (current_tokens + seq_len > max_context || current_batch.len() >= n_seq_max) {
+                if !current_batch.is_empty()
+                    && (current_tokens + seq_len > max_context || current_batch.len() >= n_seq_max)
+                {
                     // Process current batch
                     let batch_embeddings = model.process_batch_tokens(current_batch)?;
                     let batch_len = batch_embeddings.len();
                     all_embeddings.extend(batch_embeddings);
-                    
+
                     // Update progress
                     let current = progress_counter.fetch_add(batch_len, Ordering::Relaxed);
                     if let Some(ref callback) = self.progress_callback {
                         callback(current + batch_len, total);
                     }
-                    
+
                     // Start new batch
                     current_batch = vec![seq];
                     current_tokens = seq_len;
@@ -165,24 +174,24 @@ impl BatchProcessor {
                     current_tokens += seq_len;
                 }
             }
-            
+
             // Process remaining batch
             if !current_batch.is_empty() {
                 let batch_embeddings = model.process_batch_tokens(current_batch)?;
                 let batch_len = batch_embeddings.len();
-                
+
                 // Update progress
                 let current = progress_counter.fetch_add(batch_len, Ordering::Relaxed);
                 if let Some(ref callback) = self.progress_callback {
                     callback(current + batch_len, total);
                 }
-                
+
                 all_embeddings.extend(batch_embeddings);
             }
-            
+
             all_embeddings
         };
-        
+
         debug!("Completed batch processing of {} texts", texts.len());
         Ok(embeddings)
     }
@@ -213,23 +222,21 @@ impl BatchProcessor {
     #[instrument(skip(self, texts), fields(count = texts.len()))]
     fn parallel_validate(&self, texts: &[&str]) -> Result<()> {
         debug!("Validating {} texts in parallel", texts.len());
-        
+
         // Parallel validation with error handling
-        texts
-            .par_iter()
-            .try_for_each(|text| {
-                if text.is_empty() {
-                    return Err(Error::InvalidInput {
-                        message: "Cannot process empty text".to_string(),
-                    });
-                }
-                // Could add more validation here (e.g., max length check)
-                Ok(())
-            })?;
-        
+        texts.par_iter().try_for_each(|text| {
+            if text.is_empty() {
+                return Err(Error::InvalidInput {
+                    message: "Cannot process empty text".to_string(),
+                });
+            }
+            // Could add more validation here (e.g., max length check)
+            Ok(())
+        })?;
+
         Ok(())
     }
-    
+
     /// Tokenizes texts using the real model tokenizer.
     ///
     /// Note: Due to !Send constraint on model, tokenization happens sequentially
@@ -245,15 +252,15 @@ impl BatchProcessor {
     /// Returns a vector of tokenized sequences.
     #[instrument(skip(self, model, texts), fields(count = texts.len()))]
     fn parallel_tokenize_real(
-        &self, 
-        model: &EmbeddingModel, 
-        texts: &[&str]
+        &self,
+        model: &EmbeddingModel,
+        texts: &[&str],
     ) -> Result<Vec<Vec<LlamaToken>>> {
         debug!("Starting tokenization of {} texts", texts.len());
-        
+
         let add_bos = model.add_bos_token();
         let max_seq_len = model.max_sequence_length();
-        
+
         // First, validate all texts in parallel
         let validation_results: Result<Vec<_>> = texts
             .par_iter()
@@ -268,13 +275,13 @@ impl BatchProcessor {
             })
             .collect();
         validation_results?;
-        
+
         // Then tokenize sequentially (due to !Send constraint on model)
         let mut results = Vec::with_capacity(texts.len());
         for text in texts {
             // Use real tokenizer from model
             let tokens = model.tokenize(text, add_bos)?;
-            
+
             // Check token limit
             if tokens.len() > max_seq_len {
                 return Err(Error::InvalidInput {
@@ -285,14 +292,13 @@ impl BatchProcessor {
                     ),
                 });
             }
-            
+
             results.push(tokens);
         }
-        
+
         debug!("Completed tokenization");
         Ok(results)
     }
-
 }
 
 /// Builder for creating configured BatchProcessor instances.
@@ -310,19 +316,19 @@ impl BatchProcessorBuilder {
         self.max_batch_size = Some(size);
         self
     }
-    
+
     /// Sets whether to normalize embeddings.
     pub fn with_normalization(mut self, normalize: bool) -> Self {
         self.normalize = normalize;
         self
     }
-    
+
     /// Sets the pooling strategy.
     pub fn with_pooling_strategy(mut self, strategy: PoolingStrategy) -> Self {
         self.pooling_strategy = strategy;
         self
     }
-    
+
     /// Sets the progress callback.
     pub fn with_progress_callback<F>(mut self, callback: F) -> Self
     where
@@ -331,7 +337,7 @@ impl BatchProcessorBuilder {
         self.progress_callback = Some(Arc::new(callback));
         self
     }
-    
+
     /// Builds the BatchProcessor.
     pub fn build(self) -> BatchProcessor {
         BatchProcessor {

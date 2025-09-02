@@ -14,21 +14,21 @@
 
 //! Common test utilities and fixtures
 
-use std::path::PathBuf;
-use std::fs;
-use tempfile::TempDir;
 use embellama::{EngineConfig, PoolingStrategy};
+use std::fs;
+use std::path::PathBuf;
+use tempfile::TempDir;
 
 /// Creates a dummy model file for testing purposes
 pub fn create_dummy_model() -> (TempDir, PathBuf) {
     let dir = TempDir::new().expect("Failed to create temp dir");
     let model_path = dir.path().join("test_model.gguf");
-    
+
     // Create a minimal GGUF file structure (simplified for testing)
     // > NOTE: This is not a valid GGUF file but sufficient for path validation tests
     fs::write(&model_path, b"GGUF\x00\x00\x00\x04dummy_model_content")
         .expect("Failed to write dummy model");
-    
+
     (dir, model_path)
 }
 
@@ -64,12 +64,12 @@ pub fn should_run_model_tests() -> bool {
 pub fn init_test_logger() {
     use std::sync::Once;
     static INIT: Once = Once::new();
-    
+
     INIT.call_once(|| {
         tracing_subscriber::fmt()
             .with_env_filter(
                 tracing_subscriber::EnvFilter::from_default_env()
-                    .add_directive("embellama=debug".parse().unwrap())
+                    .add_directive("embellama=debug".parse().unwrap()),
             )
             .with_test_writer()
             .init();
@@ -85,24 +85,28 @@ pub fn generate_sample_texts(count: usize) -> Vec<String> {
 
 /// Assert that two embedding vectors are approximately equal
 pub fn assert_embeddings_equal(emb1: &[f32], emb2: &[f32], tolerance: f32) {
-    assert_eq!(emb1.len(), emb2.len(), "Embeddings have different dimensions");
-    
+    assert_eq!(
+        emb1.len(),
+        emb2.len(),
+        "Embeddings have different dimensions"
+    );
+
     for (i, (a, b)) in emb1.iter().zip(emb2.iter()).enumerate() {
         let diff = (a - b).abs();
         assert!(
             diff < tolerance,
             "Embedding values differ at index {}: {} vs {} (diff: {})",
-            i, a, b, diff
+            i,
+            a,
+            b,
+            diff
         );
     }
 }
 
 /// Calculate L2 norm of an embedding vector
 pub fn calculate_l2_norm(embedding: &[f32]) -> f32 {
-    embedding.iter()
-        .map(|x| x * x)
-        .sum::<f32>()
-        .sqrt()
+    embedding.iter().map(|x| x * x).sum::<f32>().sqrt()
 }
 
 /// Assert that an embedding is normalized (L2 norm ≈ 1.0)

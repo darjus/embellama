@@ -13,21 +13,19 @@
 // limitations under the License.
 
 //! Property-based tests for embellama
-//! 
+//!
 //! These tests use proptest to verify invariants with real models.
 //! Requires EMBELLAMA_TEST_MODEL to be set to a valid GGUF model file.
 
 use embellama::{EmbeddingEngine, EngineConfig};
+use once_cell::sync::Lazy;
 use proptest::prelude::*;
 use serial_test::serial;
 use std::path::PathBuf;
 use std::sync::{Arc, Mutex};
-use once_cell::sync::Lazy;
 
 // Use Lazy and Arc<Mutex> for safer shared access
-static ENGINE: Lazy<Arc<Mutex<Option<EmbeddingEngine>>>> = Lazy::new(|| {
-    Arc::new(Mutex::new(None))
-});
+static ENGINE: Lazy<Arc<Mutex<Option<EmbeddingEngine>>>> = Lazy::new(|| Arc::new(Mutex::new(None)));
 
 /// Initialize the engine once for all property tests
 fn ensure_engine_initialized() {
@@ -35,31 +33,31 @@ fn ensure_engine_initialized() {
     if engine_guard.is_none() {
         let model_path = std::env::var("EMBELLAMA_TEST_MODEL")
             .expect("EMBELLAMA_TEST_MODEL must be set - run 'just download-test-model' first");
-        
+
         let model_path = PathBuf::from(model_path);
-        assert!(model_path.exists(), 
-            "Model file not found at {:?}. Run 'just download-test-model' to download it.", 
-            model_path);
-        
+        assert!(
+            model_path.exists(),
+            "Model file not found at {:?}. Run 'just download-test-model' to download it.",
+            model_path
+        );
+
         let config = EngineConfig::builder()
             .with_model_path(model_path)
             .with_model_name("proptest-model")
             .with_normalize_embeddings(true)
             .build()
             .expect("Failed to create config");
-        
-        let engine = EmbeddingEngine::new(config)
-            .expect("Failed to create engine");
-        
-        engine.warmup_model(None)
-            .expect("Failed to warm up model");
-        
+
+        let engine = EmbeddingEngine::new(config).expect("Failed to create engine");
+
+        engine.warmup_model(None).expect("Failed to warm up model");
+
         *engine_guard = Some(engine);
     }
 }
 
 /// Get a reference to the engine
-fn with_engine<T, F>(f: F) -> T 
+fn with_engine<T, F>(f: F) -> T
 where
     F: FnOnce(&EmbeddingEngine) -> T,
 {
@@ -70,10 +68,7 @@ where
 
 /// Calculate L2 norm of an embedding
 fn calculate_l2_norm(embedding: &[f32]) -> f32 {
-    embedding.iter()
-        .map(|x| x * x)
-        .sum::<f32>()
-        .sqrt()
+    embedding.iter().map(|x| x * x).sum::<f32>().sqrt()
 }
 
 // Property: Normalized embeddings should have L2 norm ≈ 1.0
@@ -85,15 +80,15 @@ proptest! {
         if text.trim().is_empty() {
             return Ok(());
         }
-        
+
         let embedding = with_engine(|engine| {
             engine.embed(None, &text)
                 .expect("Failed to generate embedding")
         });
-        
+
         let norm = calculate_l2_norm(&embedding);
         // Note: MiniLM doesn't normalize by default, so we check if norm > 0.1
-        prop_assert!(norm > 0.1, 
+        prop_assert!(norm > 0.1,
             "Embedding norm should be non-zero, got {}", norm);
     }
 }
@@ -114,14 +109,14 @@ proptest! {
             });
             embeddings.push(embedding);
         }
-        
+
         if embeddings.is_empty() {
             return Ok(());
         }
-        
+
         let first_dim = embeddings[0].len();
         for (i, embedding) in embeddings.iter().enumerate() {
-            prop_assert_eq!(embedding.len(), first_dim, 
+            prop_assert_eq!(embedding.len(), first_dim,
                 "Embedding {} has different dimension", i);
         }
     }
@@ -132,24 +127,24 @@ proptest! {
     #[test]
     #[serial]
     fn test_batch_order_preservation(texts in prop::collection::vec("[a-zA-Z0-9 ]{1,100}", 2..20)) {
-        
+
         // Filter out empty strings
         let valid_texts: Vec<String> = texts.into_iter()
             .filter(|t| !t.trim().is_empty())
             .collect();
-        
+
         if valid_texts.len() < 2 {
             return Ok(());
         }
-        
+
         let text_refs: Vec<&str> = valid_texts.iter().map(|s| s.as_str()).collect();
-        
+
         // Get batch embeddings
         let batch_embeddings = with_engine(|engine| {
             engine.embed_batch(None, text_refs.clone())
                 .expect("Failed to generate batch embeddings")
         });
-        
+
         // Get individual embeddings
         let mut individual_embeddings = Vec::new();
         for text in &text_refs {
@@ -159,20 +154,20 @@ proptest! {
             });
             individual_embeddings.push(embedding);
         }
-        
+
         prop_assert_eq!(batch_embeddings.len(), individual_embeddings.len());
-        
+
         // Check that batch preserves order
         for (i, (batch_emb, individual_emb)) in batch_embeddings.iter()
             .zip(individual_embeddings.iter())
-            .enumerate() 
+            .enumerate()
         {
-            prop_assert_eq!(batch_emb.len(), individual_emb.len(), 
+            prop_assert_eq!(batch_emb.len(), individual_emb.len(),
                 "Dimension mismatch at index {}", i);
-            
+
             // Allow small numerical differences due to floating point
             for (j, (b, ind)) in batch_emb.iter().zip(individual_emb.iter()).enumerate() {
-                prop_assert!((b - ind).abs() < 0.0001, 
+                prop_assert!((b - ind).abs() < 0.0001,
                     "Embedding mismatch at index {}, position {}", i, j);
             }
         }
@@ -189,7 +184,7 @@ proptest! {
             engine.embed_batch(None, empty)
                 .expect("Failed to process empty batch")
         });
-        
+
         prop_assert!(embeddings.is_empty(), "Empty batch should return empty results");
     }
 }
@@ -199,11 +194,11 @@ proptest! {
     #[test]
     #[serial]
     fn test_deterministic_embeddings(text in "[a-zA-Z0-9 ]{1,200}", repetitions in 2..5) {
-        
+
         if text.trim().is_empty() {
             return Ok(());
         }
-        
+
         let mut embeddings = Vec::new();
         for _ in 0..repetitions {
             let embedding = with_engine(|engine| {
@@ -212,15 +207,15 @@ proptest! {
             });
             embeddings.push(embedding);
         }
-        
+
         // All embeddings should be identical
         let first = &embeddings[0];
         for (i, embedding) in embeddings.iter().enumerate().skip(1) {
-            prop_assert_eq!(embedding.len(), first.len(), 
+            prop_assert_eq!(embedding.len(), first.len(),
                 "Dimension mismatch at repetition {}", i);
-            
+
             for (j, (a, b)) in embedding.iter().zip(first.iter()).enumerate() {
-                prop_assert!((a - b).abs() < 0.0001, 
+                prop_assert!((a - b).abs() < 0.0001,
                     "Non-deterministic result at repetition {}, position {}", i, j);
             }
         }
@@ -241,13 +236,13 @@ proptest! {
             let result = with_engine(|engine| engine.embed(None, &short_text));
             prop_assert!(result.is_ok(), "Failed on short text");
         }
-        
+
         // Should handle medium text
         if !medium_text.trim().is_empty() {
             let result = with_engine(|engine| engine.embed(None, &medium_text));
             prop_assert!(result.is_ok(), "Failed on medium text");
         }
-        
+
         // Should handle long text
         if !long_text.trim().is_empty() {
             let result = with_engine(|engine| engine.embed(None, &long_text));
@@ -266,11 +261,11 @@ proptest! {
         if text.trim().is_empty() {
             return Ok(());
         }
-        
+
         // Should not crash on special characters
         let result = with_engine(|engine| engine.embed(None, &text));
         prop_assert!(result.is_ok(), "Failed on special characters: {}", text);
-        
+
         let embedding = result.unwrap();
         prop_assert!(!embedding.is_empty(), "Empty embedding for special characters");
     }
@@ -287,14 +282,14 @@ proptest! {
     ) {
         // Test mixed unicode text
         let mixed = format!("{} {} {}", english, chinese, emoji);
-        
+
         if mixed.trim().is_empty() {
             return Ok(());
         }
-        
+
         let result = with_engine(|engine| engine.embed(None, &mixed));
         prop_assert!(result.is_ok(), "Failed on unicode text");
-        
+
         let embedding = result.unwrap();
         prop_assert!(!embedding.is_empty(), "Empty embedding for unicode text");
         prop_assert!(embedding.len() > 0, "Invalid embedding dimensions");
@@ -310,12 +305,12 @@ proptest! {
             .map(|i| format!("Text number {}", i))
             .collect();
         let text_refs: Vec<&str> = texts.iter().map(|s| s.as_str()).collect();
-        
+
         let result = with_engine(|engine| engine.embed_batch(None, text_refs));
         prop_assert!(result.is_ok(), "Failed with batch size {}", batch_size);
-        
+
         let embeddings = result.unwrap();
-        prop_assert_eq!(embeddings.len(), batch_size, 
+        prop_assert_eq!(embeddings.len(), batch_size,
             "Batch size mismatch: expected {}, got {}", batch_size, embeddings.len());
     }
 }
@@ -328,18 +323,18 @@ proptest! {
         if text.trim().is_empty() {
             return Ok(());
         }
-        
+
         let embedding = with_engine(|engine| {
             engine.embed(None, &text)
                 .expect("Failed to generate embedding")
         });
-        
+
         for (i, value) in embedding.iter().enumerate() {
-            prop_assert!(value.is_finite(), 
+            prop_assert!(value.is_finite(),
                 "Non-finite value at position {}: {}", i, value);
-            
+
             // Also check reasonable bounds
-            prop_assert!(value.abs() < 100.0, 
+            prop_assert!(value.abs() < 100.0,
                 "Embedding value out of reasonable bounds at position {}: {}", i, value);
         }
     }
@@ -353,10 +348,10 @@ proptest! {
         if base_text.trim().is_empty() {
             return Ok(());
         }
-        
+
         let text1 = base_text.clone();
         let text2 = format!("{} {}", base_text, suffix); // Similar but not identical
-        
+
         let emb1 = with_engine(|engine| {
             engine.embed(None, &text1)
                 .expect("Failed to generate embedding 1")
@@ -365,19 +360,19 @@ proptest! {
             engine.embed(None, &text2)
                 .expect("Failed to generate embedding 2")
         });
-        
+
         // Calculate cosine similarity
         let dot_product: f32 = emb1.iter().zip(emb2.iter())
             .map(|(a, b)| a * b)
             .sum();
-        
+
         let norm1 = calculate_l2_norm(&emb1);
         let norm2 = calculate_l2_norm(&emb2);
-        
+
         let cosine_similarity = dot_product / (norm1 * norm2);
-        
+
         // Similar texts should have cosine similarity > 0.5
-        prop_assert!(cosine_similarity > 0.5, 
+        prop_assert!(cosine_similarity > 0.5,
             "Low similarity {} for related texts", cosine_similarity);
     }
 }

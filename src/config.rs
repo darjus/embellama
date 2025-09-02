@@ -22,37 +22,37 @@ use std::path::{Path, PathBuf};
 pub struct ModelConfig {
     /// Path to the GGUF model file
     pub model_path: PathBuf,
-    
+
     /// Name identifier for the model
     pub model_name: String,
-    
+
     /// Context size (number of tokens)
     pub n_ctx: Option<u32>,
-    
+
     /// Number of threads for CPU inference
     pub n_threads: Option<usize>,
-    
+
     /// Number of GPU layers to offload (0 = CPU only)
     pub n_gpu_layers: Option<u32>,
-    
+
     /// Use memory mapping for model loading
     /// NOTE: This setting is not yet supported by llama-cpp-2 API
     pub use_mmap: bool,
-    
+
     /// Use memory locking to prevent swapping
     /// NOTE: This setting is not yet supported by llama-cpp-2 API
     pub use_mlock: bool,
-    
+
     /// Enable embedding normalization
     pub normalize_embeddings: bool,
-    
+
     /// Pooling strategy for embeddings
     pub pooling_strategy: PoolingStrategy,
-    
+
     /// Whether to add BOS (beginning-of-sequence) token during tokenization
     /// None = auto-detect based on model type (encoder models like BERT/E5/BGE/GTE = false, decoder models = true)
     pub add_bos_token: Option<bool>,
-    
+
     /// Maximum number of sequences for batch processing
     /// Default: 1, max: 64 (llama.cpp limit)
     pub n_seq_max: Option<u32>,
@@ -98,7 +98,9 @@ impl ModelConfig {
                 return Err(Error::config("n_seq_max must be greater than 0"));
             }
             if n_seq > 64 {
-                return Err(Error::config("n_seq_max cannot exceed 64 (llama.cpp limit)"));
+                return Err(Error::config(
+                    "n_seq_max cannot exceed 64 (llama.cpp limit)",
+                ));
             }
         }
 
@@ -190,14 +192,14 @@ impl ModelConfigBuilder {
         self.config.pooling_strategy = strategy;
         self
     }
-    
+
     /// Set whether to add BOS token during tokenization
     /// None = auto-detect based on model type
     pub fn with_add_bos_token(mut self, add_bos: Option<bool>) -> Self {
         self.config.add_bos_token = add_bos;
         self
     }
-    
+
     /// Set the maximum number of sequences for batch processing
     /// Default: 1, max: 64 (llama.cpp limit)
     pub fn with_n_seq_max(mut self, n_seq_max: u32) -> Self {
@@ -223,40 +225,40 @@ impl Default for ModelConfigBuilder {
 pub struct EngineConfig {
     /// Path to the GGUF model file
     pub model_path: PathBuf,
-    
+
     /// Name identifier for the model
     pub model_name: String,
-    
+
     /// Context size for the model (defaults to model's default if None)
     pub context_size: Option<usize>,
-    
+
     /// Number of threads to use for CPU inference (defaults to number of CPU cores)
     pub n_threads: Option<usize>,
-    
+
     /// Whether to use GPU acceleration if available
     pub use_gpu: bool,
-    
+
     /// Number of GPU layers to offload (0 = CPU only)
     pub n_gpu_layers: Option<u32>,
-    
+
     /// Batch size for processing
     pub batch_size: Option<usize>,
-    
+
     /// Enable embedding normalization
     pub normalize_embeddings: bool,
-    
+
     /// Pooling strategy for embeddings
     pub pooling_strategy: PoolingStrategy,
-    
+
     /// Maximum number of tokens per input
     pub max_tokens: Option<usize>,
-    
+
     /// Memory limit in MB (None for unlimited)
     pub memory_limit_mb: Option<usize>,
-    
+
     /// Enable verbose logging
     pub verbose: bool,
-    
+
     /// Seed for reproducibility (None for random)
     pub seed: Option<u32>,
 
@@ -270,11 +272,11 @@ pub struct EngineConfig {
     /// Use memory locking to prevent swapping
     /// NOTE: This setting is not yet supported by llama-cpp-2 API
     pub use_mlock: bool,
-    
+
     /// Whether to add BOS (beginning-of-sequence) token during tokenization
     /// None = auto-detect based on model type
     pub add_bos_token: Option<bool>,
-    
+
     /// Maximum number of sequences for batch processing
     /// Default: 1, max: 64 (llama.cpp limit)
     pub n_seq_max: Option<u32>,
@@ -370,13 +372,15 @@ impl EngineConfig {
                 return Err(Error::config("Max tokens must be greater than 0"));
             }
         }
-        
+
         if let Some(n_seq) = self.n_seq_max {
             if n_seq == 0 {
                 return Err(Error::config("n_seq_max must be greater than 0"));
             }
             if n_seq > 64 {
-                return Err(Error::config("n_seq_max cannot exceed 64 (llama.cpp limit)"));
+                return Err(Error::config(
+                    "n_seq_max cannot exceed 64 (llama.cpp limit)",
+                ));
             }
         }
 
@@ -396,23 +400,23 @@ impl EngineConfig {
         }
 
         if let Ok(size) = env::var("EMBELLAMA_CONTEXT_SIZE") {
-            let size = size.parse().map_err(|_| {
-                Error::config("Invalid EMBELLAMA_CONTEXT_SIZE value")
-            })?;
+            let size = size
+                .parse()
+                .map_err(|_| Error::config("Invalid EMBELLAMA_CONTEXT_SIZE value"))?;
             builder = builder.with_context_size(size);
         }
 
         if let Ok(threads) = env::var("EMBELLAMA_N_THREADS") {
-            let threads = threads.parse().map_err(|_| {
-                Error::config("Invalid EMBELLAMA_N_THREADS value")
-            })?;
+            let threads = threads
+                .parse()
+                .map_err(|_| Error::config("Invalid EMBELLAMA_N_THREADS value"))?;
             builder = builder.with_n_threads(threads);
         }
 
         if let Ok(use_gpu) = env::var("EMBELLAMA_USE_GPU") {
-            let use_gpu = use_gpu.parse().map_err(|_| {
-                Error::config("Invalid EMBELLAMA_USE_GPU value")
-            })?;
+            let use_gpu = use_gpu
+                .parse()
+                .map_err(|_| Error::config("Invalid EMBELLAMA_USE_GPU value"))?;
             builder = builder.with_use_gpu(use_gpu);
         }
 
@@ -545,14 +549,14 @@ impl EngineConfigBuilder {
         self.config.use_mlock = use_mlock;
         self
     }
-    
+
     /// Set whether to add BOS token during tokenization
     /// None = auto-detect based on model type
     pub fn with_add_bos_token(mut self, add_bos: Option<bool>) -> Self {
         self.config.add_bos_token = add_bos;
         self
     }
-    
+
     /// Set the maximum number of sequences for batch processing
     /// Default: 1, max: 64 (llama.cpp limit)
     pub fn with_n_seq_max(mut self, n_seq_max: u32) -> Self {
@@ -603,12 +607,13 @@ mod tests {
 
     #[test]
     fn test_model_config_validation() {
-        let result = ModelConfig::builder()
-            .with_model_name("test")
-            .build();
+        let result = ModelConfig::builder().with_model_name("test").build();
 
         assert!(result.is_err());
-        assert!(matches!(result.unwrap_err(), Error::ConfigurationError { .. }));
+        assert!(matches!(
+            result.unwrap_err(),
+            Error::ConfigurationError { .. }
+        ));
 
         let dir = tempdir().unwrap();
         let model_path = dir.path().join("model.gguf");
@@ -667,12 +672,13 @@ mod tests {
 
     #[test]
     fn test_config_validation_empty_path() {
-        let result = EngineConfig::builder()
-            .with_model_name("test")
-            .build();
+        let result = EngineConfig::builder().with_model_name("test").build();
 
         assert!(result.is_err());
-        assert!(matches!(result.unwrap_err(), Error::ConfigurationError { .. }));
+        assert!(matches!(
+            result.unwrap_err(),
+            Error::ConfigurationError { .. }
+        ));
     }
 
     #[test]
@@ -691,9 +697,7 @@ mod tests {
         let model_path = dir.path().join("model.gguf");
         fs::write(&model_path, b"dummy").unwrap();
 
-        let result = EngineConfig::builder()
-            .with_model_path(model_path)
-            .build();
+        let result = EngineConfig::builder().with_model_path(model_path).build();
 
         assert!(result.is_err());
     }
@@ -827,11 +831,11 @@ mod tests {
     #[test]
     fn test_model_config_path_types() {
         let dir = tempdir().unwrap();
-        
+
         // Test with PathBuf
         let model_path_buf = dir.path().join("model1.gguf");
         fs::write(&model_path_buf, b"dummy").unwrap();
-        
+
         let config = ModelConfig::builder()
             .with_model_path(&model_path_buf)
             .with_model_name("test1")
@@ -842,7 +846,7 @@ mod tests {
         // Test with &Path
         let model_path = dir.path().join("model2.gguf");
         fs::write(&model_path, b"dummy").unwrap();
-        
+
         let config = ModelConfig::builder()
             .with_model_path(model_path.as_path())
             .with_model_name("test2")
@@ -853,7 +857,7 @@ mod tests {
         // Test with String
         let model_path_str = dir.path().join("model3.gguf");
         fs::write(&model_path_str, b"dummy").unwrap();
-        
+
         let config = ModelConfig::builder()
             .with_model_path(model_path_str.to_str().unwrap())
             .with_model_name("test3")

@@ -42,24 +42,27 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
     let config = EngineConfig::builder()
         .with_model_path(model_path)
         .with_model_name("batch-model")
-        .with_batch_size(64)  // Optimize batch size
+        .with_batch_size(64) // Optimize batch size
         .with_normalize_embeddings(true)
-        .with_n_threads(num_cpus::get())  // Use all CPU cores
+        .with_n_threads(num_cpus::get()) // Use all CPU cores
         .build()?;
 
     // Create engine
     let engine = EmbeddingEngine::new(config)?;
-    
+
     // Warmup
     println!("Warming up model...");
     engine.warmup_model(None)?;
 
     // Test different batch sizes
     let batch_sizes = vec![1, 5, 10, 25, 50, 100, 200];
-    
+
     println!("\nBatch Size Performance Comparison:");
     println!("-----------------------------------");
-    println!("{:<12} {:>12} {:>12} {:>15}", "Batch Size", "Total Time", "Per Item", "Items/Second");
+    println!(
+        "{:<12} {:>12} {:>12} {:>15}",
+        "Batch Size", "Total Time", "Per Item", "Items/Second"
+    );
     println!("{:-<52}", "");
 
     for &size in &batch_sizes {
@@ -79,8 +82,10 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
         let per_item_ms = total_ms as f64 / size as f64;
         let items_per_sec = (size as f64 * 1000.0) / total_ms as f64;
 
-        println!("{:<12} {:>11}ms {:>11.2}ms {:>14.1}/s", 
-            size, total_ms, per_item_ms, items_per_sec);
+        println!(
+            "{:<12} {:>11}ms {:>11.2}ms {:>14.1}/s",
+            size, total_ms, per_item_ms, items_per_sec
+        );
 
         // Verify results
         assert_eq!(embeddings.len(), size);
@@ -92,7 +97,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
     // Compare sequential vs batch processing
     println!("\n\nSequential vs Batch Comparison (50 texts):");
     println!("-------------------------------------------");
-    
+
     let test_texts: Vec<String> = (0..50)
         .map(|i| format!("Comparison test document {}", i))
         .collect();
@@ -113,8 +118,10 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
 
     println!("Sequential: {:?}", sequential_time);
     println!("Batch:      {:?}", batch_time);
-    println!("Speedup:    {:.2}x", 
-        sequential_time.as_secs_f64() / batch_time.as_secs_f64());
+    println!(
+        "Speedup:    {:.2}x",
+        sequential_time.as_secs_f64() / batch_time.as_secs_f64()
+    );
 
     // Verify results are identical
     assert_eq!(sequential_embeddings.len(), batch_embeddings.len());
@@ -126,7 +133,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
     // Large batch stress test
     println!("\n\nLarge Batch Stress Test:");
     println!("------------------------");
-    
+
     let large_batch_sizes = vec![500, 1000];
     for &size in &large_batch_sizes {
         let texts: Vec<String> = (0..size)
@@ -138,9 +145,12 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
         let embeddings = engine.embed_batch(None, text_refs)?;
         let duration = start.elapsed();
 
-        println!("Processed {} texts in {:?} ({:.1} texts/sec)",
-            size, duration,
-            size as f64 / duration.as_secs_f64());
+        println!(
+            "Processed {} texts in {:?} ({:.1} texts/sec)",
+            size,
+            duration,
+            size as f64 / duration.as_secs_f64()
+        );
 
         assert_eq!(embeddings.len(), size);
     }
