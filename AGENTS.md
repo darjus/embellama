@@ -1,5 +1,7 @@
 # Agent Guidelines for Embellama
 
+> **Note**: This document contains agent-specific guidelines and architectural constraints. For general development setup, testing, and contribution guidelines, see [DEVELOPMENT.md](DEVELOPMENT.md).
+
 ## Critical Threading Constraints
 
 **IMPORTANT**: The `LlamaContext` from `llama-cpp-2` is `!Send` and `!Sync`, meaning it cannot be shared between threads. This fundamental constraint drives the entire architecture.
@@ -459,26 +461,17 @@ pub fn embed(&self, model_name: &str, text: &str) -> Result<Vec<f32>, EmbellamaE
 3. Document error conditions clearly
 4. Keep internal documentation focused and technical
 5. Update ARCHITECTURE.md for significant changes
+6. Development setup and guidelines belong in DEVELOPMENT.md
 
 ## Development Workflow
 
-### Quick Development Loop with `just`
-```bash
-# View all available commands
-just
+**Note**: For detailed development setup, testing procedures, and `just` command reference, see [DEVELOPMENT.md](DEVELOPMENT.md).
 
-# Quick development cycle
+### Quick Development Loop
+```bash
 just dev        # Run fix, fmt, clippy, and unit tests
 just test       # Run all test suites
-just bench-quick # Quick benchmark validation
-
-# Pre-commit validation
 just pre-commit # Full validation before committing
-
-# Model management
-just download-test-model   # Get MiniLM for tests
-just download-bench-model  # Get Jina for benchmarks
-just models-status        # Check cached models
 ```
 
 ### Standard Workflow

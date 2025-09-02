@@ -269,82 +269,7 @@ EMBELLAMA_BENCH_MODEL=/path/to/model.gguf cargo bench
 
 ## Development
 
-This project uses [just](https://github.com/casey/just) for task automation. 
-
-### Available Commands
-
-```bash
-just               # Show all available commands
-just test          # Run all tests (unit + integration + concurrency)
-just test-unit     # Run unit tests only
-just test-integration # Run integration tests with real model
-just test-concurrency # Run concurrency tests
-just bench         # Run full benchmarks
-just bench-quick   # Run quick benchmark subset
-just dev           # Run fix, fmt, clippy, and unit tests
-just pre-commit    # Run all checks before committing
-just clean-all     # Clean build artifacts and models
-```
-
-### Testing
-
-The project includes comprehensive test suites:
-
-#### Unit Tests
-```bash
-just test-unit
-```
-
-#### Integration Tests
-Tests with real GGUF models (downloads MiniLM automatically):
-```bash
-just test-integration
-```
-
-#### Concurrency Tests
-Tests thread safety and parallel processing:
-```bash
-just test-concurrency
-```
-
-#### Testing Considerations
-
-**Important**: Integration tests use the `serial_test` crate to ensure tests run sequentially. This is necessary because:
-- The `LlamaBackend` can only be initialized once per process
-- Each `EmbeddingEngine` owns its backend instance
-- Tests must run serially to avoid backend initialization conflicts
-
-When writing tests that create multiple engines, use a single engine with `load_model()` for different configurations:
-
-```rust
-#[test]
-#[serial]  // Required for all integration tests
-fn test_multiple_configurations() {
-    let mut engine = EmbeddingEngine::new(initial_config)?;
-    
-    // Load additional models instead of creating new engines
-    engine.load_model(config2)?;
-    engine.load_model(config3)?;
-}
-```
-
-### Model Management
-
-Test models are automatically downloaded and cached:
-- **Test model** (MiniLM-L6-v2): ~15MB, for integration tests
-- **Benchmark model** (Jina Embeddings v2): ~110MB, for performance testing
-
-```bash
-just download-test-model   # Download test model
-just download-bench-model  # Download benchmark model
-just models-status        # Check cached models
-```
-
-### Environment Variables
-
-- `EMBELLAMA_TEST_MODEL`: Path to test model (auto-set by justfile)
-- `EMBELLAMA_BENCH_MODEL`: Path to benchmark model (auto-set by justfile)
-- `EMBELLAMA_MODEL`: Path to model for examples
+For development setup, testing, and contributing guidelines, please see [DEVELOPMENT.md](DEVELOPMENT.md).
 
 ## Examples
 
@@ -362,62 +287,13 @@ Run examples with:
 cargo run --example simple
 ```
 
-## Architecture
-
-### Backend and Engine Management
-
-The library manages the LlamaBackend lifecycle:
-
-- Each `EmbeddingEngine` owns its `LlamaBackend` instance
-- Backend is initialized when the engine is created
-- Backend is dropped when the engine is dropped
-- Singleton pattern available for shared engine access
-
-### Model Management
-
-The library uses a thread-local architecture due to llama-cpp's `!Send` constraint:
-
-- Each thread maintains its own model instance
-- Models cannot be shared between threads
-- Use message passing for concurrent operations
-
-### Batch Processing Pipeline
-
-1. **Parallel Pre-processing**: Tokenization in parallel using Rayon
-2. **Sequential Inference**: Model inference on single thread
-3. **Parallel Post-processing**: Normalization and formatting in parallel
-
-## Error Handling
-
-The library provides comprehensive error handling:
-
-```rust
-use embellama::Error;
-
-match engine.embed(None, text) {
-    Ok(embedding) => process_embedding(embedding),
-    Err(Error::ModelNotFound { name }) => {
-        println!("Model {} not found", name);
-    }
-    Err(Error::InvalidInput { message }) => {
-        println!("Invalid input: {}", message);
-    }
-    Err(e) if e.is_retryable() => {
-        // Retry logic for transient errors
-    }
-    Err(e) => {
-        eprintln!("Error: {}", e);
-    }
-}
-```
-
 ## License
 
 Licensed under the Apache License, Version 2.0. See [LICENSE](LICENSE) for details.
 
 ## Contributing
 
-Contributions are welcome! Please read our contributing guidelines before submitting PRs.
+Contributions are welcome! Please see [DEVELOPMENT.md](DEVELOPMENT.md) for development setup and contribution guidelines.
 
 ## Support
 
