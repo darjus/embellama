@@ -75,6 +75,10 @@ mod engine;
 /// Batch processing module
 mod batch;
 
+/// Server module (feature-gated)
+#[cfg(feature = "server")]
+pub mod server;
+
 // Re-export main types
 pub use batch::{BatchProcessor, BatchProcessorBuilder};
 pub use config::{

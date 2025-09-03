@@ -388,11 +388,11 @@ serde = { version = "1.0", features = ["derive"] }
 rayon = "1.8"  # For library batch processing only
 
 # Server-only dependencies
-axum = { version = "0.7", optional = true }
+axum = { version = "0.8", optional = true }
 tokio = { version = "1.35", features = ["full"], optional = true }
 clap = { version = "4.4", features = ["derive"], optional = true }
 tower = { version = "0.4", optional = true }
-tower-http = { version = "0.5", features = ["cors", "trace"], optional = true }
+tower-http = { version = "0.6", features = ["cors", "trace"], optional = true }
 
 [features]
 default = []

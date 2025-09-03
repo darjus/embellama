@@ -17,52 +17,56 @@ This document outlines the phased implementation plan for the `embellama` server
 Set up the basic server infrastructure with Axum and establish the project structure.
 
 ### Tasks
-- [ ] Configure server dependencies in `Cargo.toml`
-  - [ ] Add server feature flag configuration
-  - [ ] Add `axum = { version = "0.7", optional = true }`
-  - [ ] Add `tokio = { version = "1.35", features = ["full"], optional = true }`
-  - [ ] Add `clap = { version = "4.4", features = ["derive"], optional = true }`
-  - [ ] Add `tower = { version = "0.4", optional = true }`
-  - [ ] Add `tower-http = { version = "0.5", features = ["cors", "trace"], optional = true }`
-  - [ ] Configure binary target with required features
+- [x] Configure server dependencies in `Cargo.toml`
+  - [x] Add server feature flag configuration
+  - [x] Add `axum = { version = "0.8", optional = true }`
+  - [x] Add `tokio = { version = "1.35", features = ["full"], optional = true }` 
+  - [x] Add `clap = { version = "4.4", features = ["derive"], optional = true }`
+  - [x] Add `tower = { version = "0.4", optional = true }` > NOTE: Updated to 0.5 for compatibility
+  - [x] Add `tower-http = { version = "0.6", features = ["cors", "trace"], optional = true }`
+  - [x] Add `uuid = { version = "1.11", features = ["v4", "serde"], optional = true }`
+  - [x] Configure binary target with required features
   
-- [ ] Create server module structure
-  - [ ] Create `src/server/mod.rs` with submodule declarations
-  - [ ] Create `src/server/worker.rs` for worker thread implementation
-  - [ ] Create `src/server/dispatcher.rs` for request routing
-  - [ ] Create `src/server/channel.rs` for message types
-  - [ ] Create `src/server/state.rs` for application state
-  - [ ] Create `src/bin/server.rs` for server binary
+- [x] Create server module structure
+  - [x] Create `src/server/mod.rs` with submodule declarations
+  - [x] Create `src/server/worker.rs` for worker thread implementation (stub for Phase 2)
+  - [x] Create `src/server/dispatcher.rs` for request routing (stub for Phase 2)
+  - [x] Create `src/server/channel.rs` for message types
+  - [x] Create `src/server/state.rs` for application state
+  - [x] Create `src/bin/server.rs` for server binary
   
-- [ ] Implement CLI argument parsing (`src/bin/server.rs`)
-  - [ ] Define `Args` struct with `clap` derive
-  - [ ] Add arguments:
-    - [ ] `--model-path` - Path to GGUF model file
-    - [ ] `--model-name` - Model identifier for API
-    - [ ] `--host` - Bind address (default: 127.0.0.1)
-    - [ ] `--port` - Server port (default: 8080)
-    - [ ] `--workers` - Number of worker threads
-    - [ ] `--queue-size` - Max pending requests per worker
-  - [ ] Implement argument validation
+- [x] Implement CLI argument parsing (`src/bin/server.rs`)
+  - [x] Define `Args` struct with `clap` derive
+  - [x] Add arguments:
+    - [x] `--model-path` - Path to GGUF model file
+    - [x] `--model-name` - Model identifier for API
+    - [x] `--host` - Bind address (default: 127.0.0.1)
+    - [x] `--port` - Server port (default: 8080)
+    - [x] `--workers` - Number of worker threads
+    - [x] `--queue-size` - Max pending requests per worker
+    - [x] `--log-level` - Log level configuration
+  - [x] Implement argument validation
+  - [x] Support environment variables for all arguments
   
-- [ ] Set up basic Axum application
-  - [ ] Create `Router` with basic routes
-  - [ ] Add `/health` endpoint
-  - [ ] Configure middleware (CORS, tracing)
-  - [ ] Set up graceful shutdown
-  - [ ] Implement server binding and listening
+- [x] Set up basic Axum application
+  - [x] Create `Router` with basic routes
+  - [x] Add `/health` endpoint
+  - [x] Configure middleware (CORS, tracing)
+  - [x] Set up graceful shutdown
+  - [x] Implement server binding and listening
+  > BUG: Fixed layer ordering issue - TraceLayer must come before CorsLayer
   
-- [ ] Configure logging for server
-  - [ ] Set up `tracing_subscriber` with env filter
-  - [ ] Add request/response logging middleware
-  - [ ] Configure structured logging output
-  - [ ] Add correlation IDs for requests
+- [x] Configure logging for server
+  - [x] Set up `tracing_subscriber` with env filter
+  - [x] Add request/response logging middleware
+  - [x] Configure structured logging output
+  - [x] Add correlation IDs for requests (using UUID v4)
 
 ### Success Criteria
-- [ ] Server starts with `cargo run --features server --bin embellama-server`
-- [ ] `/health` endpoint returns 200 OK
-- [ ] CLI arguments are parsed correctly
-- [ ] Logging produces structured output
+- [x] Server starts with `cargo run --features server --bin embellama-server`
+- [x] `/health` endpoint returns 200 OK
+- [x] CLI arguments are parsed correctly
+- [x] Logging produces structured output
 
 ### Dependencies
 - Core library phases 1-3 (available for import)
