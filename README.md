@@ -1,5 +1,10 @@
 # Embellama
 
+[![Crates.io](https://img.shields.io/crates/v/embellama.svg)](https://crates.io/crates/embellama)
+[![Documentation](https://docs.rs/embellama/badge.svg)](https://docs.rs/embellama)
+[![License](https://img.shields.io/crates/l/embellama.svg)](https://github.com/darjus/embellama/blob/master/LICENSE)
+[![CI](https://github.com/darjus/embellama/actions/workflows/ci.yml/badge.svg)](https://github.com/darjus/embellama/actions/workflows/ci.yml)
+
 High-performance Rust library for generating text embeddings using llama-cpp.
 
 ## Features
@@ -37,17 +42,21 @@ let embeddings = engine.embed_batch(None, texts)?;
 
 ### Singleton Pattern (Advanced)
 
-The engine can optionally use a singleton pattern for shared access:
+The engine can optionally use a singleton pattern for shared access across your application. The singleton methods return `Arc<Mutex<EmbeddingEngine>>` for thread-safe access:
 
 ```rust
-use std::sync::{Arc, Mutex};
-
-// Get or initialize singleton instance
+// Get or initialize singleton instance (returns Arc<Mutex<EmbeddingEngine>>)
 let engine = EmbeddingEngine::get_or_init(config)?;
 
-// Access from multiple places
+// Access the singleton from anywhere in your application
 let engine_clone = EmbeddingEngine::instance()
     .expect("Engine not initialized");
+
+// Use the engine (requires locking the mutex)
+let embedding = {
+    let engine_guard = engine.lock().unwrap();
+    engine_guard.embed(None, "text")?
+};
 ```
 
 ## Tested Models
@@ -155,20 +164,48 @@ The library is designed with these constraints in mind:
 - Use thread-local storage for model instances
 - Batch processing uses parallel pre/post-processing with sequential inference
 
-Example of thread-safe usage:
+Example of thread-safe usage with regular (non-singleton) engine:
 
 ```rust
-use std::sync::Arc;
 use std::thread;
 
-let engine = Arc::new(EmbeddingEngine::new(config)?);
+// Each thread needs its own engine instance due to llama-cpp constraints
+let handles: Vec<_> = (0..4)
+    .map(|i| {
+        let config = config.clone(); // Clone config for each thread
+        thread::spawn(move || {
+            // Create engine instance in each thread
+            let engine = EmbeddingEngine::new(config)?;
+            let text = format!("Thread {} text", i);
+            let embedding = engine.embed(None, &text)?;
+            Ok::<_, embellama::Error>(embedding)
+        })
+    })
+    .collect();
+
+for handle in handles {
+    let embedding = handle.join().unwrap()?;
+    // Process embedding
+}
+```
+
+Or using the singleton pattern for shared access:
+
+```rust
+use std::thread;
+
+// Initialize singleton once
+let engine = EmbeddingEngine::get_or_init(config)?;
 
 let handles: Vec<_> = (0..4)
     .map(|i| {
-        let engine = engine.clone();
+        let engine = engine.clone(); // Clone Arc<Mutex<>>
         thread::spawn(move || {
             let text = format!("Thread {} text", i);
-            let embedding = engine.embed(None, &text)?;
+            let embedding = {
+                let engine_guard = engine.lock().unwrap();
+                engine_guard.embed(None, &text)?
+            };
             Ok::<_, embellama::Error>(embedding)
         })
     })

@@ -19,7 +19,6 @@
 
 use crate::config::{ModelConfig, PoolingStrategy};
 use crate::error::{Error, Result};
-use llama_cpp_2::LogOptions;
 use llama_cpp_2::context::LlamaContext;
 use llama_cpp_2::{
     context::params::LlamaContextParams,

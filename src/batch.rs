@@ -365,6 +365,7 @@ pub mod utils {
     /// # Returns
     ///
     /// Returns the recommended batch size.
+    #[allow(dead_code)]
     pub fn calculate_optimal_batch_size(
         _model_size_mb: usize,
         _embedding_dim: usize,
@@ -384,6 +385,7 @@ pub mod utils {
     /// # Returns
     ///
     /// Returns an iterator over chunks.
+    #[allow(dead_code)]
     pub fn chunk_texts<'a>(
         texts: &'a [&'a str],
         chunk_size: usize,
