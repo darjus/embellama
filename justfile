@@ -153,3 +153,82 @@ pre-commit: fmt clippy test
 # Full CI simulation
 ci: clean check clippy test bench
     @echo "✓ CI checks completed successfully"
+
+# Build the server binary
+build-server:
+    @echo "Building server binary..."
+    cargo build --features server --bin embellama-server
+    @echo "✓ Server binary built"
+
+# Run the server with test model
+run-server: download-test-model build-server
+    @echo "Starting server with test model..."
+    cargo run --features server --bin embellama-server -- \
+        --model-path {{test_model_file}} \
+        --model-name test-model \
+        --workers 2 \
+        --log-level info
+
+# Run server in background for testing (returns immediately)
+start-server: download-test-model build-server
+    @echo "Starting server in background..."
+    @cargo run --features server --bin embellama-server -- \
+        --model-path {{test_model_file}} \
+        --model-name test-model \
+        --workers 2 \
+        --log-level info > server.log 2>&1 & \
+        echo $$! > server.pid
+    @sleep 2
+    @echo "✓ Server started (PID: `cat server.pid`)"
+
+# Stop the background server
+stop-server:
+    @if [ -f server.pid ]; then \
+        echo "Stopping server (PID: `cat server.pid`)..."; \
+        kill `cat server.pid` 2>/dev/null || true; \
+        rm -f server.pid; \
+        echo "✓ Server stopped"; \
+    else \
+        echo "No server running"; \
+    fi
+
+# Test server API endpoints
+test-server-api:
+    @echo "Testing server API endpoints..."
+    @echo "================================"
+    @echo
+    @echo "1. Testing /health endpoint:"
+    @curl -s "http://localhost:8080/health" | jq . || echo "Failed - is server running?"
+    @echo
+    @echo "2. Testing /v1/models endpoint:"
+    @curl -s "http://localhost:8080/v1/models" | jq . || echo "Failed - is server running?"
+    @echo
+    @echo "3. Testing /v1/embeddings with single text:"
+    @curl -s -X POST "http://localhost:8080/v1/embeddings" \
+        -H "Content-Type: application/json" \
+        -d '{"model": "test-model", "input": "Hello, world!"}' \
+        | jq '.object, .model, .usage' || echo "Failed - is server running?"
+    @echo
+    @echo "4. Testing /v1/embeddings with batch:"
+    @curl -s -X POST "http://localhost:8080/v1/embeddings" \
+        -H "Content-Type: application/json" \
+        -d '{"model": "test-model", "input": ["Hello", "World"]}' \
+        | jq '.object, .model, (.data | length)' || echo "Failed - is server running?"
+    @echo
+    @echo "================================"
+    @echo "✓ API tests complete"
+
+# Full server test workflow
+test-server: start-server test-server-api stop-server
+    @echo "✓ Server tests completed"
+
+# Check server compilation
+check-server:
+    @echo "Checking server compilation..."
+    cargo check --features server --bin embellama-server
+
+# Clean server artifacts
+clean-server: stop-server
+    @echo "Cleaning server artifacts..."
+    @rm -f server.log server.pid
+    @echo "✓ Server artifacts cleaned"

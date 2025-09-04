@@ -161,7 +161,9 @@ fn build_router(state: AppState) -> axum::Router {
     // Build router with routes and middleware
     Router::new()
         .route("/health", get(health_handler))
-        // Phase 3: Add /v1/embeddings and other routes here
+        // OpenAI-compatible API routes
+        .route("/v1/embeddings", axum::routing::post(embellama::server::handlers::embeddings_handler))
+        .route("/v1/models", get(embellama::server::handlers::list_models_handler))
         .layer(
             tower::ServiceBuilder::new()
                 // Add tracing/logging middleware

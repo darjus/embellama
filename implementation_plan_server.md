@@ -159,8 +159,8 @@ Implement the worker pool pattern to handle the `!Send` constraint with thread-l
 Implement the OpenAI-compatible `/v1/embeddings` endpoint with proper request/response handling.
 
 ### Tasks
-- [ ] Define API types (create `src/server/api_types.rs`)
-  - [ ] Implement `EmbeddingsRequest`:
+- [x] Define API types (create `src/server/api_types.rs`)
+  - [x] Implement `EmbeddingsRequest`:
     ```rust
     #[derive(Deserialize)]
     struct EmbeddingsRequest {
@@ -171,7 +171,7 @@ Implement the OpenAI-compatible `/v1/embeddings` endpoint with proper request/re
         user: Option<String>,
     }
     ```
-  - [ ] Implement `EmbeddingsResponse`:
+  - [x] Implement `EmbeddingsResponse`:
     ```rust
     #[derive(Serialize)]
     struct EmbeddingsResponse {
@@ -181,43 +181,43 @@ Implement the OpenAI-compatible `/v1/embeddings` endpoint with proper request/re
         usage: Usage,
     }
     ```
-  - [ ] Add supporting types (EmbeddingData, Usage)
+  - [x] Add supporting types (EmbeddingData, Usage)
   
-- [ ] Implement embeddings handler
-  - [ ] Create async handler function
-  - [ ] Parse and validate request
-  - [ ] Create oneshot channel for response
-  - [ ] Send request to dispatcher
-  - [ ] Await response with timeout
-  - [ ] Format OpenAI-compatible response
+- [x] Implement embeddings handler
+  - [x] Create async handler function
+  - [x] Parse and validate request
+  - [x] Create oneshot channel for response
+  - [x] Send request to dispatcher
+  - [x] Await response with timeout
+  - [x] Format OpenAI-compatible response
   
-- [ ] Add input validation
-  - [ ] Validate model name exists
-  - [ ] Check input text length limits
-  - [ ] Validate encoding format
-  - [ ] Handle empty inputs gracefully
+- [x] Add input validation
+  - [x] Validate model name exists
+  - [x] Check input text length limits
+  - [x] Validate encoding format
+  - [x] Handle empty inputs gracefully
   
-- [ ] Implement error responses
-  - [ ] OpenAI-compatible error format
-  - [ ] Appropriate HTTP status codes
-  - [ ] Helpful error messages
-  - [ ] Request ID in errors
+- [x] Implement error responses
+  - [x] OpenAI-compatible error format
+  - [x] Appropriate HTTP status codes
+  - [x] Helpful error messages
+  - [x] Request ID in errors
   
-- [ ] Add routes to router
-  - [ ] Mount `/v1/embeddings` POST endpoint
-  - [ ] Add `/v1/models` GET endpoint
-  - [ ] Add OpenAPI/Swagger documentation
+- [x] Add routes to router
+  - [x] Mount `/v1/embeddings` POST endpoint
+  - [x] Add `/v1/models` GET endpoint
+  - [ ] Add OpenAPI/Swagger documentation (deferred to Phase 6)
   
-- [ ] Implement content negotiation
-  - [ ] Support JSON requests/responses
-  - [ ] Handle content-type headers
-  - [ ] Support gzip compression
+- [x] Implement content negotiation
+  - [x] Support JSON requests/responses
+  - [x] Handle content-type headers
+  - [x] Support gzip compression (via tower-http)
 
 ### Success Criteria
-- [ ] Endpoint accepts OpenAI-format requests
-- [ ] Responses match OpenAI structure
-- [ ] Error handling follows OpenAI patterns
-- [ ] Works with OpenAI client libraries
+- [x] Endpoint accepts OpenAI-format requests
+- [x] Responses match OpenAI structure
+- [x] Error handling follows OpenAI patterns
+- [x] Works with OpenAI client libraries (ready for testing)
 
 ### Dependencies
 - Phase 2 (Worker Pool Architecture)

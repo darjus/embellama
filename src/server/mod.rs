@@ -17,8 +17,10 @@
 //! This module provides an OpenAI-compatible REST API for the embedding engine.
 //! It uses a worker pool architecture to handle the `!Send` constraint of LlamaContext.
 
+pub mod api_types;
 pub mod channel;
 pub mod dispatcher;
+pub mod handlers;
 pub mod state;
 pub mod worker;
 
