@@ -14,21 +14,23 @@
 
 //! Worker thread implementation for model inference
 //!
-//! This module implements worker threads that each own a LlamaContext instance.
-//! Workers process embedding requests received via channels.
+//! This module implements worker threads that use the shared EmbeddingEngine.
+//! Each thread will have its own thread-local model instance managed by the engine.
 
-use crate::server::channel::{WorkerRequest, WorkerResponse};
+use crate::server::channel::{TextInput, WorkerRequest, WorkerResponse};
+use crate::EmbeddingEngine;
+use std::sync::{Arc, Mutex};
 use std::thread;
 use std::time::Instant;
 use tokio::sync::mpsc;
-use tracing::{debug, error, info};
+use tracing::{debug, error, info, warn};
 
-/// Worker thread that owns a model instance
+/// Worker thread that processes embedding requests
 pub struct Worker {
     /// Worker identifier
     id: usize,
-    /// Path to the model file
-    model_path: String,
+    /// Shared embedding engine instance
+    engine: Arc<Mutex<EmbeddingEngine>>,
     /// Request receiver channel
     receiver: mpsc::Receiver<WorkerRequest>,
 }
@@ -38,15 +40,19 @@ impl Worker {
     ///
     /// # Arguments
     /// * `id` - Worker identifier
-    /// * `model_path` - Path to the GGUF model file
+    /// * `engine` - Shared embedding engine instance
     /// * `receiver` - Channel to receive requests
     ///
     /// # Returns
     /// A new `Worker` instance
-    pub fn new(id: usize, model_path: String, receiver: mpsc::Receiver<WorkerRequest>) -> Self {
+    pub fn new(
+        id: usize,
+        engine: Arc<Mutex<EmbeddingEngine>>,
+        receiver: mpsc::Receiver<WorkerRequest>,
+    ) -> Self {
         Self {
             id,
-            model_path,
+            engine,
             receiver,
         }
     }
@@ -54,29 +60,62 @@ impl Worker {
     /// Run the worker main loop
     ///
     /// This method runs in a dedicated thread and processes requests
-    /// until the channel is closed.
+    /// until the channel is closed. The first request will trigger
+    /// model loading in this thread via the engine's thread-local storage.
     pub fn run(mut self) {
         info!("Worker {} starting", self.id);
-        
-        // Phase 2: Load model here
-        // For now, just process requests without actual model
         
         // Use blocking recv since we're in a dedicated thread
         while let Some(request) = self.receiver.blocking_recv() {
             debug!("Worker {} processing request {:?}", self.id, request.id);
             let start = Instant::now();
             
-            // Phase 2: Process with actual model
-            // For now, send dummy response
-            let response = WorkerResponse {
-                embeddings: vec![vec![0.0; 384]], // Dummy embedding
-                token_count: 10,
-                processing_time_ms: start.elapsed().as_millis() as u64,
+            // Process the request using the shared engine
+            let result = {
+                let engine = self.engine.lock().unwrap();
+                match &request.input {
+                    TextInput::Single(text) => {
+                        // Generate single embedding
+                        engine.embed(Some(&request.model), text)
+                            .map(|embedding| vec![embedding])
+                    }
+                    TextInput::Batch(texts) => {
+                        // Generate batch embeddings
+                        let text_refs: Vec<&str> = texts.iter().map(|s| s.as_str()).collect();
+                        engine.embed_batch(Some(&request.model), text_refs)
+                    }
+                }
+            };
+            
+            // Create response based on result
+            let response = match result {
+                Ok(embeddings) => {
+                    let token_count = embeddings.iter()
+                        .map(|e| e.len())
+                        .sum::<usize>() / 10; // Rough estimate
+                    
+                    WorkerResponse {
+                        embeddings,
+                        token_count,
+                        processing_time_ms: start.elapsed().as_millis() as u64,
+                    }
+                }
+                Err(e) => {
+                    error!("Worker {} failed to generate embeddings: {}", self.id, e);
+                    // Send empty response on error
+                    // > TODO: Add error field to WorkerResponse for better error handling
+                    WorkerResponse {
+                        embeddings: vec![],
+                        token_count: 0,
+                        processing_time_ms: start.elapsed().as_millis() as u64,
+                    }
+                }
             };
             
             // Send response back
             if let Err(_) = request.response_tx.send(response) {
-                error!("Worker {} failed to send response for request {:?}", self.id, request.id);
+                warn!("Worker {} failed to send response for request {:?} (client may have timed out)", 
+                    self.id, request.id);
             }
         }
         
@@ -87,18 +126,18 @@ impl Worker {
     ///
     /// # Arguments
     /// * `id` - Worker identifier  
-    /// * `model_path` - Path to the GGUF model file
+    /// * `engine` - Shared embedding engine instance
     /// * `receiver` - Channel to receive requests
     ///
     /// # Returns
     /// Handle to the spawned thread
     pub fn spawn(
         id: usize,
-        model_path: String,
+        engine: Arc<Mutex<EmbeddingEngine>>,
         receiver: mpsc::Receiver<WorkerRequest>,
     ) -> thread::JoinHandle<()> {
         thread::spawn(move || {
-            let worker = Worker::new(id, model_path, receiver);
+            let worker = Worker::new(id, engine, receiver);
             worker.run();
         })
     }

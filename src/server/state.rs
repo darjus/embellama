@@ -18,7 +18,8 @@
 //! The state must be Send + Sync + Clone for use with Axum.
 
 use crate::server::dispatcher::Dispatcher;
-use std::sync::Arc;
+use crate::{EmbeddingEngine, EngineConfig};
+use std::sync::{Arc, Mutex};
 
 /// Server configuration
 #[derive(Debug, Clone)]
@@ -57,6 +58,8 @@ pub struct AppState {
     pub dispatcher: Arc<Dispatcher>,
     /// Server configuration
     pub config: Arc<ServerConfig>,
+    /// Embedding engine instance
+    pub engine: Arc<Mutex<EmbeddingEngine>>,
 }
 
 impl AppState {
@@ -66,18 +69,27 @@ impl AppState {
     /// * `config` - Server configuration
     ///
     /// # Returns
-    /// A new `AppState` instance
-    pub fn new(config: ServerConfig) -> Self {
+    /// A new `AppState` instance or an error
+    pub fn new(config: ServerConfig) -> crate::Result<Self> {
+        // Initialize the embedding engine singleton
+        let engine_config = EngineConfig::builder()
+            .with_model_path(&config.model_path)
+            .with_model_name(&config.model_name)
+            .build()?;
+        
+        let engine = EmbeddingEngine::get_or_init(engine_config)?;
+        
+        // Create the dispatcher with worker pool
         let dispatcher = Dispatcher::new(
             config.worker_count,
             config.queue_size,
-            config.model_path.clone(),
         );
         
-        Self {
+        Ok(Self {
             dispatcher: Arc::new(dispatcher),
             config: Arc::new(config),
-        }
+            engine,
+        })
     }
     
     /// Get the model name

@@ -19,7 +19,7 @@ use std::path::PathBuf;
 use tokio::signal;
 use tower_http::cors::CorsLayer;
 use tower_http::trace::TraceLayer;
-use tracing::{info, warn, error};
+use tracing::info;
 use uuid::Uuid;
 
 /// Embellama server - OpenAI-compatible embedding API
@@ -110,7 +110,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     };
     
     // Create application state
-    let state = AppState::new(config.clone());
+    let state = AppState::new(config.clone())?;
     
     // Build the router
     let app = build_router(state);

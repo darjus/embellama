@@ -15,18 +15,36 @@
 //! Request dispatcher for routing to worker threads
 //!
 //! This module handles the distribution of embedding requests to available
-//! worker threads using a round-robin or load-based routing strategy.
+//! worker threads using a round-robin routing strategy.
 
 use crate::server::channel::WorkerRequest;
+use crate::server::worker::Worker;
+use crate::EmbeddingEngine;
+use std::sync::atomic::{AtomicUsize, Ordering};
 use std::sync::Arc;
+use std::thread;
 use tokio::sync::mpsc;
-use tracing::{debug, error, info};
+use tracing::{debug, info, warn};
 
 /// Dispatcher for routing requests to workers
-#[derive(Clone)]
 pub struct Dispatcher {
-    /// Sender channel to dispatcher thread
-    sender: mpsc::Sender<WorkerRequest>,
+    /// Worker sender channels for round-robin distribution
+    workers: Arc<Vec<mpsc::Sender<WorkerRequest>>>,
+    /// Current worker index for round-robin
+    current_worker: Arc<AtomicUsize>,
+    /// Worker thread handles (not cloneable, so wrapped in Option)
+    #[allow(dead_code)]
+    handles: Option<Vec<thread::JoinHandle<()>>>,
+}
+
+impl Clone for Dispatcher {
+    fn clone(&self) -> Self {
+        Self {
+            workers: Arc::clone(&self.workers),
+            current_worker: Arc::clone(&self.current_worker),
+            handles: None, // Don't clone thread handles
+        }
+    }
 }
 
 impl Dispatcher {
@@ -35,31 +53,45 @@ impl Dispatcher {
     /// # Arguments
     /// * `worker_count` - Number of worker threads to spawn
     /// * `queue_size` - Maximum pending requests per worker
-    /// * `model_path` - Path to the GGUF model file
     ///
     /// # Returns
     /// A new `Dispatcher` instance
-    pub fn new(worker_count: usize, queue_size: usize, model_path: String) -> Self {
+    pub fn new(worker_count: usize, queue_size: usize) -> Self {
         info!("Creating dispatcher with {} workers", worker_count);
         
-        // Create channel for receiving requests
-        let (tx, mut rx) = mpsc::channel::<WorkerRequest>(queue_size * worker_count);
+        // Get the engine instance (should already be initialized)
+        let engine = EmbeddingEngine::instance()
+            .expect("EmbeddingEngine should be initialized before creating Dispatcher");
         
-        // Spawn dispatcher task (stub for Phase 1)
-        tokio::spawn(async move {
-            debug!("Dispatcher task started");
-            while let Some(request) = rx.recv().await {
-                debug!("Received request {:?}, but worker pool not yet implemented", request.id);
-                // Phase 2: Route to workers
-                // For now, just log and drop
-            }
-            info!("Dispatcher task shutting down");
-        });
+        let mut workers = Vec::with_capacity(worker_count);
+        let mut handles = Vec::with_capacity(worker_count);
         
-        Self { sender: tx }
+        // Spawn worker threads
+        for id in 0..worker_count {
+            // Create channel for this worker
+            let (tx, rx) = mpsc::channel::<WorkerRequest>(queue_size);
+            
+            // Spawn the worker thread
+            let handle = Worker::spawn(id, Arc::clone(&engine), rx);
+            
+            workers.push(tx);
+            handles.push(handle);
+            
+            debug!("Spawned worker {}", id);
+        }
+        
+        info!("Dispatcher created with {} workers", worker_count);
+        
+        Self {
+            workers: Arc::new(workers),
+            current_worker: Arc::new(AtomicUsize::new(0)),
+            handles: Some(handles),
+        }
     }
     
     /// Send a request to the dispatcher
+    ///
+    /// Routes the request to the next worker using round-robin distribution.
     ///
     /// # Arguments
     /// * `request` - The worker request to process
@@ -67,14 +99,43 @@ impl Dispatcher {
     /// # Returns
     /// Result indicating success or failure
     pub async fn send(&self, request: WorkerRequest) -> Result<(), String> {
-        self.sender
+        // Select next worker using round-robin
+        let worker_count = self.workers.len();
+        let worker_index = self.current_worker.fetch_add(1, Ordering::Relaxed) % worker_count;
+        
+        debug!("Routing request {:?} to worker {}", request.id, worker_index);
+        
+        // Send to selected worker
+        self.workers[worker_index]
             .send(request)
             .await
-            .map_err(|e| format!("Failed to send request: {}", e))
+            .map_err(|e| {
+                warn!("Worker {} channel full or closed: {}", worker_index, e);
+                format!("Failed to send request to worker {}: {}", worker_index, e)
+            })
     }
     
     /// Check if the dispatcher is ready to accept requests
     pub fn is_ready(&self) -> bool {
-        !self.sender.is_closed()
+        // Check if at least one worker is available
+        self.workers.iter().any(|tx| !tx.is_closed())
+    }
+    
+    /// Get the number of active workers
+    pub fn worker_count(&self) -> usize {
+        self.workers.len()
+    }
+    
+    /// Shutdown all workers gracefully
+    ///
+    /// This drops all sender channels, causing workers to exit their loops
+    pub async fn shutdown(self) {
+        info!("Shutting down dispatcher and workers");
+        
+        // Note: Dropping the Arc will signal workers to stop when last reference is dropped
+        // We can't directly manipulate the Arc<Vec>, but dropping self will work
+        drop(self);
+        
+        info!("Workers signaled to shutdown");
     }
 }
