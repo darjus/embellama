@@ -218,7 +218,43 @@ test-server-api:
     @echo "================================"
     @echo "✓ API tests complete"
 
-# Full server test workflow
+# Run server integration tests
+test-server-integration: download-test-model
+    @echo "Running server integration tests..."
+    cargo test --features server --test server_api_tests -- --nocapture
+
+# Run OpenAI compatibility tests
+test-server-compat: download-test-model
+    @echo "Running OpenAI compatibility tests..."
+    cargo test --features server --test openai_compat_tests -- --nocapture
+
+# Run server load tests (excluding slow tests)
+test-server-load: download-test-model
+    @echo "Running server load tests..."
+    cargo test --features server --test server_load_tests -- --nocapture
+
+# Run ALL server load tests (including slow/ignored tests)
+test-server-load-all: download-test-model
+    @echo "Running all server load tests (including slow tests)..."
+    cargo test --features server --test server_load_tests -- --nocapture --ignored
+
+# Run all server tests
+test-server-all: test-server-integration test-server-compat test-server-load
+    @echo "✓ All server tests completed"
+
+# Test with Python OpenAI SDK
+test-server-python: start-server
+    @echo "Testing with Python OpenAI SDK..."
+    @python3 scripts/test-openai-python.py || echo "Python SDK test failed - is openai package installed?"
+    @just stop-server
+
+# Test with JavaScript OpenAI SDK
+test-server-js: start-server
+    @echo "Testing with JavaScript OpenAI SDK..."
+    @node scripts/test-openai-js.mjs || echo "JS SDK test failed - is openai package installed?"
+    @just stop-server
+
+# Full server test workflow (old compatibility)
 test-server: start-server test-server-api stop-server
     @echo "✓ Server tests completed"
 
@@ -226,6 +262,7 @@ test-server: start-server test-server-api stop-server
 check-server:
     @echo "Checking server compilation..."
     cargo check --features server --bin embellama-server
+    cargo check --features server --tests
 
 # Clean server artifacts
 clean-server: stop-server

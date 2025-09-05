@@ -47,6 +47,10 @@ tokio-test = "0.4"
 pretty_assertions = "1.4"
 proptest = "1.4"
 test-log = { version = "0.2.18", features = ["trace"] }
+# Server testing dependencies
+reqwest = { version = "0.12", features = ["json", "blocking"] }
+hyper = { version = "1.0", features = ["full"] }
+hyper-util = "0.1"
 
 [features]
 default = []
