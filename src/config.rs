@@ -311,7 +311,7 @@ impl Default for EngineConfig {
             use_gpu: false,
             n_gpu_layers: None,
             batch_size: None,
-            normalize_embeddings: false,
+            normalize_embeddings: true,
             pooling_strategy: PoolingStrategy::default(),
             max_tokens: None,
             memory_limit_mb: None,

@@ -174,6 +174,7 @@ pub struct ErrorDetail {
     #[serde(rename = "type")]
     pub error_type: String,
     /// Optional error code
+    #[serde(skip_serializing_if = "Option::is_none")]
     pub code: Option<String>,
 }
 

@@ -75,6 +75,7 @@ impl AppState {
         let engine_config = EngineConfig::builder()
             .with_model_path(&config.model_path)
             .with_model_name(&config.model_name)
+            .with_normalize_embeddings(true)
             .build()?;
         
         let engine = EmbeddingEngine::get_or_init(engine_config)?;
