@@ -23,10 +23,10 @@ use crate::server::api_types::{
 use crate::server::channel::WorkerRequest;
 use crate::server::state::AppState;
 use axum::{
+    Json,
     extract::State,
     http::StatusCode,
     response::{IntoResponse, Response},
-    Json,
 };
 use std::time::Duration;
 use tokio::sync::oneshot;
@@ -79,7 +79,7 @@ pub async fn embeddings_handler(
 
     // Check if model exists
     // > TODO: Validate against actual loaded models once engine exposes model list
-    
+
     // Create oneshot channel for response
     let (tx, rx) = oneshot::channel();
 
@@ -93,10 +93,7 @@ pub async fn embeddings_handler(
 
     // Send to dispatcher
     if let Err(e) = state.dispatcher.send(worker_request).await {
-        error!(
-            "Failed to send request {} to dispatcher: {}",
-            request_id, e
-        );
+        error!("Failed to send request {} to dispatcher: {}", request_id, e);
         return (
             StatusCode::SERVICE_UNAVAILABLE,
             Json(ErrorResponse::rate_limit()),
@@ -109,7 +106,10 @@ pub async fn embeddings_handler(
         Ok(Ok(response)) => {
             // Check if embeddings are empty (indicates error in current implementation)
             if response.embeddings.is_empty() {
-                error!("Worker returned empty embeddings for request {}", request_id);
+                error!(
+                    "Worker returned empty embeddings for request {}",
+                    request_id
+                );
                 return (
                     StatusCode::INTERNAL_SERVER_ERROR,
                     Json(ErrorResponse::internal_error(
@@ -134,11 +134,7 @@ pub async fn embeddings_handler(
                     response.token_count,
                 )
             } else {
-                EmbeddingsResponse::new(
-                    request.model,
-                    response.embeddings,
-                    response.token_count,
-                )
+                EmbeddingsResponse::new(request.model, response.embeddings, response.token_count)
             };
 
             (StatusCode::OK, Json(embeddings_response)).into_response()
@@ -154,7 +150,10 @@ pub async fn embeddings_handler(
                 .into_response()
         }
         Err(_) => {
-            error!("Request {} timed out after {:?}", request_id, REQUEST_TIMEOUT);
+            error!(
+                "Request {} timed out after {:?}",
+                request_id, REQUEST_TIMEOUT
+            );
             (
                 StatusCode::REQUEST_TIMEOUT,
                 Json(ErrorResponse::internal_error("Request timed out")),
@@ -173,7 +172,7 @@ pub async fn list_models_handler(State(state): State<AppState>) -> Response {
     // Get model list from engine configuration
     // For now, we'll return the configured model from server config
     // > TODO: Get actual model list from engine.model_configs once accessible
-    
+
     let models = vec![ModelData::new(state.model_name().to_string())];
 
     let response = ListModelsResponse {

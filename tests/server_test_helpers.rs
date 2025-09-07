@@ -39,20 +39,20 @@ impl TestServer {
         // Find an available port
         let port = find_available_port()?;
         let base_url = format!("http://127.0.0.1:{}", port);
-        
+
         // Build the server binary
         let output = Command::new("cargo")
             .args(&["build", "--features", "server", "--bin", "embellama-server"])
             .output()
             .map_err(|e| format!("Failed to build server: {}", e))?;
-        
+
         if !output.status.success() {
             return Err(format!(
                 "Failed to build server: {}",
                 String::from_utf8_lossy(&output.stderr)
             ));
         }
-        
+
         // Start the server process
         let child = Command::new("cargo")
             .args(&[
@@ -77,10 +77,10 @@ impl TestServer {
             ])
             .spawn()
             .map_err(|e| format!("Failed to spawn server: {}", e))?;
-        
+
         // Wait for server to be ready
         wait_for_server(&base_url, Duration::from_secs(30)).await?;
-        
+
         Ok(TestServer {
             base_url,
             port,
@@ -88,7 +88,7 @@ impl TestServer {
             _temp_dir: None,
         })
     }
-    
+
     /// Get the base URL for the test server
     pub fn url(&self, path: &str) -> String {
         format!("{}{}", self.base_url, path)
@@ -122,19 +122,19 @@ async fn wait_for_server(base_url: &str, timeout: Duration) -> Result<(), String
     let health_url = format!("{}/health", base_url);
     let start = Instant::now();
     let client = reqwest::Client::new();
-    
+
     loop {
         if start.elapsed() > timeout {
             return Err(format!("Server failed to start within {:?}", timeout));
         }
-        
+
         // Use async client
         if let Ok(resp) = client.get(&health_url).send().await {
             if resp.status().is_success() {
                 return Ok(());
             }
         }
-        
+
         tokio::time::sleep(Duration::from_millis(100)).await;
     }
 }
@@ -153,7 +153,7 @@ impl TestClient {
                 .unwrap(),
         }
     }
-    
+
     /// Make an embedding request
     pub async fn embedding_request(
         &self,
@@ -166,18 +166,18 @@ impl TestClient {
             "model": model,
             "input": input,
         });
-        
+
         if let Some(format) = encoding_format {
             body["encoding_format"] = json!(format);
         }
-        
+
         self.client
             .post(format!("{}/v1/embeddings", base_url))
             .json(&body)
             .send()
             .await
     }
-    
+
     /// Get list of models
     pub async fn list_models(&self, base_url: &str) -> Result<Response, reqwest::Error> {
         self.client
@@ -185,13 +185,10 @@ impl TestClient {
             .send()
             .await
     }
-    
+
     /// Check health endpoint
     pub async fn health_check(&self, base_url: &str) -> Result<Response, reqwest::Error> {
-        self.client
-            .get(format!("{}/health", base_url))
-            .send()
-            .await
+        self.client.get(format!("{}/health", base_url)).send().await
     }
 }
 
@@ -264,11 +261,11 @@ pub fn generate_test_texts(count: usize) -> Vec<String> {
 pub fn validate_embedding_response(response: &EmbeddingResponse, expected_count: usize) {
     assert_eq!(response.object, "list");
     assert_eq!(response.data.len(), expected_count);
-    
+
     for (i, data) in response.data.iter().enumerate() {
         assert_eq!(data.index, i);
         assert_eq!(data.object, "embedding");
-        
+
         match &data.embedding {
             EmbeddingValue::Float(vec) => {
                 assert!(!vec.is_empty(), "Embedding vector should not be empty");
@@ -287,7 +284,7 @@ pub fn validate_embedding_response(response: &EmbeddingResponse, expected_count:
             }
         }
     }
-    
+
     // Validate usage metrics
     assert!(response.usage.prompt_tokens > 0);
     assert!(response.usage.total_tokens > 0);
@@ -312,12 +309,12 @@ pub async fn make_concurrent_requests(
     count: usize,
 ) -> Vec<Result<Response, reqwest::Error>> {
     let mut handles = Vec::new();
-    
+
     for i in 0..count {
         let client = client.client.clone();
         let url = format!("{}/v1/embeddings", base_url);
         let text = format!("Concurrent request {}", i);
-        
+
         handles.push(tokio::spawn(async move {
             client
                 .post(&url)
@@ -329,12 +326,12 @@ pub async fn make_concurrent_requests(
                 .await
         }));
     }
-    
+
     let mut results = Vec::new();
     for handle in handles {
         results.push(handle.await.unwrap());
     }
-    
+
     results
 }
 
@@ -345,7 +342,7 @@ pub async fn measure_latencies(
     requests: usize,
 ) -> LatencyStats {
     let mut latencies = Vec::new();
-    
+
     for i in 0..requests {
         let start = Instant::now();
         let _ = client
@@ -358,9 +355,9 @@ pub async fn measure_latencies(
             .await;
         latencies.push(start.elapsed().as_millis() as u64);
     }
-    
+
     latencies.sort();
-    
+
     LatencyStats {
         p50: latencies[latencies.len() / 2],
         p95: latencies[latencies.len() * 95 / 100],
@@ -390,12 +387,12 @@ pub fn get_test_model_path() -> Result<PathBuf, String> {
             return Ok(path);
         }
     }
-    
+
     // Then check default test model location from justfile
     let default_path = PathBuf::from("models/test/all-minilm-l6-v2-q4_k_m.gguf");
     if default_path.exists() {
         return Ok(default_path);
     }
-    
+
     Err("Test model not found. Run 'just download-test-model' first".to_string())
 }

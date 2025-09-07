@@ -17,8 +17,8 @@
 //! This module implements worker threads that use the shared EmbeddingEngine.
 //! Each thread will have its own thread-local model instance managed by the engine.
 
-use crate::server::channel::{TextInput, WorkerRequest, WorkerResponse};
 use crate::EmbeddingEngine;
+use crate::server::channel::{TextInput, WorkerRequest, WorkerResponse};
 use std::sync::{Arc, Mutex};
 use std::thread;
 use std::time::Instant;
@@ -56,7 +56,7 @@ impl Worker {
             receiver,
         }
     }
-    
+
     /// Run the worker main loop
     ///
     /// This method runs in a dedicated thread and processes requests
@@ -64,19 +64,20 @@ impl Worker {
     /// model loading in this thread via the engine's thread-local storage.
     pub fn run(mut self) {
         info!("Worker {} starting", self.id);
-        
+
         // Use blocking recv since we're in a dedicated thread
         while let Some(request) = self.receiver.blocking_recv() {
             debug!("Worker {} processing request {:?}", self.id, request.id);
             let start = Instant::now();
-            
+
             // Process the request using the shared engine
             let result = {
                 let engine = self.engine.lock().unwrap();
                 match &request.input {
                     TextInput::Single(text) => {
                         // Generate single embedding
-                        engine.embed(Some(&request.model), text)
+                        engine
+                            .embed(Some(&request.model), text)
                             .map(|embedding| vec![embedding])
                     }
                     TextInput::Batch(texts) => {
@@ -86,14 +87,12 @@ impl Worker {
                     }
                 }
             };
-            
+
             // Create response based on result
             let response = match result {
                 Ok(embeddings) => {
-                    let token_count = embeddings.iter()
-                        .map(|e| e.len())
-                        .sum::<usize>() / 10; // Rough estimate
-                    
+                    let token_count = embeddings.iter().map(|e| e.len()).sum::<usize>() / 10; // Rough estimate
+
                     WorkerResponse {
                         embeddings,
                         token_count,
@@ -111,17 +110,19 @@ impl Worker {
                     }
                 }
             };
-            
+
             // Send response back
             if let Err(_) = request.response_tx.send(response) {
-                warn!("Worker {} failed to send response for request {:?} (client may have timed out)", 
-                    self.id, request.id);
+                warn!(
+                    "Worker {} failed to send response for request {:?} (client may have timed out)",
+                    self.id, request.id
+                );
             }
         }
-        
+
         info!("Worker {} shutting down", self.id);
     }
-    
+
     /// Spawn a worker in a new thread
     ///
     /// # Arguments

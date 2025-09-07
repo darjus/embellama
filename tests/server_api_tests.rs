@@ -26,16 +26,18 @@ use server_test_helpers::*;
 #[serial]
 async fn test_health_endpoint() {
     let model_path = get_test_model_path().expect("Test model not found");
-    let server = TestServer::spawn(model_path, 2).await.expect("Failed to spawn server");
+    let server = TestServer::spawn(model_path, 2)
+        .await
+        .expect("Failed to spawn server");
     let client = TestClient::new();
-    
+
     let response = client
         .health_check(&server.base_url)
         .await
         .expect("Failed to check health");
-    
+
     assert_eq!(response.status(), StatusCode::OK);
-    
+
     let body: serde_json::Value = response.json().await.unwrap();
     assert_eq!(body["status"], "healthy");
     assert!(body["model"].is_string());
@@ -46,21 +48,23 @@ async fn test_health_endpoint() {
 #[serial]
 async fn test_models_endpoint() {
     let model_path = get_test_model_path().expect("Test model not found");
-    let server = TestServer::spawn(model_path, 2).await.expect("Failed to spawn server");
+    let server = TestServer::spawn(model_path, 2)
+        .await
+        .expect("Failed to spawn server");
     let client = TestClient::new();
-    
+
     let response = client
         .list_models(&server.base_url)
         .await
         .expect("Failed to list models");
-    
+
     assert_eq!(response.status(), StatusCode::OK);
-    
+
     let body: serde_json::Value = response.json().await.unwrap();
     assert_eq!(body["object"], "list");
     assert!(body["data"].is_array());
     assert!(!body["data"].as_array().unwrap().is_empty());
-    
+
     // Check first model
     let first_model = &body["data"][0];
     assert_eq!(first_model["object"], "model");
@@ -72,9 +76,11 @@ async fn test_models_endpoint() {
 #[serial]
 async fn test_single_embedding_short_text() {
     let model_path = get_test_model_path().expect("Test model not found");
-    let server = TestServer::spawn(model_path, 2).await.expect("Failed to spawn server");
+    let server = TestServer::spawn(model_path, 2)
+        .await
+        .expect("Failed to spawn server");
     let client = TestClient::new();
-    
+
     let response = client
         .embedding_request(
             &server.base_url,
@@ -84,12 +90,12 @@ async fn test_single_embedding_short_text() {
         )
         .await
         .expect("Failed to create embedding");
-    
+
     assert_eq!(response.status(), StatusCode::OK);
-    
+
     let embedding_response: EmbeddingResponse = response.json().await.unwrap();
     validate_embedding_response(&embedding_response, 1);
-    
+
     // Verify it's float format by default
     match &embedding_response.data[0].embedding {
         EmbeddingValue::Float(vec) => {
@@ -103,13 +109,15 @@ async fn test_single_embedding_short_text() {
 #[serial]
 async fn test_single_embedding_medium_text() {
     let model_path = get_test_model_path().expect("Test model not found");
-    let server = TestServer::spawn(model_path, 2).await.expect("Failed to spawn server");
+    let server = TestServer::spawn(model_path, 2)
+        .await
+        .expect("Failed to spawn server");
     let client = TestClient::new();
-    
+
     let medium_text = "This is a medium length text that contains multiple sentences. \
                        It's designed to test how the embedding API handles typical paragraph-sized inputs. \
                        The text should be processed correctly and return valid embeddings.";
-    
+
     let response = client
         .embedding_request(
             &server.base_url,
@@ -119,9 +127,9 @@ async fn test_single_embedding_medium_text() {
         )
         .await
         .expect("Failed to create embedding");
-    
+
     assert_eq!(response.status(), StatusCode::OK);
-    
+
     let embedding_response: EmbeddingResponse = response.json().await.unwrap();
     validate_embedding_response(&embedding_response, 1);
 }
@@ -130,11 +138,13 @@ async fn test_single_embedding_medium_text() {
 #[serial]
 async fn test_single_embedding_long_text() {
     let model_path = get_test_model_path().expect("Test model not found");
-    let server = TestServer::spawn(model_path, 2).await.expect("Failed to spawn server");
+    let server = TestServer::spawn(model_path, 2)
+        .await
+        .expect("Failed to spawn server");
     let client = TestClient::new();
-    
+
     let long_text = "Lorem ipsum ".repeat(100); // Create a long text
-    
+
     let response = client
         .embedding_request(
             &server.base_url,
@@ -144,9 +154,9 @@ async fn test_single_embedding_long_text() {
         )
         .await
         .expect("Failed to create embedding");
-    
+
     assert_eq!(response.status(), StatusCode::OK);
-    
+
     let embedding_response: EmbeddingResponse = response.json().await.unwrap();
     validate_embedding_response(&embedding_response, 1);
 }
@@ -155,11 +165,13 @@ async fn test_single_embedding_long_text() {
 #[serial]
 async fn test_single_embedding_special_chars() {
     let model_path = get_test_model_path().expect("Test model not found");
-    let server = TestServer::spawn(model_path, 2).await.expect("Failed to spawn server");
+    let server = TestServer::spawn(model_path, 2)
+        .await
+        .expect("Failed to spawn server");
     let client = TestClient::new();
-    
+
     let special_text = "Text with special characters: café, naïve, 日本語, emoji 🚀, symbols @#$%";
-    
+
     let response = client
         .embedding_request(
             &server.base_url,
@@ -169,9 +181,9 @@ async fn test_single_embedding_special_chars() {
         )
         .await
         .expect("Failed to create embedding");
-    
+
     assert_eq!(response.status(), StatusCode::OK);
-    
+
     let embedding_response: EmbeddingResponse = response.json().await.unwrap();
     validate_embedding_response(&embedding_response, 1);
 }
@@ -180,15 +192,17 @@ async fn test_single_embedding_special_chars() {
 #[serial]
 async fn test_batch_embeddings_small() {
     let model_path = get_test_model_path().expect("Test model not found");
-    let server = TestServer::spawn(model_path, 2).await.expect("Failed to spawn server");
+    let server = TestServer::spawn(model_path, 2)
+        .await
+        .expect("Failed to spawn server");
     let client = TestClient::new();
-    
+
     let texts = vec![
         "First text".to_string(),
         "Second text".to_string(),
         "Third text".to_string(),
     ];
-    
+
     let response = client
         .embedding_request(
             &server.base_url,
@@ -198,9 +212,9 @@ async fn test_batch_embeddings_small() {
         )
         .await
         .expect("Failed to create embeddings");
-    
+
     assert_eq!(response.status(), StatusCode::OK);
-    
+
     let embedding_response: EmbeddingResponse = response.json().await.unwrap();
     validate_embedding_response(&embedding_response, texts.len());
 }
@@ -209,11 +223,13 @@ async fn test_batch_embeddings_small() {
 #[serial]
 async fn test_batch_embeddings_medium() {
     let model_path = get_test_model_path().expect("Test model not found");
-    let server = TestServer::spawn(model_path, 2).await.expect("Failed to spawn server");
+    let server = TestServer::spawn(model_path, 2)
+        .await
+        .expect("Failed to spawn server");
     let client = TestClient::new();
-    
+
     let texts = generate_test_texts(10);
-    
+
     let response = client
         .embedding_request(
             &server.base_url,
@@ -223,9 +239,9 @@ async fn test_batch_embeddings_medium() {
         )
         .await
         .expect("Failed to create embeddings");
-    
+
     assert_eq!(response.status(), StatusCode::OK);
-    
+
     let embedding_response: EmbeddingResponse = response.json().await.unwrap();
     validate_embedding_response(&embedding_response, texts.len());
 }
@@ -234,11 +250,13 @@ async fn test_batch_embeddings_medium() {
 #[serial]
 async fn test_batch_embeddings_large() {
     let model_path = get_test_model_path().expect("Test model not found");
-    let server = TestServer::spawn(model_path, 4).await.expect("Failed to spawn server");
+    let server = TestServer::spawn(model_path, 4)
+        .await
+        .expect("Failed to spawn server");
     let client = TestClient::new();
-    
+
     let texts = generate_test_texts(50);
-    
+
     let response = client
         .embedding_request(
             &server.base_url,
@@ -248,9 +266,9 @@ async fn test_batch_embeddings_large() {
         )
         .await
         .expect("Failed to create embeddings");
-    
+
     assert_eq!(response.status(), StatusCode::OK);
-    
+
     let embedding_response: EmbeddingResponse = response.json().await.unwrap();
     validate_embedding_response(&embedding_response, texts.len());
 }
@@ -260,11 +278,13 @@ async fn test_batch_embeddings_large() {
 #[ignore] // This test is slow
 async fn test_batch_embeddings_very_large() {
     let model_path = get_test_model_path().expect("Test model not found");
-    let server = TestServer::spawn(model_path, 4).await.expect("Failed to spawn server");
+    let server = TestServer::spawn(model_path, 4)
+        .await
+        .expect("Failed to spawn server");
     let client = TestClient::new();
-    
+
     let texts = generate_test_texts(100);
-    
+
     let response = client
         .embedding_request(
             &server.base_url,
@@ -274,9 +294,9 @@ async fn test_batch_embeddings_very_large() {
         )
         .await
         .expect("Failed to create embeddings");
-    
+
     assert_eq!(response.status(), StatusCode::OK);
-    
+
     let embedding_response: EmbeddingResponse = response.json().await.unwrap();
     validate_embedding_response(&embedding_response, texts.len());
 }
@@ -285,16 +305,18 @@ async fn test_batch_embeddings_very_large() {
 #[serial]
 async fn test_batch_embeddings_mixed_lengths() {
     let model_path = get_test_model_path().expect("Test model not found");
-    let server = TestServer::spawn(model_path, 2).await.expect("Failed to spawn server");
+    let server = TestServer::spawn(model_path, 2)
+        .await
+        .expect("Failed to spawn server");
     let client = TestClient::new();
-    
+
     let texts = vec![
         "Short".to_string(),
         "This is a medium length text with more words".to_string(),
         "This is a much longer text that contains multiple sentences. It's designed to test how the embedding system handles various text lengths in a single batch. We want to ensure consistent processing.".to_string(),
         "Another short one".to_string(),
     ];
-    
+
     let response = client
         .embedding_request(
             &server.base_url,
@@ -304,9 +326,9 @@ async fn test_batch_embeddings_mixed_lengths() {
         )
         .await
         .expect("Failed to create embeddings");
-    
+
     assert_eq!(response.status(), StatusCode::OK);
-    
+
     let embedding_response: EmbeddingResponse = response.json().await.unwrap();
     validate_embedding_response(&embedding_response, texts.len());
 }
@@ -315,9 +337,11 @@ async fn test_batch_embeddings_mixed_lengths() {
 #[serial]
 async fn test_batch_embeddings_duplicate_texts() {
     let model_path = get_test_model_path().expect("Test model not found");
-    let server = TestServer::spawn(model_path, 2).await.expect("Failed to spawn server");
+    let server = TestServer::spawn(model_path, 2)
+        .await
+        .expect("Failed to spawn server");
     let client = TestClient::new();
-    
+
     let texts = vec![
         "Duplicate text".to_string(),
         "Unique text".to_string(),
@@ -325,7 +349,7 @@ async fn test_batch_embeddings_duplicate_texts() {
         "Another unique".to_string(),
         "Duplicate text".to_string(), // Same as first again
     ];
-    
+
     let response = client
         .embedding_request(
             &server.base_url,
@@ -335,12 +359,12 @@ async fn test_batch_embeddings_duplicate_texts() {
         )
         .await
         .expect("Failed to create embeddings");
-    
+
     assert_eq!(response.status(), StatusCode::OK);
-    
+
     let embedding_response: EmbeddingResponse = response.json().await.unwrap();
     validate_embedding_response(&embedding_response, texts.len());
-    
+
     // Verify duplicate texts produce same embeddings
     if let EmbeddingValue::Float(emb1) = &embedding_response.data[0].embedding {
         if let EmbeddingValue::Float(emb2) = &embedding_response.data[2].embedding {
@@ -359,9 +383,11 @@ async fn test_batch_embeddings_duplicate_texts() {
 #[serial]
 async fn test_encoding_format_float() {
     let model_path = get_test_model_path().expect("Test model not found");
-    let server = TestServer::spawn(model_path, 2).await.expect("Failed to spawn server");
+    let server = TestServer::spawn(model_path, 2)
+        .await
+        .expect("Failed to spawn server");
     let client = TestClient::new();
-    
+
     let response = client
         .embedding_request(
             &server.base_url,
@@ -371,15 +397,15 @@ async fn test_encoding_format_float() {
         )
         .await
         .expect("Failed to create embedding");
-    
+
     assert_eq!(response.status(), StatusCode::OK);
-    
+
     let embedding_response: EmbeddingResponse = response.json().await.unwrap();
     validate_embedding_response(&embedding_response, 1);
-    
+
     // Verify it's float format
     match &embedding_response.data[0].embedding {
-        EmbeddingValue::Float(_) => {},
+        EmbeddingValue::Float(_) => {}
         _ => panic!("Expected float embedding format"),
     }
 }
@@ -388,9 +414,11 @@ async fn test_encoding_format_float() {
 #[serial]
 async fn test_encoding_format_base64() {
     let model_path = get_test_model_path().expect("Test model not found");
-    let server = TestServer::spawn(model_path, 2).await.expect("Failed to spawn server");
+    let server = TestServer::spawn(model_path, 2)
+        .await
+        .expect("Failed to spawn server");
     let client = TestClient::new();
-    
+
     let response = client
         .embedding_request(
             &server.base_url,
@@ -400,15 +428,15 @@ async fn test_encoding_format_base64() {
         )
         .await
         .expect("Failed to create embedding");
-    
+
     assert_eq!(response.status(), StatusCode::OK);
-    
+
     let embedding_response: EmbeddingResponse = response.json().await.unwrap();
     validate_embedding_response(&embedding_response, 1);
-    
+
     // Verify it's base64 format
     match &embedding_response.data[0].embedding {
-        EmbeddingValue::Base64(_) => {},
+        EmbeddingValue::Base64(_) => {}
         _ => panic!("Expected base64 embedding format"),
     }
 }
@@ -417,9 +445,11 @@ async fn test_encoding_format_base64() {
 #[serial]
 async fn test_error_empty_input() {
     let model_path = get_test_model_path().expect("Test model not found");
-    let server = TestServer::spawn(model_path, 2).await.expect("Failed to spawn server");
+    let server = TestServer::spawn(model_path, 2)
+        .await
+        .expect("Failed to spawn server");
     let client = TestClient::new();
-    
+
     let response = client
         .embedding_request(
             &server.base_url,
@@ -429,9 +459,9 @@ async fn test_error_empty_input() {
         )
         .await
         .expect("Failed to send request");
-    
+
     assert_eq!(response.status(), StatusCode::BAD_REQUEST);
-    
+
     let error: ErrorResponse = response.json().await.unwrap();
     assert!(error.error.message.contains("empty"));
 }
@@ -440,9 +470,11 @@ async fn test_error_empty_input() {
 #[serial]
 async fn test_error_empty_batch() {
     let model_path = get_test_model_path().expect("Test model not found");
-    let server = TestServer::spawn(model_path, 2).await.expect("Failed to spawn server");
+    let server = TestServer::spawn(model_path, 2)
+        .await
+        .expect("Failed to spawn server");
     let client = TestClient::new();
-    
+
     let response = client
         .embedding_request(
             &server.base_url,
@@ -452,9 +484,9 @@ async fn test_error_empty_batch() {
         )
         .await
         .expect("Failed to send request");
-    
+
     assert_eq!(response.status(), StatusCode::BAD_REQUEST);
-    
+
     let error: ErrorResponse = response.json().await.unwrap();
     assert!(error.error.message.contains("empty"));
 }
@@ -463,9 +495,11 @@ async fn test_error_empty_batch() {
 #[serial]
 async fn test_error_invalid_encoding_format() {
     let model_path = get_test_model_path().expect("Test model not found");
-    let server = TestServer::spawn(model_path, 2).await.expect("Failed to spawn server");
+    let server = TestServer::spawn(model_path, 2)
+        .await
+        .expect("Failed to spawn server");
     let client = TestClient::new();
-    
+
     let response = client
         .embedding_request(
             &server.base_url,
@@ -475,9 +509,9 @@ async fn test_error_invalid_encoding_format() {
         )
         .await
         .expect("Failed to send request");
-    
+
     assert_eq!(response.status(), StatusCode::BAD_REQUEST);
-    
+
     let error: ErrorResponse = response.json().await.unwrap();
     assert!(error.error.message.contains("encoding_format"));
 }
@@ -486,11 +520,14 @@ async fn test_error_invalid_encoding_format() {
 #[serial]
 async fn test_error_missing_model_field() {
     let model_path = get_test_model_path().expect("Test model not found");
-    let server = TestServer::spawn(model_path, 2).await.expect("Failed to spawn server");
+    let server = TestServer::spawn(model_path, 2)
+        .await
+        .expect("Failed to spawn server");
     let client = TestClient::new();
-    
+
     // Send request without model field
-    let response = client.client
+    let response = client
+        .client
         .post(format!("{}/v1/embeddings", server.base_url))
         .json(&serde_json::json!({
             "input": "Test text"
@@ -498,7 +535,7 @@ async fn test_error_missing_model_field() {
         .send()
         .await
         .expect("Failed to send request");
-    
+
     assert_eq!(response.status(), StatusCode::UNPROCESSABLE_ENTITY);
 }
 
@@ -506,11 +543,14 @@ async fn test_error_missing_model_field() {
 #[serial]
 async fn test_error_missing_input_field() {
     let model_path = get_test_model_path().expect("Test model not found");
-    let server = TestServer::spawn(model_path, 2).await.expect("Failed to spawn server");
+    let server = TestServer::spawn(model_path, 2)
+        .await
+        .expect("Failed to spawn server");
     let client = TestClient::new();
-    
+
     // Send request without input field
-    let response = client.client
+    let response = client
+        .client
         .post(format!("{}/v1/embeddings", server.base_url))
         .json(&serde_json::json!({
             "model": "test-model"
@@ -518,7 +558,7 @@ async fn test_error_missing_input_field() {
         .send()
         .await
         .expect("Failed to send request");
-    
+
     assert_eq!(response.status(), StatusCode::UNPROCESSABLE_ENTITY);
 }
 
@@ -526,17 +566,20 @@ async fn test_error_missing_input_field() {
 #[serial]
 async fn test_error_invalid_json() {
     let model_path = get_test_model_path().expect("Test model not found");
-    let server = TestServer::spawn(model_path, 2).await.expect("Failed to spawn server");
+    let server = TestServer::spawn(model_path, 2)
+        .await
+        .expect("Failed to spawn server");
     let client = TestClient::new();
-    
-    let response = client.client
+
+    let response = client
+        .client
         .post(format!("{}/v1/embeddings", server.base_url))
         .header("Content-Type", "application/json")
         .body("{ invalid json }")
         .send()
         .await
         .expect("Failed to send request");
-    
+
     assert_eq!(response.status(), StatusCode::BAD_REQUEST);
 }
 
@@ -544,9 +587,11 @@ async fn test_error_invalid_json() {
 #[serial]
 async fn test_usage_metrics_single() {
     let model_path = get_test_model_path().expect("Test model not found");
-    let server = TestServer::spawn(model_path, 2).await.expect("Failed to spawn server");
+    let server = TestServer::spawn(model_path, 2)
+        .await
+        .expect("Failed to spawn server");
     let client = TestClient::new();
-    
+
     let response = client
         .embedding_request(
             &server.base_url,
@@ -556,11 +601,11 @@ async fn test_usage_metrics_single() {
         )
         .await
         .expect("Failed to create embedding");
-    
+
     assert_eq!(response.status(), StatusCode::OK);
-    
+
     let embedding_response: EmbeddingResponse = response.json().await.unwrap();
-    
+
     // Verify usage metrics are present and reasonable
     assert!(embedding_response.usage.prompt_tokens > 0);
     assert!(embedding_response.usage.total_tokens > 0);
@@ -574,15 +619,17 @@ async fn test_usage_metrics_single() {
 #[serial]
 async fn test_usage_metrics_batch() {
     let model_path = get_test_model_path().expect("Test model not found");
-    let server = TestServer::spawn(model_path, 2).await.expect("Failed to spawn server");
+    let server = TestServer::spawn(model_path, 2)
+        .await
+        .expect("Failed to spawn server");
     let client = TestClient::new();
-    
+
     let texts = vec![
         "First text".to_string(),
         "Second text with more words".to_string(),
         "Third text that is even longer than the second one".to_string(),
     ];
-    
+
     let response = client
         .embedding_request(
             &server.base_url,
@@ -592,11 +639,11 @@ async fn test_usage_metrics_batch() {
         )
         .await
         .expect("Failed to create embeddings");
-    
+
     assert_eq!(response.status(), StatusCode::OK);
-    
+
     let embedding_response: EmbeddingResponse = response.json().await.unwrap();
-    
+
     // Verify usage metrics increase with more text
     assert!(embedding_response.usage.prompt_tokens > 3); // More than number of texts
     assert!(embedding_response.usage.total_tokens > 3);

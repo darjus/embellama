@@ -102,12 +102,9 @@ impl EmbeddingsResponse {
             .into_iter()
             .enumerate()
             .map(|(index, embedding)| {
-                let bytes: Vec<u8> = embedding
-                    .iter()
-                    .flat_map(|f| f.to_le_bytes())
-                    .collect();
+                let bytes: Vec<u8> = embedding.iter().flat_map(|f| f.to_le_bytes()).collect();
                 let base64 = STANDARD.encode(&bytes);
-                
+
                 EmbeddingData {
                     index,
                     object: "embedding".to_string(),
@@ -259,4 +256,4 @@ impl ModelData {
 }
 
 /// Add base64 encoding support
-use base64::{engine::general_purpose::STANDARD, Engine as _};
+use base64::{Engine as _, engine::general_purpose::STANDARD};

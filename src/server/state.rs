@@ -77,27 +77,24 @@ impl AppState {
             .with_model_name(&config.model_name)
             .with_normalize_embeddings(true)
             .build()?;
-        
+
         let engine = EmbeddingEngine::get_or_init(engine_config)?;
-        
+
         // Create the dispatcher with worker pool
-        let dispatcher = Dispatcher::new(
-            config.worker_count,
-            config.queue_size,
-        );
-        
+        let dispatcher = Dispatcher::new(config.worker_count, config.queue_size);
+
         Ok(Self {
             dispatcher: Arc::new(dispatcher),
             config: Arc::new(config),
             engine,
         })
     }
-    
+
     /// Get the model name
     pub fn model_name(&self) -> &str {
         &self.config.model_name
     }
-    
+
     /// Check if the server is ready
     pub fn is_ready(&self) -> bool {
         self.dispatcher.is_ready()
