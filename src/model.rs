@@ -272,7 +272,7 @@ impl EmbeddingModel {
     ///
     /// # Returns
     ///
-    /// A tuple containing (model_name, model_path, vocab_size, n_params).
+    /// A tuple containing (`model_name`, `model_path`, `vocab_size`, `n_params`).
     pub fn model_metadata(&self) -> (String, PathBuf, usize, usize) {
         (
             self.model_name.clone(),
@@ -402,7 +402,7 @@ impl EmbeddingModel {
             .borrow_owner()
             .str_to_token(text, add_bos)
             .map_err(|e| Error::TokenizationError {
-                message: format!("Failed to tokenize text: {}", e),
+                message: format!("Failed to tokenize text: {e}"),
             })
     }
 
@@ -474,7 +474,7 @@ impl EmbeddingModel {
     ///
     /// This method enables true batch processing by encoding multiple sequences
     /// in a single model pass using unique sequence IDs. If the number of sequences
-    /// exceeds n_seq_max, it will automatically chunk them.
+    /// exceeds `n_seq_max`, it will automatically chunk them.
     ///
     /// # Arguments
     ///
@@ -522,13 +522,13 @@ impl EmbeddingModel {
         self.process_batch_tokens_internal(token_sequences)
     }
 
-    /// Internal method to process a batch of token sequences that fits within n_seq_max.
+    /// Internal method to process a batch of token sequences that fits within `n_seq_max`.
     fn process_batch_tokens_internal(
         &mut self,
         token_sequences: Vec<Vec<LlamaToken>>,
     ) -> Result<Vec<Vec<f32>>> {
         // Calculate total tokens needed for batch
-        let total_tokens: usize = token_sequences.iter().map(|seq| seq.len()).sum();
+        let total_tokens: usize = token_sequences.iter().map(std::vec::Vec::len).sum();
 
         // Check if total tokens exceed context size
         if total_tokens > self.max_context_size {
@@ -548,7 +548,7 @@ impl EmbeddingModel {
             batch
                 .add_sequence(tokens, seq_id as i32, true)
                 .map_err(|e| Error::EmbeddingGenerationError {
-                    message: format!("Failed to add sequence {} to batch: {}", seq_id, e),
+                    message: format!("Failed to add sequence {seq_id} to batch: {e}"),
                     source: Some(anyhow::anyhow!(e)),
                 })?;
         }
@@ -557,7 +557,7 @@ impl EmbeddingModel {
         self.cell.with_dependent_mut(|_, ctx| {
             ctx.encode(&mut batch)
                 .map_err(|e| Error::EmbeddingGenerationError {
-                    message: format!("Failed to encode batch: {}", e),
+                    message: format!("Failed to encode batch: {e}"),
                     source: Some(anyhow::anyhow!(e)),
                 })
         })?;
@@ -581,15 +581,14 @@ impl EmbeddingModel {
 
                             // Calculate token offset for this sequence
                             let token_offset: usize =
-                                token_sequences[..seq_id].iter().map(|s| s.len()).sum();
+                                token_sequences[..seq_id].iter().map(std::vec::Vec::len).sum();
 
                             for i in 0..seq_tokens.len() {
                                 let global_idx = token_offset + i;
                                 let embeddings = ctx.embeddings_ith(global_idx as i32).map_err(
                                     |e| Error::EmbeddingGenerationError {
                                         message: format!(
-                                            "Failed to get embeddings for token {} in sequence {}",
-                                            i, seq_id
+                                            "Failed to get embeddings for token {i} in sequence {seq_id}"
                                         ),
                                         source: Some(anyhow::anyhow!(e)),
                                     },
@@ -651,7 +650,7 @@ impl EmbeddingModel {
         Ok(final_embedding)
     }
 
-    /// Internal method to process LlamaToken vectors.
+    /// Internal method to process `LlamaToken` vectors.
     fn process_tokens_internal(&mut self, tokens: &[LlamaToken]) -> Result<Vec<Vec<f32>>> {
         if tokens.is_empty() {
             return Err(Error::InvalidInput {
@@ -665,7 +664,7 @@ impl EmbeddingModel {
         batch
             .add_sequence(tokens, 0, true)
             .map_err(|e| Error::EmbeddingGenerationError {
-                message: format!("Failed to add tokens to batch: {}", e),
+                message: format!("Failed to add tokens to batch: {e}"),
                 source: Some(anyhow::anyhow!(e)),
             })?;
 
@@ -673,7 +672,7 @@ impl EmbeddingModel {
         self.cell.with_dependent_mut(|_, ctx| {
             ctx.encode(&mut batch)
                 .map_err(|e| Error::EmbeddingGenerationError {
-                    message: format!("Failed to encode batch: {}", e),
+                    message: format!("Failed to encode batch: {e}"),
                     source: Some(anyhow::anyhow!(e)),
                 })
         })?;
@@ -693,7 +692,7 @@ impl EmbeddingModel {
                     for i in 0..n_tokens {
                         let embeddings = ctx.embeddings_ith(i as i32).map_err(|e| {
                             Error::EmbeddingGenerationError {
-                                message: format!("Failed to get embeddings for token {}", i),
+                                message: format!("Failed to get embeddings for token {i}"),
                                 source: Some(anyhow::anyhow!(e)),
                             }
                         })?;

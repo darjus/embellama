@@ -112,7 +112,7 @@ impl BatchProcessor {
         let token_sequences = self.parallel_tokenize_real(model, &texts)?;
 
         // Step 3: Check if we need to chunk the batch based on total token count and n_seq_max
-        let total_tokens: usize = token_sequences.iter().map(|seq| seq.len()).sum();
+        let total_tokens: usize = token_sequences.iter().map(std::vec::Vec::len).sum();
         let max_context = model.max_sequence_length();
         let n_seq_max = model.n_seq_max() as usize;
 
@@ -198,7 +198,7 @@ impl BatchProcessor {
 
     /// Sets a progress callback for batch processing.
     ///
-    /// The callback will be called with (current_index, total_count) during processing.
+    /// The callback will be called with (`current_index`, `total_count`) during processing.
     ///
     /// # Arguments
     ///
@@ -301,7 +301,7 @@ impl BatchProcessor {
     }
 }
 
-/// Builder for creating configured BatchProcessor instances.
+/// Builder for creating configured `BatchProcessor` instances.
 #[derive(Default)]
 pub struct BatchProcessorBuilder {
     max_batch_size: Option<usize>,
@@ -338,7 +338,7 @@ impl BatchProcessorBuilder {
         self
     }
 
-    /// Builds the BatchProcessor.
+    /// Builds the `BatchProcessor`.
     pub fn build(self) -> BatchProcessor {
         BatchProcessor {
             max_batch_size: self.max_batch_size.unwrap_or(32),

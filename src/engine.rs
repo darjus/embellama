@@ -80,10 +80,10 @@ pub struct EmbeddingEngine {
 }
 
 impl EmbeddingEngine {
-    /// Gets or creates the singleton LlamaBackend instance.
+    /// Gets or creates the singleton `LlamaBackend` instance.
     ///
     /// This ensures only one backend is created per process, avoiding the
-    /// "BackendAlreadyInitialized" error when creating multiple engines.
+    /// `BackendAlreadyInitialized` error when creating multiple engines.
     fn get_or_create_backend() -> Result<Arc<Mutex<LlamaBackend>>> {
         if let Some(backend) = BACKEND.get() {
             return Ok(Arc::clone(backend));
@@ -91,7 +91,7 @@ impl EmbeddingEngine {
 
         // Initialize the backend for the first time
         let mut backend = LlamaBackend::init().map_err(|e| {
-            let error_str = format!("{}", e);
+            let error_str = format!("{e}");
             if error_str.contains("BackendAlreadyInitialized") {
                 Error::ConfigurationError {
                     message: "LlamaBackend already initialized. This is an internal error."
@@ -109,7 +109,7 @@ impl EmbeddingEngine {
         let backend_arc = Arc::new(Mutex::new(backend));
         // Try to set it, but if another thread beat us to it, use theirs
         match BACKEND.set(Arc::clone(&backend_arc)) {
-            Ok(_) => Ok(backend_arc),
+            Ok(()) => Ok(backend_arc),
             Err(_) => Ok(Arc::clone(BACKEND.get().unwrap())),
         }
     }
@@ -299,7 +299,7 @@ impl EmbeddingEngine {
             let configs = self.model_configs.read();
             if configs.contains_key(&model_name) {
                 return Err(Error::ConfigurationError {
-                    message: format!("Model '{}' is already loaded", model_name),
+                    message: format!("Model '{model_name}' is already loaded"),
                 });
             }
         }
@@ -395,7 +395,7 @@ impl EmbeddingEngine {
     ///
     /// This is a convenience method that combines `unregister_model` and
     /// `drop_model_from_thread`. It maintains backward compatibility with
-    /// the original unload_model behavior.
+    /// the original `unload_model` behavior.
     ///
     /// # Arguments
     ///
@@ -445,7 +445,7 @@ impl EmbeddingEngine {
             // Convert EngineConfig to ModelConfig and create model
             let model_config = config.to_model_config();
             let backend_guard = self.backend.lock().unwrap();
-            let model = EmbeddingModel::new(&*backend_guard, &model_config)?;
+            let model = EmbeddingModel::new(&backend_guard, &model_config)?;
             drop(backend_guard); // Release lock as soon as we're done
 
             // Store in thread-local map
@@ -479,7 +479,7 @@ impl EmbeddingEngine {
     pub fn embed(&self, model_name: Option<&str>, text: &str) -> Result<Vec<f32>> {
         // Determine which model to use
         let model_name = model_name
-            .map(|s| s.to_string())
+            .map(std::string::ToString::to_string)
             .or_else(|| self.default_model.clone())
             .ok_or_else(|| Error::ConfigurationError {
                 message: "No model specified and no default model set".to_string(),
@@ -525,7 +525,7 @@ impl EmbeddingEngine {
     pub fn embed_batch(&self, model_name: Option<&str>, texts: Vec<&str>) -> Result<Vec<Vec<f32>>> {
         // Determine which model to use
         let model_name = model_name
-            .map(|s| s.to_string())
+            .map(std::string::ToString::to_string)
             .or_else(|| self.default_model.clone())
             .ok_or_else(|| Error::ConfigurationError {
                 message: "No model specified and no default model set".to_string(),
@@ -548,7 +548,7 @@ impl EmbeddingEngine {
         let batch_processor = BatchProcessorBuilder::default()
             .with_max_batch_size(64) // Default batch size
             .with_normalization(config.normalize_embeddings)
-            .with_pooling_strategy(config.pooling_strategy.clone())
+            .with_pooling_strategy(config.pooling_strategy)
             .build();
 
         // Process batch using the BatchProcessor
@@ -607,7 +607,7 @@ impl EmbeddingEngine {
         })
     }
 
-    /// Checks if a model is loaded (deprecated, use is_model_registered).
+    /// Checks if a model is loaded (deprecated, use `is_model_registered`).
     ///
     /// # Deprecated
     ///

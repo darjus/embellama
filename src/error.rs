@@ -209,7 +209,7 @@ impl Error {
 /// Type alias for Results in this crate
 pub type Result<T> = std::result::Result<T, Error>;
 
-/// Convert std::io::Error to our Error type
+/// Convert `std::io::Error` to our Error type
 impl From<std::io::Error> for Error {
     fn from(err: std::io::Error) -> Self {
         Self::IoError {

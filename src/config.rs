@@ -81,17 +81,15 @@ impl ModelConfig {
             return Err(Error::config("Model name cannot be empty"));
         }
 
-        if let Some(n_ctx) = self.n_ctx {
-            if n_ctx == 0 {
+        if let Some(n_ctx) = self.n_ctx
+            && n_ctx == 0 {
                 return Err(Error::config("Context size must be greater than 0"));
             }
-        }
 
-        if let Some(n_threads) = self.n_threads {
-            if n_threads == 0 {
+        if let Some(n_threads) = self.n_threads
+            && n_threads == 0 {
                 return Err(Error::config("Number of threads must be greater than 0"));
             }
-        }
 
         if let Some(n_seq) = self.n_seq_max {
             if n_seq == 0 {
@@ -126,7 +124,7 @@ impl Default for ModelConfig {
     }
 }
 
-/// Builder for creating ModelConfig instances
+/// Builder for creating `ModelConfig` instances
 pub struct ModelConfigBuilder {
     config: ModelConfig,
 }
@@ -349,29 +347,25 @@ impl EngineConfig {
             return Err(Error::config("Model name cannot be empty"));
         }
 
-        if let Some(context_size) = self.context_size {
-            if context_size == 0 {
+        if let Some(context_size) = self.context_size
+            && context_size == 0 {
                 return Err(Error::config("Context size must be greater than 0"));
             }
-        }
 
-        if let Some(n_threads) = self.n_threads {
-            if n_threads == 0 {
+        if let Some(n_threads) = self.n_threads
+            && n_threads == 0 {
                 return Err(Error::config("Number of threads must be greater than 0"));
             }
-        }
 
-        if let Some(batch_size) = self.batch_size {
-            if batch_size == 0 {
+        if let Some(batch_size) = self.batch_size
+            && batch_size == 0 {
                 return Err(Error::config("Batch size must be greater than 0"));
             }
-        }
 
-        if let Some(max_tokens) = self.max_tokens {
-            if max_tokens == 0 {
+        if let Some(max_tokens) = self.max_tokens
+            && max_tokens == 0 {
                 return Err(Error::config("Max tokens must be greater than 0"));
             }
-        }
 
         if let Some(n_seq) = self.n_seq_max {
             if n_seq == 0 {
@@ -423,7 +417,7 @@ impl EngineConfig {
         builder.build()
     }
 
-    /// Convert EngineConfig to ModelConfig
+    /// Convert `EngineConfig` to `ModelConfig`
     pub fn to_model_config(&self) -> ModelConfig {
         ModelConfig {
             model_path: self.model_path.clone(),
@@ -441,7 +435,7 @@ impl EngineConfig {
     }
 }
 
-/// Builder for creating EngineConfig instances
+/// Builder for creating `EngineConfig` instances
 pub struct EngineConfigBuilder {
     config: EngineConfig,
 }
