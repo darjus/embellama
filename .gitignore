@@ -55,3 +55,7 @@ coverage/
 __pycache__/
 *.py[cod]
 *$py.class
+
+server.log
+scripts/package-lock.json
+scripts/node_modules
