@@ -36,36 +36,27 @@ jobs:
       - name: Checkout repository
         uses: actions/checkout@v4
 
-      - name: Install Rust toolchain
-        uses: dtolnay/rust-toolchain@master
+      - name: Setup build environment
+        uses: ./.github/actions/setup-build
         with:
-          toolchain: ${{ matrix.rust }}
-          components: rustfmt, clippy
+          rust-toolchain: ${{ matrix.rust }}
+          rust-components: rustfmt, clippy
+          cache-key-prefix: cargo-${{ matrix.rust }}
 
-      - name: Cache cargo registry
-        uses: actions/cache@v3
-        with:
-          path: |
-            ~/.cargo/registry/index/
-            ~/.cargo/registry/cache/
-            ~/.cargo/git/db/
-            target/
-          key: ${{ runner.os }}-cargo-${{ matrix.rust }}-${{ hashFiles('**/Cargo.lock') }}
-          restore-keys: |
-            ${{ runner.os }}-cargo-${{ matrix.rust }}-
-            ${{ runner.os }}-cargo-
-
-      - name: Install dependencies (Ubuntu)
-        if: matrix.os == 'ubuntu-latest'
-        run: |
-          sudo apt-get update
-          sudo apt-get install -y build-essential cmake
+      - name: Download test models
+        run: just download-test-model
 
       - name: Build
-        run: cargo build --verbose --all-features
+        run: just check
 
-      - name: Run tests
-        run: cargo test --verbose --all-features
+      - name: Run unit tests
+        run: just test-unit
+
+      - name: Run integration tests
+        run: just test-integration
+
+      - name: Run concurrency tests  
+        run: just test-concurrency
 
       - name: Build documentation
         run: cargo doc --verbose --no-deps --all-features
@@ -76,7 +67,7 @@ jobs:
         run: cargo check --verbose --no-default-features
 
       - name: Check with server feature
-        run: cargo check --verbose --features server
+        run: just check-server
 
   fmt:
     name: Rustfmt
@@ -90,8 +81,11 @@ jobs:
         with:
           components: rustfmt
 
+      - name: Install just
+        uses: taiki-e/install-action@just
+
       - name: Check formatting
-        run: cargo fmt --all -- --check
+        run: just fmt -- --check
 
   clippy:
     name: Clippy
@@ -100,26 +94,14 @@ jobs:
       - name: Checkout repository
         uses: actions/checkout@v4
 
-      - name: Install Rust toolchain
-        uses: dtolnay/rust-toolchain@stable
+      - name: Setup build environment
+        uses: ./.github/actions/setup-build
         with:
-          components: clippy
-
-      - name: Cache cargo registry
-        uses: actions/cache@v3
-        with:
-          path: |
-            ~/.cargo/registry/index/
-            ~/.cargo/registry/cache/
-            ~/.cargo/git/db/
-            target/
-          key: ${{ runner.os }}-cargo-clippy-${{ hashFiles('**/Cargo.lock') }}
-          restore-keys: |
-            ${{ runner.os }}-cargo-clippy-
-            ${{ runner.os }}-cargo-
+          rust-components: clippy
+          cache-key-prefix: cargo-clippy
 
       - name: Run clippy
-        run: cargo clippy --all-features --all-targets -- -D warnings
+        run: just clippy
 
   security:
     name: Security Audit
@@ -141,14 +123,21 @@ jobs:
       - name: Checkout repository
         uses: actions/checkout@v4
 
-      - name: Install Rust toolchain
-        uses: dtolnay/rust-toolchain@stable
+      - name: Setup build environment
+        uses: ./.github/actions/setup-build
+        with:
+          cache-key-prefix: cargo-coverage
 
       - name: Install tarpaulin
         run: cargo install cargo-tarpaulin
 
+      - name: Download test models
+        run: just download-test-model
+
       - name: Generate coverage
-        run: cargo tarpaulin --verbose --all-features --workspace --timeout 120 --out xml
+        run: |
+          export EMBELLAMA_TEST_MODEL=$(pwd)/models/test/all-minilm-l6-v2-q4_k_m.gguf
+          cargo tarpaulin --verbose --all-features --workspace --timeout 120 --out xml
 
       - name: Upload coverage to Codecov
         uses: codecov/codecov-action@v3
@@ -165,11 +154,14 @@ jobs:
       - name: Checkout repository
         uses: actions/checkout@v4
 
-      - name: Install Rust 1.88.0
-        uses: dtolnay/rust-toolchain@1.88.0
+      - name: Setup build environment
+        uses: ./.github/actions/setup-build
+        with:
+          rust-toolchain: '1.88.0'
+          cache-key-prefix: cargo-msrv
 
       - name: Check MSRV
-        run: cargo check --all-features
+        run: just check
 
   publish-dry-run:
     name: Publish Dry Run
@@ -178,8 +170,38 @@ jobs:
       - name: Checkout repository
         uses: actions/checkout@v4
 
-      - name: Install Rust toolchain
-        uses: dtolnay/rust-toolchain@stable
+      - name: Setup build environment
+        uses: ./.github/actions/setup-build
+        with:
+          install-just: 'false'  # Don't need just for publishing
+          cache-key-prefix: cargo-publish
 
       - name: Dry run publish
         run: cargo publish --dry-run
+
+  server-tests:
+    name: Server Tests
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Setup build environment
+        uses: ./.github/actions/setup-build
+        with:
+          cache-key-prefix: cargo-server
+
+      - name: Download test models
+        run: just download-test-model
+
+      - name: Check server compilation
+        run: just check-server
+
+      - name: Run server integration tests
+        run: just test-server-integration
+
+      - name: Run OpenAI compatibility tests
+        run: just test-server-compat
+
+      - name: Run server load tests
+        run: just test-server-load
