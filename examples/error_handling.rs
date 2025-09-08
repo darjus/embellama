@@ -26,7 +26,7 @@ fn main() {
 
     // Demonstrate various error handling patterns
     if let Err(e) = run_examples() {
-        eprintln!("Example failed: {}", e);
+        eprintln!("Example failed: {e}");
         std::process::exit(1);
     }
 }
@@ -66,7 +66,7 @@ fn handle_missing_model() -> Result<(), Box<dyn std::error::Error>> {
             println!("  Unexpected: Config created with non-existent model");
         }
         Err(e) => {
-            println!("  Expected error caught: {}", e);
+            println!("  Expected error caught: {e}");
 
             // Check if it's a configuration error
             if e.is_configuration_error() {
@@ -118,8 +118,8 @@ fn handle_invalid_config() -> Result<(), Box<dyn std::error::Error>> {
 
     for (desc, result) in invalid_configs {
         match result {
-            Ok(_) => println!("  {}: Unexpected success", desc),
-            Err(e) => println!("  {}: Caught error - {}", desc, e),
+            Ok(_) => println!("  {desc}: Unexpected success"),
+            Err(e) => println!("  {desc}: Caught error - {e}"),
         }
     }
 
@@ -133,13 +133,10 @@ fn handle_embedding_errors() -> Result<(), Box<dyn std::error::Error>> {
     println!("----------------------------------------");
 
     // Get model path from environment or skip
-    let model_path = match env::var("EMBELLAMA_MODEL") {
-        Ok(path) => PathBuf::from(path),
-        Err(_) => {
-            println!("  Skipping: Set EMBELLAMA_MODEL to run this example");
-            println!();
-            return Ok(());
-        }
+    let model_path = if let Ok(path) = env::var("EMBELLAMA_MODEL") { PathBuf::from(path) } else {
+        println!("  Skipping: Set EMBELLAMA_MODEL to run this example");
+        println!();
+        return Ok(());
     };
 
     let config = EngineConfig::builder()
@@ -156,7 +153,7 @@ fn handle_embedding_errors() -> Result<(), Box<dyn std::error::Error>> {
     ];
 
     for text in texts {
-        println!("  Attempting to embed: \"{}\"", text);
+        println!("  Attempting to embed: \"{text}\"");
 
         let mut retries = 3;
         loop {
@@ -166,11 +163,11 @@ fn handle_embedding_errors() -> Result<(), Box<dyn std::error::Error>> {
                     break;
                 }
                 Err(e) => {
-                    println!("    Error: {}", e);
+                    println!("    Error: {e}");
 
                     if e.is_retryable() && retries > 0 {
                         retries -= 1;
-                        println!("    Retrying... ({} attempts left)", retries);
+                        println!("    Retrying... ({retries} attempts left)");
                         std::thread::sleep(std::time::Duration::from_millis(100));
                     } else {
                         println!("    Failed permanently");
@@ -191,13 +188,10 @@ fn handle_batch_errors() -> Result<(), Box<dyn std::error::Error>> {
     println!("------------------------------------");
 
     // Get model path from environment or skip
-    let model_path = match env::var("EMBELLAMA_MODEL") {
-        Ok(path) => PathBuf::from(path),
-        Err(_) => {
-            println!("  Skipping: Set EMBELLAMA_MODEL to run this example");
-            println!();
-            return Ok(());
-        }
+    let model_path = if let Ok(path) = env::var("EMBELLAMA_MODEL") { PathBuf::from(path) } else {
+        println!("  Skipping: Set EMBELLAMA_MODEL to run this example");
+        println!();
+        return Ok(());
     };
 
     let config = EngineConfig::builder()
@@ -241,8 +235,8 @@ fn handle_batch_errors() -> Result<(), Box<dyn std::error::Error>> {
             message,
             failed_indices,
         }) => {
-            println!("  Batch error: {}", message);
-            println!("  Failed indices: {:?}", failed_indices);
+            println!("  Batch error: {message}");
+            println!("  Failed indices: {failed_indices:?}");
 
             // Process only the valid texts
             let valid_texts: Vec<&str> = texts
@@ -262,28 +256,28 @@ fn handle_batch_errors() -> Result<(), Box<dyn std::error::Error>> {
                         );
                     }
                     Err(e) => {
-                        println!("  Retry failed: {}", e);
+                        println!("  Retry failed: {e}");
                     }
                 }
             }
         }
         Err(e) => {
-            println!("  Unexpected error: {}", e);
+            println!("  Unexpected error: {e}");
 
             // Check error type for appropriate handling
             match e {
                 Error::ModelNotFound { name } => {
-                    println!("  -> Model '{}' not found. Load it first.", name);
+                    println!("  -> Model '{name}' not found. Load it first.");
                 }
                 Error::InvalidInput { message } => {
-                    println!("  -> Invalid input: {}", message);
+                    println!("  -> Invalid input: {message}");
                 }
                 Error::Timeout { message } => {
-                    println!("  -> Operation timed out: {}", message);
+                    println!("  -> Operation timed out: {message}");
                     println!("  -> This is retryable!");
                 }
                 _ => {
-                    println!("  -> Error type: {:?}", e);
+                    println!("  -> Error type: {e:?}");
                 }
             }
         }

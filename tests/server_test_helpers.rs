@@ -38,13 +38,13 @@ impl TestServer {
     pub async fn spawn(model_path: PathBuf, workers: usize) -> Result<Self, String> {
         // Find an available port
         let port = find_available_port()?;
-        let base_url = format!("http://127.0.0.1:{}", port);
+        let base_url = format!("http://127.0.0.1:{port}");
 
         // Build the server binary
         let output = Command::new("cargo")
-            .args(&["build", "--features", "server", "--bin", "embellama-server"])
+            .args(["build", "--features", "server", "--bin", "embellama-server"])
             .output()
-            .map_err(|e| format!("Failed to build server: {}", e))?;
+            .map_err(|e| format!("Failed to build server: {e}"))?;
 
         if !output.status.success() {
             return Err(format!(
@@ -55,7 +55,7 @@ impl TestServer {
 
         // Start the server process
         let child = Command::new("cargo")
-            .args(&[
+            .args([
                 "run",
                 "--features",
                 "server",
@@ -76,7 +76,7 @@ impl TestServer {
                 "info",
             ])
             .spawn()
-            .map_err(|e| format!("Failed to spawn server: {}", e))?;
+            .map_err(|e| format!("Failed to spawn server: {e}"))?;
 
         // Wait for server to be ready
         wait_for_server(&base_url, Duration::from_secs(30)).await?;
@@ -90,7 +90,7 @@ impl TestServer {
     }
 
     /// Get the base URL for the test server
-    pub fn url(&self, path: &str) -> String {
+    #[must_use] pub fn url(&self, path: &str) -> String {
         format!("{}{}", self.base_url, path)
     }
 }
@@ -111,29 +111,28 @@ impl Drop for TestServer {
 /// Find an available port
 fn find_available_port() -> Result<u16, String> {
     TcpListener::bind("127.0.0.1:0")
-        .map_err(|e| format!("Failed to bind to port: {}", e))?
+        .map_err(|e| format!("Failed to bind to port: {e}"))?
         .local_addr()
         .map(|addr| addr.port())
-        .map_err(|e| format!("Failed to get local address: {}", e))
+        .map_err(|e| format!("Failed to get local address: {e}"))
 }
 
 /// Wait for the server to become ready
 async fn wait_for_server(base_url: &str, timeout: Duration) -> Result<(), String> {
-    let health_url = format!("{}/health", base_url);
+    let health_url = format!("{base_url}/health");
     let start = Instant::now();
     let client = reqwest::Client::new();
 
     loop {
         if start.elapsed() > timeout {
-            return Err(format!("Server failed to start within {:?}", timeout));
+            return Err(format!("Server failed to start within {timeout:?}"));
         }
 
         // Use async client
-        if let Ok(resp) = client.get(&health_url).send().await {
-            if resp.status().is_success() {
+        if let Ok(resp) = client.get(&health_url).send().await
+            && resp.status().is_success() {
                 return Ok(());
             }
-        }
 
         tokio::time::sleep(Duration::from_millis(100)).await;
     }
@@ -144,8 +143,14 @@ pub struct TestClient {
     pub client: Client,
 }
 
+impl Default for TestClient {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
 impl TestClient {
-    pub fn new() -> Self {
+    #[must_use] pub fn new() -> Self {
         Self {
             client: Client::builder()
                 .timeout(Duration::from_secs(30))
@@ -172,7 +177,7 @@ impl TestClient {
         }
 
         self.client
-            .post(format!("{}/v1/embeddings", base_url))
+            .post(format!("{base_url}/v1/embeddings"))
             .json(&body)
             .send()
             .await
@@ -181,14 +186,14 @@ impl TestClient {
     /// Get list of models
     pub async fn list_models(&self, base_url: &str) -> Result<Response, reqwest::Error> {
         self.client
-            .get(format!("{}/v1/models", base_url))
+            .get(format!("{base_url}/v1/models"))
             .send()
             .await
     }
 
     /// Check health endpoint
     pub async fn health_check(&self, base_url: &str) -> Result<Response, reqwest::Error> {
-        self.client.get(format!("{}/health", base_url)).send().await
+        self.client.get(format!("{base_url}/health")).send().await
     }
 }
 
@@ -244,14 +249,14 @@ pub struct ErrorDetail {
 }
 
 /// Generate test texts of various lengths
-pub fn generate_test_texts(count: usize) -> Vec<String> {
+#[must_use] pub fn generate_test_texts(count: usize) -> Vec<String> {
     (0..count)
         .map(|i| {
             match i % 4 {
-                0 => format!("Short text {}", i),
-                1 => format!("This is a medium length text for testing embeddings. Number: {}", i),
-                2 => format!("This is a much longer text that contains multiple sentences. It's designed to test how the embedding system handles larger inputs. We want to make sure that the model can process various text lengths efficiently. Test number: {}", i),
-                _ => format!("Text with special chars: café, naïve, 日本語, emoji 🚀 #{}", i),
+                0 => format!("Short text {i}"),
+                1 => format!("This is a medium length text for testing embeddings. Number: {i}"),
+                2 => format!("This is a much longer text that contains multiple sentences. It's designed to test how the embedding system handles larger inputs. We want to make sure that the model can process various text lengths efficiently. Test number: {i}"),
+                _ => format!("Text with special chars: café, naïve, 日本語, emoji 🚀 #{i}"),
             }
         })
         .collect()
@@ -296,8 +301,7 @@ pub fn assert_embeddings_normalized(embeddings: &[Vec<f32>], tolerance: f32) {
         let norm: f32 = embedding.iter().map(|x| x * x).sum::<f32>().sqrt();
         assert!(
             (norm - 1.0).abs() < tolerance,
-            "Embedding is not normalized. L2 norm: {} (expected: ~1.0)",
-            norm
+            "Embedding is not normalized. L2 norm: {norm} (expected: ~1.0)"
         );
     }
 }
@@ -312,8 +316,8 @@ pub async fn make_concurrent_requests(
 
     for i in 0..count {
         let client = client.client.clone();
-        let url = format!("{}/v1/embeddings", base_url);
-        let text = format!("Concurrent request {}", i);
+        let url = format!("{base_url}/v1/embeddings");
+        let text = format!("Concurrent request {i}");
 
         handles.push(tokio::spawn(async move {
             client
@@ -349,14 +353,14 @@ pub async fn measure_latencies(
             .embedding_request(
                 base_url,
                 "test-model",
-                EmbeddingInput::Single(format!("Latency test {}", i)),
+                EmbeddingInput::Single(format!("Latency test {i}")),
                 None,
             )
             .await;
         latencies.push(start.elapsed().as_millis() as u64);
     }
 
-    latencies.sort();
+    latencies.sort_unstable();
 
     LatencyStats {
         p50: latencies[latencies.len() / 2],

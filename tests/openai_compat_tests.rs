@@ -12,9 +12,9 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-//! OpenAI compatibility tests for the Embellama server
+//! `OpenAI` compatibility tests for the Embellama server
 //!
-//! These tests validate that the API responses exactly match the OpenAI
+//! These tests validate that the API responses exactly match the `OpenAI`
 //! embeddings API specification.
 
 #![cfg(feature = "server")]
@@ -82,12 +82,11 @@ async fn test_openai_response_structure() {
     );
 
     // Ensure no extra fields are present at top level
-    let expected_fields = vec!["object", "data", "model", "usage"];
-    for (key, _) in body.as_object().unwrap().iter() {
+    let expected_fields = ["object", "data", "model", "usage"];
+    for (key, _) in body.as_object().unwrap() {
         assert!(
             expected_fields.contains(&key.as_str()),
-            "Unexpected field '{}' in response",
-            key
+            "Unexpected field '{key}' in response"
         );
     }
 }
@@ -191,7 +190,7 @@ async fn test_openai_error_response_format() {
         .embedding_request(
             &server.base_url,
             "test-model",
-            EmbeddingInput::Single("".to_string()),
+            EmbeddingInput::Single(String::new()),
             None,
         )
         .await
@@ -430,8 +429,7 @@ async fn test_openai_normalized_embeddings() {
         // Allow some tolerance for floating point precision
         assert!(
             (norm - 1.0).abs() < 0.01,
-            "Embedding should be normalized. L2 norm: {}",
-            norm
+            "Embedding should be normalized. L2 norm: {norm}"
         );
     }
 }

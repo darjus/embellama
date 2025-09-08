@@ -111,7 +111,7 @@ impl Dispatcher {
         // Send to selected worker
         self.workers[worker_index].send(request).await.map_err(|e| {
             warn!("Worker {} channel full or closed: {}", worker_index, e);
-            format!("Failed to send request to worker {}: {}", worker_index, e)
+            format!("Failed to send request to worker {worker_index}: {e}")
         })
     }
 

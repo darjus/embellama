@@ -14,7 +14,7 @@
 
 //! Integration tests for the embellama library
 
-use embellama::{EmbeddingEngine, EngineConfig, ModelConfig, PoolingStrategy};
+use embellama::{EmbeddingEngine, EngineConfig, PoolingStrategy};
 use serial_test::serial;
 use std::fs;
 use std::path::PathBuf;
@@ -70,8 +70,7 @@ fn test_engine_creation_and_embedding() {
     let model_path = PathBuf::from(model_path);
     assert!(
         model_path.exists(),
-        "Model file not found at {:?}. Run 'just download-test-model' to download it.",
-        model_path
+        "Model file not found at {model_path:?}. Run 'just download-test-model' to download it."
     );
 
     let normalize = true; // Store this before moving config
@@ -92,23 +91,21 @@ fn test_engine_creation_and_embedding() {
         .expect("Failed to generate embedding");
 
     assert!(!embedding.is_empty());
-    assert!(embedding.len() > 0);
+    assert!(!embedding.is_empty());
 
     // Check that embeddings are not all zeros (norm should be non-zero)
     // Note: Some models like MiniLM don't normalize by default
     let norm: f32 = embedding.iter().map(|x| x * x).sum::<f32>().sqrt();
     assert!(
         norm > 0.1,
-        "Embedding norm too low (likely zeros), got norm: {}",
-        norm
+        "Embedding norm too low (likely zeros), got norm: {norm}"
     );
 
     // If normalization is enabled in config, check it's close to 1.0
     if normalize {
         assert!(
             (norm - 1.0).abs() < 0.01,
-            "Embedding should be normalized to 1.0, got norm: {}",
-            norm
+            "Embedding should be normalized to 1.0, got norm: {norm}"
         );
     }
 
@@ -126,8 +123,7 @@ fn test_batch_embeddings() {
     let model_path = PathBuf::from(model_path);
     assert!(
         model_path.exists(),
-        "Model file not found at {:?}. Run 'just download-test-model' to download it.",
-        model_path
+        "Model file not found at {model_path:?}. Run 'just download-test-model' to download it."
     );
 
     let config = EngineConfig::builder()
@@ -153,7 +149,7 @@ fn test_batch_embeddings() {
     // Check that all embeddings have the same dimension
     let dim = embeddings[0].len();
     for (i, emb) in embeddings.iter().enumerate() {
-        assert_eq!(emb.len(), dim, "Embedding {} has different dimension", i);
+        assert_eq!(emb.len(), dim, "Embedding {i} has different dimension");
     }
 
     // Clean up thread-local models before test ends
@@ -170,8 +166,7 @@ fn test_multiple_models() {
     let model_path = PathBuf::from(model_path);
     assert!(
         model_path.exists(),
-        "Model file not found at {:?}. Run 'just download-test-model' to download it.",
-        model_path
+        "Model file not found at {model_path:?}. Run 'just download-test-model' to download it."
     );
 
     // Create engine with first model
@@ -227,8 +222,7 @@ fn test_error_handling() {
     let model_path = PathBuf::from(model_path);
     assert!(
         model_path.exists(),
-        "Model file not found at {:?}. Run 'just download-test-model' to download it.",
-        model_path
+        "Model file not found at {model_path:?}. Run 'just download-test-model' to download it."
     );
 
     let config = EngineConfig::builder()
@@ -262,8 +256,7 @@ fn test_bos_token_configuration() {
     let model_path = PathBuf::from(model_path);
     assert!(
         model_path.exists(),
-        "Model file not found at {:?}. Run 'just download-test-model' to download it.",
-        model_path
+        "Model file not found at {model_path:?}. Run 'just download-test-model' to download it."
     );
 
     // Create a single engine with initial model
@@ -341,8 +334,7 @@ fn test_granular_unload_operations() {
     let model_path = PathBuf::from(model_path);
     assert!(
         model_path.exists(),
-        "Model file not found at {:?}. Run 'just download-test-model' to download it.",
-        model_path
+        "Model file not found at {model_path:?}. Run 'just download-test-model' to download it."
     );
 
     // Create engine with a model
@@ -424,8 +416,7 @@ fn test_model_registration_checking() {
     let model_path = PathBuf::from(model_path);
     assert!(
         model_path.exists(),
-        "Model file not found at {:?}. Run 'just download-test-model' to download it.",
-        model_path
+        "Model file not found at {model_path:?}. Run 'just download-test-model' to download it."
     );
 
     // Create engine with a model
@@ -514,8 +505,7 @@ fn test_pooling_strategies() {
     let model_path = PathBuf::from(model_path);
     assert!(
         model_path.exists(),
-        "Model file not found at {:?}. Run 'just download-test-model' to download it.",
-        model_path
+        "Model file not found at {model_path:?}. Run 'just download-test-model' to download it."
     );
 
     // Test different pooling strategies
@@ -551,7 +541,7 @@ fn test_pooling_strategies() {
     for strategy in strategies.into_iter().skip(1) {
         let config = EngineConfig::builder()
             .with_model_path(model_path.clone())
-            .with_model_name(format!("model-{:?}", strategy))
+            .with_model_name(format!("model-{strategy:?}"))
             .with_pooling_strategy(strategy)
             .build()
             .unwrap();
@@ -559,13 +549,12 @@ fn test_pooling_strategies() {
         engine.load_model(config).expect("Failed to load model");
 
         let embedding = engine
-            .embed(Some(&format!("model-{:?}", strategy)), text)
+            .embed(Some(&format!("model-{strategy:?}")), text)
             .expect("Failed to generate embedding");
 
         assert!(
             !embedding.is_empty(),
-            "Embedding empty for strategy {:?}",
-            strategy
+            "Embedding empty for strategy {strategy:?}"
         );
     }
 }
@@ -580,8 +569,7 @@ fn test_model_warmup() {
     let model_path = PathBuf::from(model_path);
     assert!(
         model_path.exists(),
-        "Model file not found at {:?}. Run 'just download-test-model' to download it.",
-        model_path
+        "Model file not found at {model_path:?}. Run 'just download-test-model' to download it."
     );
 
     let config = EngineConfig::builder()
@@ -610,8 +598,7 @@ fn test_model_info() {
     let model_path = PathBuf::from(model_path);
     assert!(
         model_path.exists(),
-        "Model file not found at {:?}. Run 'just download-test-model' to download it.",
-        model_path
+        "Model file not found at {model_path:?}. Run 'just download-test-model' to download it."
     );
 
     let config = EngineConfig::builder()
@@ -662,8 +649,7 @@ fn test_thread_safety() {
     let model_path = PathBuf::from(model_path);
     assert!(
         model_path.exists(),
-        "Model file not found at {:?}. Run 'just download-test-model' to download it.",
-        model_path
+        "Model file not found at {model_path:?}. Run 'just download-test-model' to download it."
     );
 
     let config = EngineConfig::builder()
@@ -679,7 +665,7 @@ fn test_thread_safety() {
         .map(|i| {
             let engine = engine.clone();
             thread::spawn(move || {
-                let text = format!("Thread {} test text", i);
+                let text = format!("Thread {i} test text");
                 let embedding = engine.embed(None, &text).expect("Failed in thread");
                 assert!(!embedding.is_empty());
             })
@@ -702,8 +688,7 @@ fn bench_single_embedding() {
     let model_path = PathBuf::from(model_path);
     assert!(
         model_path.exists(),
-        "Model file not found at {:?}. Run 'just download-test-model' to download it.",
-        model_path
+        "Model file not found at {model_path:?}. Run 'just download-test-model' to download it."
     );
 
     let config = EngineConfig::builder()
@@ -731,13 +716,12 @@ fn bench_single_embedding() {
     let duration = start.elapsed();
     let avg_time = duration / iterations;
 
-    println!("Average time per embedding: {:?}", avg_time);
+    println!("Average time per embedding: {avg_time:?}");
 
     // Assert performance target (adjust based on hardware)
     assert!(
         avg_time.as_millis() < 1000,
-        "Embedding generation too slow: {:?}",
-        avg_time
+        "Embedding generation too slow: {avg_time:?}"
     );
 }
 
@@ -796,9 +780,9 @@ fn test_batch_processing_large() {
     // Create a large batch
     let mut texts = Vec::new();
     for i in 0..100 {
-        texts.push(format!("Test document number {}", i));
+        texts.push(format!("Test document number {i}"));
     }
-    let text_refs: Vec<&str> = texts.iter().map(|s| s.as_str()).collect();
+    let text_refs: Vec<&str> = texts.iter().map(std::string::String::as_str).collect();
 
     let start = std::time::Instant::now();
     let embeddings = engine
@@ -905,9 +889,9 @@ fn test_batch_vs_sequential_performance() {
     // Create test texts
     let mut texts = Vec::new();
     for i in 0..20 {
-        texts.push(format!("Performance test document {}", i));
+        texts.push(format!("Performance test document {i}"));
     }
-    let text_refs: Vec<&str> = texts.iter().map(|s| s.as_str()).collect();
+    let text_refs: Vec<&str> = texts.iter().map(std::string::String::as_str).collect();
 
     // Measure sequential processing time
     let sequential_start = std::time::Instant::now();
@@ -922,8 +906,8 @@ fn test_batch_vs_sequential_performance() {
     let batch_embeddings = engine.embed_batch(Some("test_perf"), text_refs).unwrap();
     let batch_duration = batch_start.elapsed();
 
-    println!("Sequential processing: {:?}", sequential_duration);
-    println!("Batch processing: {:?}", batch_duration);
+    println!("Sequential processing: {sequential_duration:?}");
+    println!("Batch processing: {batch_duration:?}");
     println!(
         "Speedup: {:.2}x",
         sequential_duration.as_secs_f64() / batch_duration.as_secs_f64()

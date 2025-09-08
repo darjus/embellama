@@ -14,7 +14,7 @@
 
 //! Concurrency and thread safety tests for embellama
 
-use embellama::{EmbeddingEngine, EngineConfig, Error};
+use embellama::{EmbeddingEngine, EngineConfig};
 use serial_test::serial;
 use std::sync::{Arc, Barrier};
 use std::thread;
@@ -40,7 +40,7 @@ fn test_thread_local_isolation() {
 
     // Create thread-local storage for models
     thread_local! {
-        static MODEL_NAME: std::cell::RefCell<Option<String>> = std::cell::RefCell::new(None);
+        static MODEL_NAME: std::cell::RefCell<Option<String>> = const { std::cell::RefCell::new(None) };
     }
 
     let handles: Vec<_> = (0..4)
@@ -49,23 +49,23 @@ fn test_thread_local_isolation() {
             thread::spawn(move || {
                 // Each thread sets its own model name
                 MODEL_NAME.with(|name| {
-                    *name.borrow_mut() = Some(format!("thread-{}", i));
+                    *name.borrow_mut() = Some(format!("thread-{i}"));
                 });
 
                 // Verify isolation
                 MODEL_NAME.with(|name| {
                     let stored = name.borrow();
-                    assert_eq!(stored.as_ref().unwrap(), &format!("thread-{}", i));
+                    assert_eq!(stored.as_ref().unwrap(), &format!("thread-{i}"));
                 });
 
                 // Create config (would create model in real scenario)
                 let config = EngineConfig::builder()
                     .with_model_path(path)
-                    .with_model_name(format!("model-{}", i))
+                    .with_model_name(format!("model-{i}"))
                     .build()
                     .unwrap();
 
-                assert_eq!(config.model_name, format!("model-{}", i));
+                assert_eq!(config.model_name, format!("model-{i}"));
             })
         })
         .collect();
@@ -99,13 +99,11 @@ fn test_concurrent_batch_processing() {
                 barrier.wait();
 
                 // Each thread processes its own batch
-                let texts = vec![
-                    format!("Thread {} text 1", i),
-                    format!("Thread {} text 2", i),
-                    format!("Thread {} text 3", i),
-                ];
+                let texts = [format!("Thread {i} text 1"),
+                    format!("Thread {i} text 2"),
+                    format!("Thread {i} text 3")];
 
-                let text_refs: Vec<&str> = texts.iter().map(|s| s.as_str()).collect();
+                let text_refs: Vec<&str> = texts.iter().map(std::string::String::as_str).collect();
                 let result = engine.embed_batch(None, text_refs);
 
                 assert!(result.is_ok());
@@ -129,7 +127,7 @@ fn test_concurrent_batch_processing() {
 fn test_parallel_preprocessing() {
     use rayon::prelude::*;
 
-    let texts: Vec<String> = (0..100).map(|i| format!("Text number {}", i)).collect();
+    let texts: Vec<String> = (0..100).map(|i| format!("Text number {i}")).collect();
 
     // Simulate parallel tokenization
     let tokenized: Vec<Vec<usize>> = texts
@@ -144,7 +142,7 @@ fn test_parallel_preprocessing() {
 
     // Verify order is preserved
     for (i, tokens) in tokenized.iter().enumerate() {
-        let expected_text = format!("Text number {}", i);
+        let expected_text = format!("Text number {i}");
         assert_eq!(tokens.len(), expected_text.len());
     }
 }
@@ -163,7 +161,7 @@ fn test_resource_cleanup() {
                 for j in 0..5 {
                     let config = EngineConfig::builder()
                         .with_model_path(path.clone())
-                        .with_model_name(format!("model-{}-{}", i, j))
+                        .with_model_name(format!("model-{i}-{j}"))
                         .build()
                         .unwrap();
 
@@ -193,31 +191,28 @@ fn test_engine_arc_sharing() {
 
     // Note: This would fail with real model due to !Send constraint
     // but works for testing the Arc wrapper pattern
-    match EmbeddingEngine::new(config) {
-        Ok(engine) => {
-            let engine = Arc::new(engine);
+    if let Ok(engine) = EmbeddingEngine::new(config) {
+        let engine = Arc::new(engine);
 
-            let handles: Vec<_> = (0..4)
-                .map(|i| {
-                    let engine = engine.clone();
-                    thread::spawn(move || {
-                        // Each thread can access the engine
-                        let models = engine.list_models();
-                        assert!(!models.is_empty());
+        let handles: Vec<_> = (0..4)
+            .map(|i| {
+                let engine = engine.clone();
+                thread::spawn(move || {
+                    // Each thread can access the engine
+                    let models = engine.list_models();
+                    assert!(!models.is_empty());
 
-                        // Simulate some work
-                        thread::sleep(Duration::from_millis(i * 10));
-                    })
+                    // Simulate some work
+                    thread::sleep(Duration::from_millis(i * 10));
                 })
-                .collect();
+            })
+            .collect();
 
-            for handle in handles {
-                handle.join().unwrap();
-            }
+        for handle in handles {
+            handle.join().unwrap();
         }
-        Err(_) => {
-            // Expected for dummy model
-        }
+    } else {
+        // Expected for dummy model
     }
 }
 
@@ -266,9 +261,7 @@ fn test_panic_isolation() {
     let handles: Vec<_> = (0..4)
         .map(|i| {
             thread::spawn(move || {
-                if i == 2 {
-                    panic!("Intentional panic in thread {}", i);
-                }
+                assert!(!(i == 2), "Intentional panic in thread {i}");
                 thread::sleep(Duration::from_millis(100));
                 i // Return thread index
             })
@@ -332,7 +325,7 @@ fn test_model_operation_isolation() {
         .map(|i| {
             EngineConfig::builder()
                 .with_model_path(model_path.clone())
-                .with_model_name(format!("model-{}", i))
+                .with_model_name(format!("model-{i}"))
                 .with_context_size(512 * (i + 1))
                 .with_n_threads((i + 1) * 2)
                 .build()
@@ -342,7 +335,7 @@ fn test_model_operation_isolation() {
 
     // Verify each config maintains its settings
     for (i, config) in configs.iter().enumerate() {
-        assert_eq!(config.model_name, format!("model-{}", i));
+        assert_eq!(config.model_name, format!("model-{i}"));
         assert_eq!(config.context_size, Some(512 * (i + 1)));
         assert_eq!(config.n_threads, Some((i + 1) * 2));
     }
@@ -358,17 +351,17 @@ fn test_batch_consistency() {
 
     for size in batch_sizes {
         let texts: Vec<String> = (0..size)
-            .map(|i| format!("Consistency test {}", i))
+            .map(|i| format!("Consistency test {i}"))
             .collect();
 
         // Simulate parallel processing
-        let processed: HashSet<String> = texts.iter().map(|t| t.clone()).collect();
+        let processed: HashSet<String> = texts.iter().cloned().collect();
 
         assert_eq!(processed.len(), size);
 
         // Verify no duplicates or missing items
         for i in 0..size {
-            let expected = format!("Consistency test {}", i);
+            let expected = format!("Consistency test {i}");
             assert!(processed.contains(&expected));
         }
     }
@@ -392,7 +385,7 @@ fn test_no_race_in_model_loading() {
 
                 let result = EngineConfig::builder()
                     .with_model_path(path)
-                    .with_model_name(format!("race-test-{}", i))
+                    .with_model_name(format!("race-test-{i}"))
                     .build();
 
                 assert!(result.is_ok());

@@ -34,7 +34,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
             std::process::exit(1);
         });
 
-    println!("Loading model from: {:?}", model_path);
+    println!("Loading model from: {model_path:?}");
 
     // Create configuration
     let config = EngineConfig::builder()
@@ -53,7 +53,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
 
     // Generate embedding for a single text
     let text = "This is a simple example of generating text embeddings with embellama.";
-    println!("\nGenerating embedding for: \"{}\"", text);
+    println!("\nGenerating embedding for: \"{text}\"");
 
     let embedding = engine.embed(None, text)?;
 
@@ -65,7 +65,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
 
     // Calculate and display L2 norm (should be ~1.0 if normalized)
     let norm: f32 = embedding.iter().map(|x| x * x).sum::<f32>().sqrt();
-    println!("L2 norm: {:.6}", norm);
+    println!("L2 norm: {norm:.6}");
 
     // Generate embeddings for multiple texts
     println!("\n--- Batch Embedding Example ---");
@@ -84,7 +84,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
         println!("  First 5 values: {:?}", &emb[..5.min(emb.len())]);
 
         let norm: f32 = emb.iter().map(|x| x * x).sum::<f32>().sqrt();
-        println!("  L2 norm: {:.6}", norm);
+        println!("  L2 norm: {norm:.6}");
     }
 
     // Calculate cosine similarity between embeddings

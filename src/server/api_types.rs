@@ -15,7 +15,7 @@
 //! OpenAI-compatible API types for the embeddings endpoint
 //!
 //! This module defines the request and response structures that match
-//! the OpenAI API format for maximum compatibility.
+//! the `OpenAI` API format for maximum compatibility.
 
 use serde::{Deserialize, Serialize};
 
@@ -30,7 +30,7 @@ pub enum InputType {
 }
 
 impl InputType {
-    /// Convert to the internal TextInput format
+    /// Convert to the internal `TextInput` format
     pub fn into_text_input(self) -> crate::server::channel::TextInput {
         match self {
             Self::Single(text) => crate::server::channel::TextInput::Single(text),
@@ -155,7 +155,7 @@ pub struct Usage {
     pub total_tokens: usize,
 }
 
-/// Error response format matching OpenAI API
+/// Error response format matching `OpenAI` API
 #[derive(Debug, Clone, Serialize)]
 pub struct ErrorResponse {
     /// Error details
@@ -167,7 +167,7 @@ pub struct ErrorResponse {
 pub struct ErrorDetail {
     /// Error message
     pub message: String,
-    /// Error type (e.g., "invalid_request_error")
+    /// Error type (e.g., "`invalid_request_error`")
     #[serde(rename = "type")]
     pub error_type: String,
     /// Optional error code
@@ -191,7 +191,7 @@ impl ErrorResponse {
     pub fn model_not_found(model: &str) -> Self {
         Self {
             error: ErrorDetail {
-                message: format!("Model '{}' not found", model),
+                message: format!("Model '{model}' not found"),
                 error_type: "model_not_found_error".to_string(),
                 code: Some("model_not_found".to_string()),
             },

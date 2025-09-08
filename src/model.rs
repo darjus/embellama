@@ -887,8 +887,7 @@ mod tests {
             let result = EmbeddingModel::detect_add_bos_token(&path, model_name);
             assert!(
                 !result,
-                "Expected false (no BOS) for encoder model: {}",
-                model_name
+                "Expected false (no BOS) for encoder model: {model_name}"
             );
         }
     }
@@ -915,8 +914,7 @@ mod tests {
             let result = EmbeddingModel::detect_add_bos_token(&path, model_name);
             assert!(
                 result,
-                "Expected true (add BOS) for decoder model: {}",
-                model_name
+                "Expected true (add BOS) for decoder model: {model_name}"
             );
         }
     }
@@ -937,8 +935,7 @@ mod tests {
             let result = EmbeddingModel::detect_add_bos_token(&path, model_name);
             assert!(
                 result,
-                "Expected true (default) for unknown model: {}",
-                model_name
+                "Expected true (default) for unknown model: {model_name}"
             );
         }
     }
@@ -964,8 +961,7 @@ mod tests {
             let result = EmbeddingModel::detect_add_bos_token(&path, model_name);
             assert_eq!(
                 result, expected,
-                "Case-insensitive test failed for: {}",
-                model_name
+                "Case-insensitive test failed for: {model_name}"
             );
         }
     }
@@ -992,7 +988,7 @@ mod tests {
                 assert!(model.max_sequence_length() > 0);
             }
             Err(e) => {
-                eprintln!("Expected error loading model: {}", e);
+                eprintln!("Expected error loading model: {e}");
             }
         }
     }

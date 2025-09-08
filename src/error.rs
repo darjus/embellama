@@ -438,7 +438,7 @@ mod tests {
         ];
 
         for err in retryable_errors {
-            assert!(err.is_retryable(), "{:?} should be retryable", err);
+            assert!(err.is_retryable(), "{err:?} should be retryable");
         }
 
         // Test non-retryable errors
@@ -455,7 +455,7 @@ mod tests {
         ];
 
         for err in non_retryable {
-            assert!(!err.is_retryable(), "{:?} should not be retryable", err);
+            assert!(!err.is_retryable(), "{err:?} should not be retryable");
         }
     }
 

@@ -14,7 +14,7 @@
 
 //! Worker thread implementation for model inference
 //!
-//! This module implements worker threads that use the shared EmbeddingEngine.
+//! This module implements worker threads that use the shared `EmbeddingEngine`.
 //! Each thread will have its own thread-local model instance managed by the engine.
 
 use crate::EmbeddingEngine;
@@ -82,7 +82,7 @@ impl Worker {
                     }
                     TextInput::Batch(texts) => {
                         // Generate batch embeddings
-                        let text_refs: Vec<&str> = texts.iter().map(|s| s.as_str()).collect();
+                        let text_refs: Vec<&str> = texts.iter().map(std::string::String::as_str).collect();
                         engine.embed_batch(Some(&request.model), text_refs)
                     }
                 }
@@ -91,7 +91,7 @@ impl Worker {
             // Create response based on result
             let response = match result {
                 Ok(embeddings) => {
-                    let token_count = embeddings.iter().map(|e| e.len()).sum::<usize>() / 10; // Rough estimate
+                    let token_count = embeddings.iter().map(std::vec::Vec::len).sum::<usize>() / 10; // Rough estimate
 
                     WorkerResponse {
                         embeddings,
@@ -112,7 +112,7 @@ impl Worker {
             };
 
             // Send response back
-            if let Err(_) = request.response_tx.send(response) {
+            if request.response_tx.send(response).is_err() {
                 warn!(
                     "Worker {} failed to send response for request {:?} (client may have timed out)",
                     self.id, request.id

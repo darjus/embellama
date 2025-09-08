@@ -36,7 +36,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
 
     println!("Batch Processing Example");
     println!("========================");
-    println!("Model: {:?}\n", model_path);
+    println!("Model: {model_path:?}\n");
 
     // Create configuration optimized for batch processing
     let config = EngineConfig::builder()
@@ -68,9 +68,9 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
     for &size in &batch_sizes {
         // Generate test texts
         let texts: Vec<String> = (0..size)
-            .map(|i| format!("This is document number {} in the batch. It contains some sample text for embedding generation benchmark.", i))
+            .map(|i| format!("This is document number {i} in the batch. It contains some sample text for embedding generation benchmark."))
             .collect();
-        let text_refs: Vec<&str> = texts.iter().map(|s| s.as_str()).collect();
+        let text_refs: Vec<&str> = texts.iter().map(std::string::String::as_str).collect();
 
         // Measure batch processing time
         let start = Instant::now();
@@ -83,14 +83,13 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
         let items_per_sec = (size as f64 * 1000.0) / total_ms as f64;
 
         println!(
-            "{:<12} {:>11}ms {:>11.2}ms {:>14.1}/s",
-            size, total_ms, per_item_ms, items_per_sec
+            "{size:<12} {total_ms:>11}ms {per_item_ms:>11.2}ms {items_per_sec:>14.1}/s"
         );
 
         // Verify results
         assert_eq!(embeddings.len(), size);
         for emb in &embeddings {
-            assert!(emb.len() > 0, "Empty embedding generated");
+            assert!(!emb.is_empty(), "Empty embedding generated");
         }
     }
 
@@ -99,7 +98,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
     println!("-------------------------------------------");
 
     let test_texts: Vec<String> = (0..50)
-        .map(|i| format!("Comparison test document {}", i))
+        .map(|i| format!("Comparison test document {i}"))
         .collect();
 
     // Sequential processing
@@ -111,13 +110,13 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
     let sequential_time = start.elapsed();
 
     // Batch processing
-    let text_refs: Vec<&str> = test_texts.iter().map(|s| s.as_str()).collect();
+    let text_refs: Vec<&str> = test_texts.iter().map(std::string::String::as_str).collect();
     let start = Instant::now();
     let batch_embeddings = engine.embed_batch(None, text_refs)?;
     let batch_time = start.elapsed();
 
-    println!("Sequential: {:?}", sequential_time);
-    println!("Batch:      {:?}", batch_time);
+    println!("Sequential: {sequential_time:?}");
+    println!("Batch:      {batch_time:?}");
     println!(
         "Speedup:    {:.2}x",
         sequential_time.as_secs_f64() / batch_time.as_secs_f64()
@@ -137,9 +136,9 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
     let large_batch_sizes = vec![500, 1000];
     for &size in &large_batch_sizes {
         let texts: Vec<String> = (0..size)
-            .map(|i| format!("Large batch text {}", i))
+            .map(|i| format!("Large batch text {i}"))
             .collect();
-        let text_refs: Vec<&str> = texts.iter().map(|s| s.as_str()).collect();
+        let text_refs: Vec<&str> = texts.iter().map(std::string::String::as_str).collect();
 
         let start = Instant::now();
         let embeddings = engine.embed_batch(None, text_refs)?;

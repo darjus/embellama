@@ -15,7 +15,7 @@
 //! Property-based tests for embellama
 //!
 //! These tests use proptest to verify invariants with real models.
-//! Requires EMBELLAMA_TEST_MODEL to be set to a valid GGUF model file.
+//! Requires `EMBELLAMA_TEST_MODEL` to be set to a valid GGUF model file.
 
 use embellama::{EmbeddingEngine, EngineConfig};
 use once_cell::sync::Lazy;
@@ -25,7 +25,7 @@ use std::path::PathBuf;
 use std::sync::{Arc, Mutex};
 
 // Use Lazy and Arc<Mutex> for safer shared access
-static ENGINE: Lazy<Arc<Mutex<Option<EmbeddingEngine>>>> = Lazy::new(|| Arc::new(Mutex::new(None)));
+static ENGINE: std::sync::LazyLock<Arc<Mutex<Option<EmbeddingEngine>>>> = std::sync::LazyLock::new(|| Arc::new(Mutex::new(None)));
 
 /// Initialize the engine once for all property tests
 fn ensure_engine_initialized() {
@@ -37,8 +37,7 @@ fn ensure_engine_initialized() {
         let model_path = PathBuf::from(model_path);
         assert!(
             model_path.exists(),
-            "Model file not found at {:?}. Run 'just download-test-model' to download it.",
-            model_path
+            "Model file not found at {model_path:?}. Run 'just download-test-model' to download it."
         );
 
         let config = EngineConfig::builder()
@@ -137,7 +136,7 @@ proptest! {
             return Ok(());
         }
 
-        let text_refs: Vec<&str> = valid_texts.iter().map(|s| s.as_str()).collect();
+        let text_refs: Vec<&str> = valid_texts.iter().map(std::string::String::as_str).collect();
 
         // Get batch embeddings
         let batch_embeddings = with_engine(|engine| {
@@ -281,7 +280,7 @@ proptest! {
         emoji in "[\u{1f300}-\u{1f6ff}]{1,10}"
     ) {
         // Test mixed unicode text
-        let mixed = format!("{} {} {}", english, chinese, emoji);
+        let mixed = format!("{english} {chinese} {emoji}");
 
         if mixed.trim().is_empty() {
             return Ok(());
@@ -292,7 +291,7 @@ proptest! {
 
         let embedding = result.unwrap();
         prop_assert!(!embedding.is_empty(), "Empty embedding for unicode text");
-        prop_assert!(embedding.len() > 0, "Invalid embedding dimensions");
+        prop_assert!(!embedding.is_empty(), "Invalid embedding dimensions");
     }
 }
 
@@ -302,9 +301,9 @@ proptest! {
     #[serial]
     fn test_batch_size_limits(batch_size in 1..200usize) {
         let texts: Vec<String> = (0..batch_size)
-            .map(|i| format!("Text number {}", i))
+            .map(|i| format!("Text number {i}"))
             .collect();
-        let text_refs: Vec<&str> = texts.iter().map(|s| s.as_str()).collect();
+        let text_refs: Vec<&str> = texts.iter().map(std::string::String::as_str).collect();
 
         let result = with_engine(|engine| engine.embed_batch(None, text_refs));
         prop_assert!(result.is_ok(), "Failed with batch size {}", batch_size);
@@ -350,7 +349,7 @@ proptest! {
         }
 
         let text1 = base_text.clone();
-        let text2 = format!("{} {}", base_text, suffix); // Similar but not identical
+        let text2 = format!("{base_text} {suffix}"); // Similar but not identical
 
         let emb1 = with_engine(|engine| {
             engine.embed(None, &text1)

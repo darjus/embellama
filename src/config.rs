@@ -813,8 +813,8 @@ mod tests {
 
             let config = EngineConfig::builder()
                 .with_model_path(&model_path)
-                .with_model_name(format!("test-{:?}", strategy))
-                .with_pooling_strategy(strategy.clone())
+                .with_model_name(format!("test-{strategy:?}"))
+                .with_pooling_strategy(strategy)
                 .build()
                 .unwrap();
 
@@ -925,7 +925,7 @@ mod tests {
             .build()
             .unwrap();
 
-        let debug_str = format!("{:?}", config);
+        let debug_str = format!("{config:?}");
         assert!(debug_str.contains("ModelConfig"));
         assert!(debug_str.contains("debug-test"));
     }

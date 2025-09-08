@@ -43,7 +43,7 @@ async fn test_concurrent_requests_10() {
         let base_url = server.base_url.clone();
 
         tasks.spawn(async move {
-            let text = format!("Concurrent request {}", i);
+            let text = format!("Concurrent request {i}");
             let result = client
                 .embedding_request(&base_url, "test-model", EmbeddingInput::Single(text), None)
                 .await;
@@ -68,8 +68,8 @@ async fn test_concurrent_requests_10() {
 
     let duration = start.elapsed();
 
-    println!("10 concurrent requests completed in {:?}", duration);
-    println!("Success: {}, Failures: {}", success_count, failure_count);
+    println!("10 concurrent requests completed in {duration:?}");
+    println!("Success: {success_count}, Failures: {failure_count}");
 
     assert_eq!(success_count, 10, "All requests should succeed");
     assert_eq!(failure_count, 0, "No requests should fail");
@@ -99,7 +99,7 @@ async fn test_concurrent_requests_50() {
         let base_url = server.base_url.clone();
 
         tasks.spawn(async move {
-            let text = format!("Stress test request {}", i);
+            let text = format!("Stress test request {i}");
             let result = client
                 .embedding_request(&base_url, "test-model", EmbeddingInput::Single(text), None)
                 .await;
@@ -124,8 +124,8 @@ async fn test_concurrent_requests_50() {
 
     let duration = start.elapsed();
 
-    println!("50 concurrent requests completed in {:?}", duration);
-    println!("Success: {}, Failures: {}", success_count, failure_count);
+    println!("50 concurrent requests completed in {duration:?}");
+    println!("Success: {success_count}, Failures: {failure_count}");
 
     // With 4 workers, all 50 should eventually succeed
     assert!(success_count >= 45, "At least 45 requests should succeed");
@@ -151,7 +151,7 @@ async fn test_concurrent_requests_100() {
         let base_url = server.base_url.clone();
 
         tasks.spawn(async move {
-            let text = format!("Heavy load test request {}", i);
+            let text = format!("Heavy load test request {i}");
             let start = Instant::now();
             let result = client
                 .embedding_request(&base_url, "test-model", EmbeddingInput::Single(text), None)
@@ -181,7 +181,7 @@ async fn test_concurrent_requests_100() {
     let duration = start.elapsed();
 
     // Calculate statistics
-    latencies.sort();
+    latencies.sort_unstable();
     let p50 = latencies.get(latencies.len() / 2).copied().unwrap_or(0);
     let p95 = latencies
         .get(latencies.len() * 95 / 100)
@@ -192,9 +192,9 @@ async fn test_concurrent_requests_100() {
         .copied()
         .unwrap_or(0);
 
-    println!("100 concurrent requests completed in {:?}", duration);
-    println!("Success: {}, Failures: {}", success_count, failure_count);
-    println!("Latencies - P50: {}ms, P95: {}ms, P99: {}ms", p50, p95, p99);
+    println!("100 concurrent requests completed in {duration:?}");
+    println!("Success: {success_count}, Failures: {failure_count}");
+    println!("Latencies - P50: {p50}ms, P95: {p95}ms, P99: {p99}ms");
 
     // With proper queue management, most should succeed
     assert!(success_count >= 80, "At least 80 requests should succeed");
@@ -213,7 +213,7 @@ async fn test_throughput_single_requests() {
     let start = Instant::now();
 
     for i in 0..num_requests {
-        let text = format!("Throughput test {}", i);
+        let text = format!("Throughput test {i}");
         let response = client
             .embedding_request(
                 &server.base_url,
@@ -228,11 +228,10 @@ async fn test_throughput_single_requests() {
     }
 
     let duration = start.elapsed();
-    let requests_per_second = num_requests as f64 / duration.as_secs_f64();
+    let requests_per_second = f64::from(num_requests) / duration.as_secs_f64();
 
     println!(
-        "Sequential throughput: {:.2} requests/second",
-        requests_per_second
+        "Sequential throughput: {requests_per_second:.2} requests/second"
     );
 
     // Should handle at least 5 requests per second sequentially
@@ -255,7 +254,7 @@ async fn test_throughput_batch_requests() {
 
     for i in 0..num_batches {
         let texts: Vec<String> = (0..batch_size)
-            .map(|j| format!("Batch {} text {}", i, j))
+            .map(|j| format!("Batch {i} text {j}"))
             .collect();
 
         let response = client
@@ -273,13 +272,12 @@ async fn test_throughput_batch_requests() {
     }
 
     let duration = start.elapsed();
-    let embeddings_per_second = total_embeddings as f64 / duration.as_secs_f64();
+    let embeddings_per_second = f64::from(total_embeddings) / duration.as_secs_f64();
 
     println!(
-        "Batch throughput: {:.2} embeddings/second",
-        embeddings_per_second
+        "Batch throughput: {embeddings_per_second:.2} embeddings/second"
     );
-    println!("({} embeddings in {:?})", total_embeddings, duration);
+    println!("({total_embeddings} embeddings in {duration:?})");
 
     // Should process many embeddings per second in batches
     assert!(embeddings_per_second > 20.0, "Batch throughput too low");
@@ -325,7 +323,7 @@ async fn test_sustained_load() {
     let mut tasks = JoinSet::new();
     let mut request_count = 0;
 
-    println!("Running sustained load test for {:?}...", duration);
+    println!("Running sustained load test for {duration:?}...");
 
     while start.elapsed() < duration {
         let client = client.clone();
@@ -333,7 +331,7 @@ async fn test_sustained_load() {
         let req_id = request_count;
 
         tasks.spawn(async move {
-            let text = format!("Sustained load request {}", req_id);
+            let text = format!("Sustained load request {req_id}");
             client
                 .embedding_request(&base_url, "test-model", EmbeddingInput::Single(text), None)
                 .await
@@ -366,14 +364,14 @@ async fn test_sustained_load() {
     }
 
     let total_duration = start.elapsed();
-    let success_rate = success_count as f64 / request_count as f64 * 100.0;
+    let success_rate = f64::from(success_count) / f64::from(request_count) * 100.0;
 
     println!("\nSustained load test results:");
-    println!("  Duration: {:?}", total_duration);
-    println!("  Total requests: {}", request_count);
-    println!("  Successful: {}", success_count);
-    println!("  Failed: {}", failure_count);
-    println!("  Success rate: {:.2}%", success_rate);
+    println!("  Duration: {total_duration:?}");
+    println!("  Total requests: {request_count}");
+    println!("  Successful: {success_count}");
+    println!("  Failed: {failure_count}");
+    println!("  Success rate: {success_rate:.2}%");
 
     // Should maintain high success rate under sustained load
     assert!(success_rate > 95.0, "Success rate should be above 95%");
@@ -400,14 +398,14 @@ async fn test_mixed_workload() {
             if i % 3 == 0 {
                 // Batch request
                 let texts: Vec<String> = (0..5)
-                    .map(|j| format!("Mixed batch {} item {}", i, j))
+                    .map(|j| format!("Mixed batch {i} item {j}"))
                     .collect();
                 client
                     .embedding_request(&base_url, "test-model", EmbeddingInput::Batch(texts), None)
                     .await
             } else {
                 // Single request
-                let text = format!("Mixed single request {}", i);
+                let text = format!("Mixed single request {i}");
                 client
                     .embedding_request(&base_url, "test-model", EmbeddingInput::Single(text), None)
                     .await
@@ -432,8 +430,8 @@ async fn test_mixed_workload() {
 
     let duration = start.elapsed();
 
-    println!("Mixed workload (30 requests) completed in {:?}", duration);
-    println!("Success: {}, Failures: {}", success_count, failure_count);
+    println!("Mixed workload (30 requests) completed in {duration:?}");
+    println!("Success: {success_count}, Failures: {failure_count}");
 
     assert_eq!(success_count, 30, "All mixed requests should succeed");
     assert_eq!(failure_count, 0, "No mixed requests should fail");
@@ -457,7 +455,7 @@ async fn test_queue_saturation() {
         let base_url = server.base_url.clone();
 
         tasks.spawn(async move {
-            let text = format!("Queue saturation test {}", i);
+            let text = format!("Queue saturation test {i}");
             let start = Instant::now();
             let result = client
                 .embedding_request(&base_url, "test-model", EmbeddingInput::Single(text), None)
@@ -476,27 +474,24 @@ async fn test_queue_saturation() {
     let mut max_latency = Duration::ZERO;
 
     while let Some(result) = tasks.join_next().await {
-        match result {
-            Ok((Ok(response), latency)) => match response.status() {
-                StatusCode::OK => {
-                    success_count += 1;
-                    if latency > max_latency {
-                        max_latency = latency;
-                    }
+        if let Ok((Ok(response), latency)) = result { match response.status() {
+            StatusCode::OK => {
+                success_count += 1;
+                if latency > max_latency {
+                    max_latency = latency;
                 }
-                StatusCode::REQUEST_TIMEOUT => timeout_count += 1,
-                StatusCode::SERVICE_UNAVAILABLE => service_unavailable_count += 1,
-                _ => {}
-            },
+            }
+            StatusCode::REQUEST_TIMEOUT => timeout_count += 1,
+            StatusCode::SERVICE_UNAVAILABLE => service_unavailable_count += 1,
             _ => {}
-        }
+        } }
     }
 
     println!("\nQueue saturation test results:");
-    println!("  Successful: {}", success_count);
-    println!("  Timeouts: {}", timeout_count);
-    println!("  Service unavailable: {}", service_unavailable_count);
-    println!("  Max latency: {:?}", max_latency);
+    println!("  Successful: {success_count}");
+    println!("  Timeouts: {timeout_count}");
+    println!("  Service unavailable: {service_unavailable_count}");
+    println!("  Max latency: {max_latency:?}");
 
     // Should handle overload gracefully
     assert!(success_count > 0, "Some requests should succeed");
@@ -534,7 +529,7 @@ async fn test_memory_stability() {
         let batch_start = Instant::now();
 
         for i in 0..100 {
-            let text = format!("Memory test batch {} request {}", batch, i);
+            let text = format!("Memory test batch {batch} request {i}");
             let response = client
                 .embedding_request(
                     &server.base_url,
@@ -551,7 +546,7 @@ async fn test_memory_stability() {
         let batch_time = batch_start.elapsed();
         batch_times.push(batch_time);
 
-        println!("Batch {} completed in {:?}", batch, batch_time);
+        println!("Batch {batch} completed in {batch_time:?}");
     }
 
     // Check that performance doesn't degrade significantly
@@ -559,12 +554,11 @@ async fn test_memory_stability() {
     let last_batch = batch_times[4].as_millis() as f64;
     let degradation = (last_batch - first_batch) / first_batch * 100.0;
 
-    println!("\nPerformance degradation: {:.2}%", degradation);
+    println!("\nPerformance degradation: {degradation:.2}%");
 
     // Performance shouldn't degrade by more than 20%
     assert!(
         degradation < 20.0,
-        "Performance degradation too high: {:.2}%",
-        degradation
+        "Performance degradation too high: {degradation:.2}%"
     );
 }

@@ -20,7 +20,7 @@ use std::path::PathBuf;
 use tempfile::TempDir;
 
 /// Creates a dummy model file for testing purposes
-pub fn create_dummy_model() -> (TempDir, PathBuf) {
+#[must_use] pub fn create_dummy_model() -> (TempDir, PathBuf) {
     let dir = TempDir::new().expect("Failed to create temp dir");
     let model_path = dir.path().join("test_model.gguf");
 
@@ -33,7 +33,7 @@ pub fn create_dummy_model() -> (TempDir, PathBuf) {
 }
 
 /// Creates a test configuration with sensible defaults
-pub fn create_test_config(model_path: PathBuf) -> EngineConfig {
+#[must_use] pub fn create_test_config(model_path: PathBuf) -> EngineConfig {
     EngineConfig::builder()
         .with_model_path(model_path)
         .with_model_name("test-model")
@@ -46,7 +46,7 @@ pub fn create_test_config(model_path: PathBuf) -> EngineConfig {
 }
 
 /// Gets the path to a real test model if available
-/// Returns None if EMBELLAMA_TEST_MODEL environment variable is not set
+/// Returns None if `EMBELLAMA_TEST_MODEL` environment variable is not set
 pub fn get_test_model_path() -> Option<PathBuf> {
     std::env::var("EMBELLAMA_TEST_MODEL")
         .ok()
@@ -55,7 +55,7 @@ pub fn get_test_model_path() -> Option<PathBuf> {
 }
 
 /// Checks if real model tests should be run
-pub fn should_run_model_tests() -> bool {
+#[must_use] pub fn should_run_model_tests() -> bool {
     get_test_model_path().is_some()
 }
 
@@ -77,9 +77,9 @@ pub fn init_test_logger() {
 }
 
 /// Generate sample texts for batch testing
-pub fn generate_sample_texts(count: usize) -> Vec<String> {
+#[must_use] pub fn generate_sample_texts(count: usize) -> Vec<String> {
     (0..count)
-        .map(|i| format!("Sample text number {} for testing embeddings", i))
+        .map(|i| format!("Sample text number {i} for testing embeddings"))
         .collect()
 }
 
@@ -95,17 +95,13 @@ pub fn assert_embeddings_equal(emb1: &[f32], emb2: &[f32], tolerance: f32) {
         let diff = (a - b).abs();
         assert!(
             diff < tolerance,
-            "Embedding values differ at index {}: {} vs {} (diff: {})",
-            i,
-            a,
-            b,
-            diff
+            "Embedding values differ at index {i}: {a} vs {b} (diff: {diff})"
         );
     }
 }
 
 /// Calculate L2 norm of an embedding vector
-pub fn calculate_l2_norm(embedding: &[f32]) -> f32 {
+#[must_use] pub fn calculate_l2_norm(embedding: &[f32]) -> f32 {
     embedding.iter().map(|x| x * x).sum::<f32>().sqrt()
 }
 
@@ -114,8 +110,7 @@ pub fn assert_normalized(embedding: &[f32], tolerance: f32) {
     let norm = calculate_l2_norm(embedding);
     assert!(
         (norm - 1.0).abs() < tolerance,
-        "Embedding is not normalized. L2 norm: {} (expected: ~1.0)",
-        norm
+        "Embedding is not normalized. L2 norm: {norm} (expected: ~1.0)"
     );
 }
 
