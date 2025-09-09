@@ -285,7 +285,7 @@ pub struct EngineConfig {
 pub enum PoolingStrategy {
     /// Mean pooling across all tokens
     Mean,
-    /// Use only the [CLS] token embedding
+    /// Use only the \[CLS\] token embedding
     Cls,
     /// Max pooling across all tokens
     Max,
