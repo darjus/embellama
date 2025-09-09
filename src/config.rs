@@ -792,7 +792,7 @@ mod tests {
         assert!(config.n_threads.is_none());
         assert!(!config.use_gpu);
         assert!(config.n_gpu_layers.is_none());
-        assert!(!config.normalize_embeddings);
+        assert!(config.normalize_embeddings);
         assert_eq!(config.pooling_strategy, PoolingStrategy::Mean);
         assert!(config.batch_size.is_none());
     }
