@@ -93,7 +93,7 @@ impl BatchProcessor {
     pub fn process_batch(
         &self,
         model: &mut EmbeddingModel,
-        texts: Vec<&str>,
+        texts: &[&str],
     ) -> Result<Vec<Vec<f32>>> {
         if texts.is_empty() {
             return Ok(Vec::new());
@@ -106,10 +106,10 @@ impl BatchProcessor {
         let total = texts.len();
 
         // Step 1: Parallel validation
-        self.parallel_validate(&texts)?;
+        Self::parallel_validate(texts)?;
 
         // Step 2: Parallel tokenization using the real tokenizer
-        let token_sequences = self.parallel_tokenize_real(model, &texts)?;
+        let token_sequences = Self::parallel_tokenize_real(model, texts)?;
 
         // Step 3: Check if we need to chunk the batch based on total token count and n_seq_max
         let total_tokens: usize = token_sequences.iter().map(std::vec::Vec::len).sum();
@@ -124,7 +124,7 @@ impl BatchProcessor {
                 total_tokens
             );
 
-            let batch_embeddings = model.process_batch_tokens(token_sequences)?;
+            let batch_embeddings = model.process_batch_tokens(&token_sequences)?;
 
             // Update progress
             let current = progress_counter.fetch_add(texts.len(), Ordering::Relaxed);
@@ -155,7 +155,7 @@ impl BatchProcessor {
                     && (current_tokens + seq_len > max_context || current_batch.len() >= n_seq_max)
                 {
                     // Process current batch
-                    let batch_embeddings = model.process_batch_tokens(current_batch)?;
+                    let batch_embeddings = model.process_batch_tokens(&current_batch)?;
                     let batch_len = batch_embeddings.len();
                     all_embeddings.extend(batch_embeddings);
 
@@ -177,7 +177,7 @@ impl BatchProcessor {
 
             // Process remaining batch
             if !current_batch.is_empty() {
-                let batch_embeddings = model.process_batch_tokens(current_batch)?;
+                let batch_embeddings = model.process_batch_tokens(&current_batch)?;
                 let batch_len = batch_embeddings.len();
 
                 // Update progress
@@ -219,8 +219,8 @@ impl BatchProcessor {
     /// # Returns
     ///
     /// Returns Ok if all texts are valid, Err otherwise.
-    #[instrument(skip(self, texts), fields(count = texts.len()))]
-    fn parallel_validate(&self, texts: &[&str]) -> Result<()> {
+    #[instrument(skip(texts), fields(count = texts.len()))]
+    fn parallel_validate(texts: &[&str]) -> Result<()> {
         debug!("Validating {} texts in parallel", texts.len());
 
         // Parallel validation with error handling
@@ -250,9 +250,8 @@ impl BatchProcessor {
     /// # Returns
     ///
     /// Returns a vector of tokenized sequences.
-    #[instrument(skip(self, model, texts), fields(count = texts.len()))]
+    #[instrument(skip(model, texts), fields(count = texts.len()))]
     fn parallel_tokenize_real(
-        &self,
         model: &EmbeddingModel,
         texts: &[&str],
     ) -> Result<Vec<Vec<LlamaToken>>> {
@@ -312,24 +311,28 @@ pub struct BatchProcessorBuilder {
 
 impl BatchProcessorBuilder {
     /// Sets the maximum batch size.
+    #[must_use]
     pub fn with_max_batch_size(mut self, size: usize) -> Self {
         self.max_batch_size = Some(size);
         self
     }
 
     /// Sets whether to normalize embeddings.
+    #[must_use]
     pub fn with_normalization(mut self, normalize: bool) -> Self {
         self.normalize = normalize;
         self
     }
 
     /// Sets the pooling strategy.
+    #[must_use]
     pub fn with_pooling_strategy(mut self, strategy: PoolingStrategy) -> Self {
         self.pooling_strategy = strategy;
         self
     }
 
     /// Sets the progress callback.
+    #[must_use]
     pub fn with_progress_callback<F>(mut self, callback: F) -> Self
     where
         F: Fn(usize, usize) + Send + Sync + 'static,
@@ -409,7 +412,7 @@ mod tests {
     }
 
     #[test]
-    #[ignore] // Will be enabled in Phase 4
+    #[ignore = "Will be enabled in Phase 4"]
     fn test_batch_processing() {
         // TODO: Phase 4 - Add actual batch processing tests
     }

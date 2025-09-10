@@ -56,6 +56,10 @@ impl Dispatcher {
     ///
     /// # Returns
     /// A new `Dispatcher` instance
+    ///
+    /// # Panics
+    ///
+    /// Panics if the `EmbeddingEngine` has not been initialized before creating the dispatcher
     pub fn new(worker_count: usize, queue_size: usize) -> Self {
         info!("Creating dispatcher with {} workers", worker_count);
 
@@ -98,6 +102,10 @@ impl Dispatcher {
     ///
     /// # Returns
     /// Result indicating success or failure
+    ///
+    /// # Errors
+    ///
+    /// Returns an error if the request cannot be sent to the worker
     pub async fn send(&self, request: WorkerRequest) -> Result<(), String> {
         // Select next worker using round-robin
         let worker_count = self.workers.len();
@@ -129,7 +137,7 @@ impl Dispatcher {
     /// Shutdown all workers gracefully
     ///
     /// This drops all sender channels, causing workers to exit their loops
-    pub async fn shutdown(self) {
+    pub fn shutdown(self) {
         info!("Shutting down dispatcher and workers");
 
         // Note: Dropping the Arc will signal workers to stop when last reference is dropped

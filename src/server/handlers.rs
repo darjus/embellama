@@ -166,6 +166,7 @@ pub async fn embeddings_handler(
 /// Handler for GET /v1/models
 ///
 /// Lists all available models in OpenAI-compatible format.
+#[allow(clippy::unused_async)] // Required by axum even though we don't await
 pub async fn list_models_handler(State(state): State<AppState>) -> Response {
     debug!("Listing available models");
 

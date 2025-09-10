@@ -65,6 +65,16 @@ impl ModelConfig {
     }
 
     /// Validate the configuration
+    ///
+    /// # Errors
+    ///
+    /// Returns an error if:
+    /// - The model path is empty
+    /// - The model file does not exist
+    /// - The model file extension is not `.gguf`
+    /// - Invalid thread count (0)
+    /// - Invalid batch size (0)
+    /// - Invalid `n_seq_max` (0 or > 64)
     pub fn validate(&self) -> Result<()> {
         if self.model_path.as_os_str().is_empty() {
             return Err(Error::config("Model path cannot be empty"));
@@ -131,6 +141,7 @@ pub struct ModelConfigBuilder {
 
 impl ModelConfigBuilder {
     /// Create a new builder with default configuration
+    #[must_use]
     pub fn new() -> Self {
         Self {
             config: ModelConfig::default(),
@@ -138,54 +149,63 @@ impl ModelConfigBuilder {
     }
 
     /// Set the model path
+    #[must_use]
     pub fn with_model_path<P: AsRef<Path>>(mut self, path: P) -> Self {
         self.config.model_path = path.as_ref().to_path_buf();
         self
     }
 
     /// Set the model name
+    #[must_use]
     pub fn with_model_name<S: Into<String>>(mut self, name: S) -> Self {
         self.config.model_name = name.into();
         self
     }
 
     /// Set the context size
+    #[must_use]
     pub fn with_n_ctx(mut self, ctx: u32) -> Self {
         self.config.n_ctx = Some(ctx);
         self
     }
 
     /// Set the number of threads
+    #[must_use]
     pub fn with_n_threads(mut self, threads: usize) -> Self {
         self.config.n_threads = Some(threads);
         self
     }
 
     /// Set the number of GPU layers
+    #[must_use]
     pub fn with_n_gpu_layers(mut self, layers: u32) -> Self {
         self.config.n_gpu_layers = Some(layers);
         self
     }
 
     /// Set whether to use memory mapping
+    #[must_use]
     pub fn with_use_mmap(mut self, use_mmap: bool) -> Self {
         self.config.use_mmap = use_mmap;
         self
     }
 
     /// Set whether to use memory locking
+    #[must_use]
     pub fn with_use_mlock(mut self, use_mlock: bool) -> Self {
         self.config.use_mlock = use_mlock;
         self
     }
 
     /// Set whether to normalize embeddings
+    #[must_use]
     pub fn with_normalize_embeddings(mut self, normalize: bool) -> Self {
         self.config.normalize_embeddings = normalize;
         self
     }
 
     /// Set the pooling strategy
+    #[must_use]
     pub fn with_pooling_strategy(mut self, strategy: PoolingStrategy) -> Self {
         self.config.pooling_strategy = strategy;
         self
@@ -193,6 +213,7 @@ impl ModelConfigBuilder {
 
     /// Set whether to add BOS token during tokenization
     /// None = auto-detect based on model type
+    #[must_use]
     pub fn with_add_bos_token(mut self, add_bos: Option<bool>) -> Self {
         self.config.add_bos_token = add_bos;
         self
@@ -200,12 +221,17 @@ impl ModelConfigBuilder {
 
     /// Set the maximum number of sequences for batch processing
     /// Default: 1, max: 64 (llama.cpp limit)
+    #[must_use]
     pub fn with_n_seq_max(mut self, n_seq_max: u32) -> Self {
         self.config.n_seq_max = Some(n_seq_max);
         self
     }
 
     /// Build the configuration
+    ///
+    /// # Errors
+    ///
+    /// Returns an error if the configuration validation fails
     pub fn build(self) -> Result<ModelConfig> {
         self.config.validate()?;
         Ok(self.config)
@@ -220,6 +246,7 @@ impl Default for ModelConfigBuilder {
 
 /// Configuration for the embedding engine
 #[derive(Debug, Clone, Serialize, Deserialize)]
+#[allow(clippy::struct_excessive_bools)]
 pub struct EngineConfig {
     /// Path to the GGUF model file
     pub model_path: PathBuf,
@@ -331,6 +358,16 @@ impl EngineConfig {
     }
 
     /// Validate the configuration
+    ///
+    /// # Errors
+    ///
+    /// Returns an error if:
+    /// - The model path is empty
+    /// - The model file does not exist
+    /// - The model file extension is not `.gguf`
+    /// - Invalid thread count (0)
+    /// - Invalid batch size (0)
+    /// - Invalid `n_seq_max` (0 or > 64)
     pub fn validate(&self) -> Result<()> {
         if self.model_path.as_os_str().is_empty() {
             return Err(Error::config("Model path cannot be empty"));
@@ -382,6 +419,10 @@ impl EngineConfig {
     }
 
     /// Load configuration from environment variables
+    ///
+    /// # Errors
+    ///
+    /// Returns an error if the configuration validation fails
     pub fn from_env() -> Result<Self> {
         let mut builder = EngineConfigBuilder::new();
 
@@ -422,7 +463,7 @@ impl EngineConfig {
         ModelConfig {
             model_path: self.model_path.clone(),
             model_name: self.model_name.clone(),
-            n_ctx: self.context_size.map(|s| s as u32),
+            n_ctx: self.context_size.and_then(|s| u32::try_from(s).ok()),
             n_threads: self.n_threads,
             n_gpu_layers: self.n_gpu_layers,
             use_mmap: self.use_mmap,
@@ -442,6 +483,7 @@ pub struct EngineConfigBuilder {
 
 impl EngineConfigBuilder {
     /// Create a new builder with default configuration
+    #[must_use]
     pub fn new() -> Self {
         Self {
             config: EngineConfig::default(),
@@ -449,96 +491,112 @@ impl EngineConfigBuilder {
     }
 
     /// Set the model path
+    #[must_use]
     pub fn with_model_path<P: AsRef<Path>>(mut self, path: P) -> Self {
         self.config.model_path = path.as_ref().to_path_buf();
         self
     }
 
     /// Set the model name
+    #[must_use]
     pub fn with_model_name<S: Into<String>>(mut self, name: S) -> Self {
         self.config.model_name = name.into();
         self
     }
 
     /// Set the context size
+    #[must_use]
     pub fn with_context_size(mut self, size: usize) -> Self {
         self.config.context_size = Some(size);
         self
     }
 
     /// Set the number of threads
+    #[must_use]
     pub fn with_n_threads(mut self, threads: usize) -> Self {
         self.config.n_threads = Some(threads);
         self
     }
 
     /// Set whether to use GPU
+    #[must_use]
     pub fn with_use_gpu(mut self, use_gpu: bool) -> Self {
         self.config.use_gpu = use_gpu;
         self
     }
 
     /// Set the number of GPU layers
+    #[must_use]
     pub fn with_n_gpu_layers(mut self, layers: u32) -> Self {
         self.config.n_gpu_layers = Some(layers);
         self
     }
 
     /// Set the batch size
+    #[must_use]
     pub fn with_batch_size(mut self, size: usize) -> Self {
         self.config.batch_size = Some(size);
         self
     }
 
     /// Set whether to normalize embeddings
+    #[must_use]
     pub fn with_normalize_embeddings(mut self, normalize: bool) -> Self {
         self.config.normalize_embeddings = normalize;
         self
     }
 
     /// Set the pooling strategy
+    #[must_use]
     pub fn with_pooling_strategy(mut self, strategy: PoolingStrategy) -> Self {
         self.config.pooling_strategy = strategy;
         self
     }
 
     /// Set the maximum tokens
+    #[must_use]
     pub fn with_max_tokens(mut self, tokens: usize) -> Self {
         self.config.max_tokens = Some(tokens);
         self
     }
 
     /// Set the memory limit in MB
+    #[must_use]
     pub fn with_memory_limit_mb(mut self, limit_mb: usize) -> Self {
         self.config.memory_limit_mb = Some(limit_mb);
         self
     }
 
     /// Set verbose logging
+    #[must_use]
     pub fn with_verbose(mut self, verbose: bool) -> Self {
         self.config.verbose = verbose;
         self
     }
 
     /// Set the seed for reproducibility
+    #[must_use]
     pub fn with_seed(mut self, seed: u32) -> Self {
         self.config.seed = Some(seed);
         self
     }
 
     /// Set the temperature
+    #[must_use]
     pub fn with_temperature(mut self, temperature: f32) -> Self {
         self.config.temperature = Some(temperature);
         self
     }
 
     /// Set whether to use memory mapping
+    #[must_use]
     pub fn with_use_mmap(mut self, use_mmap: bool) -> Self {
         self.config.use_mmap = use_mmap;
         self
     }
 
     /// Set whether to use memory locking
+    #[must_use]
     pub fn with_use_mlock(mut self, use_mlock: bool) -> Self {
         self.config.use_mlock = use_mlock;
         self
@@ -546,6 +604,7 @@ impl EngineConfigBuilder {
 
     /// Set whether to add BOS token during tokenization
     /// None = auto-detect based on model type
+    #[must_use]
     pub fn with_add_bos_token(mut self, add_bos: Option<bool>) -> Self {
         self.config.add_bos_token = add_bos;
         self
@@ -553,12 +612,17 @@ impl EngineConfigBuilder {
 
     /// Set the maximum number of sequences for batch processing
     /// Default: 1, max: 64 (llama.cpp limit)
+    #[must_use]
     pub fn with_n_seq_max(mut self, n_seq_max: u32) -> Self {
         self.config.n_seq_max = Some(n_seq_max);
         self
     }
 
     /// Build the configuration
+    ///
+    /// # Errors
+    ///
+    /// Returns an error if the configuration validation fails
     pub fn build(self) -> Result<EngineConfig> {
         self.config.validate()?;
         Ok(self.config)

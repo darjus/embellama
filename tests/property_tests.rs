@@ -18,7 +18,6 @@
 //! Requires `EMBELLAMA_TEST_MODEL` to be set to a valid GGUF model file.
 
 use embellama::{EmbeddingEngine, EngineConfig};
-use once_cell::sync::Lazy;
 use proptest::prelude::*;
 use serial_test::serial;
 use std::path::PathBuf;
@@ -140,7 +139,7 @@ proptest! {
 
         // Get batch embeddings
         let batch_embeddings = with_engine(|engine| {
-            engine.embed_batch(None, text_refs.clone())
+            engine.embed_batch(None, &text_refs)
                 .expect("Failed to generate batch embeddings")
         });
 
@@ -180,7 +179,7 @@ proptest! {
     fn test_empty_batch_handling(_seed in 0u32..100u32) {
         let empty: Vec<&str> = vec![];
         let embeddings = with_engine(|engine| {
-            engine.embed_batch(None, empty)
+            engine.embed_batch(None, &empty)
                 .expect("Failed to process empty batch")
         });
 
@@ -305,7 +304,7 @@ proptest! {
             .collect();
         let text_refs: Vec<&str> = texts.iter().map(std::string::String::as_str).collect();
 
-        let result = with_engine(|engine| engine.embed_batch(None, text_refs));
+        let result = with_engine(|engine| engine.embed_batch(None, &text_refs));
         prop_assert!(result.is_ok(), "Failed with batch size {}", batch_size);
 
         let embeddings = result.unwrap();

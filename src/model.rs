@@ -29,8 +29,8 @@ use llama_cpp_2::{
 };
 use self_cell::self_cell;
 use std::num::NonZeroU32;
-use std::path::PathBuf;
-use tracing::{debug, info, instrument};
+use std::path::{Path, PathBuf};
+use tracing::{debug, info, instrument, warn};
 
 self_cell! {
     struct ModelCell {
@@ -133,11 +133,12 @@ impl EmbeddingModel {
 
         // Set up context parameters
         let ctx_size = config.n_ctx.unwrap_or(2048);
-        let n_threads = config.n_threads.unwrap_or_else(|| {
+        let n_threads = i32::try_from(config.n_threads.unwrap_or_else(|| {
             let threads = num_cpus::get();
             debug!("Using {} CPU threads", threads);
             threads
-        }) as i32;
+        }))
+        .unwrap_or(1);
 
         // Get n_seq_max from config (default to 1)
         let n_seq_max = config.n_seq_max.unwrap_or(1);
@@ -160,6 +161,7 @@ impl EmbeddingModel {
         ctx_params = ctx_params.with_flash_attention(true);
 
         // Get embedding dimensions from the model
+        #[allow(clippy::cast_sign_loss)]
         let embedding_dimensions = model.n_embd() as usize;
 
         info!(
@@ -195,6 +197,7 @@ impl EmbeddingModel {
             model_path: config.model_path.clone(),
             model_name: config.model_name.clone(),
             embedding_dimensions,
+            #[allow(clippy::cast_lossless)]
             max_context_size: ctx_size as usize,
             add_bos_token,
             n_seq_max,
@@ -214,6 +217,10 @@ impl EmbeddingModel {
     /// # Returns
     ///
     /// Returns a `Result` containing the loaded model or an error.
+    ///
+    /// # Errors
+    ///
+    /// Returns an error if model loading fails
     pub fn load(backend: &LlamaBackend, config: &ModelConfig) -> Result<Self> {
         Self::new(backend, config)
     }
@@ -259,13 +266,16 @@ impl EmbeddingModel {
     ///
     /// # Returns
     ///
-    /// Estimated memory usage in bytes.
-    pub fn model_size(&self) -> usize {
+    /// Estimated memory usage in bytes, or `None` if the size cannot be calculated
+    /// (e.g., on 32-bit platforms with very large models).
+    pub fn model_size(&self) -> Option<usize> {
         // This is an approximation based on model parameters
         // More accurate measurement would require llama.cpp API support
         let params = self.cell.borrow_owner().n_params();
         let size_per_param = 2; // Approximate bytes per parameter for quantized models
-        params as usize * size_per_param
+        usize::try_from(params)
+            .ok()
+            .map(|p| p * size_per_param)
     }
 
     /// Returns the model's metadata.
@@ -277,8 +287,14 @@ impl EmbeddingModel {
         (
             self.model_name.clone(),
             self.model_path.clone(),
-            self.cell.borrow_owner().n_vocab() as usize,
-            self.cell.borrow_owner().n_params() as usize,
+            usize::try_from(self.cell.borrow_owner().n_vocab()).unwrap_or_else(|_| {
+                warn!("Model vocab size conversion failed, using 0");
+                0
+            }),
+            usize::try_from(self.cell.borrow_owner().n_params()).unwrap_or_else(|_| {
+                warn!("Model params count too large for platform, using 0");
+                0
+            }),
         )
     }
 
@@ -321,7 +337,7 @@ impl EmbeddingModel {
     /// # Returns
     ///
     /// Returns false for known encoder models, true otherwise (default to decoder behavior)
-    fn detect_add_bos_token(model_path: &PathBuf, model_name: &str) -> bool {
+    fn detect_add_bos_token(model_path: &Path, model_name: &str) -> bool {
         // Convert model name to lowercase for case-insensitive matching
         let name_lower = model_name.to_lowercase();
         let path_str = model_path.to_string_lossy().to_lowercase();
@@ -457,12 +473,12 @@ impl EmbeddingModel {
             embeddings[0].clone()
         } else {
             // Apply our pooling strategy for multi-token outputs
-            self.apply_pooling(&embeddings, &self.config.pooling_strategy)?
+            Self::apply_pooling(&embeddings, self.config.pooling_strategy)?
         };
 
         // Normalize if configured
         let final_embedding = if self.config.normalize_embeddings {
-            self.normalize_embedding(pooled)?
+            Self::normalize_embedding(pooled)?
         } else {
             pooled
         };
@@ -478,15 +494,23 @@ impl EmbeddingModel {
     ///
     /// # Arguments
     ///
-    /// * `token_sequences` - Vector of token sequences to process
+    /// * `token_sequences` - Slice of token sequences to process
     ///
     /// # Returns
     ///
     /// Returns a vector of embedding vectors, one for each input sequence.
+    ///
+    /// # Errors
+    ///
+    /// Returns an error if:
+    /// - Context creation fails
+    /// - Batch processing fails
+    /// - Embedding extraction fails
+    /// - Pooling or normalization operations fail
     #[instrument(skip(self, token_sequences), fields(batch_size = token_sequences.len()))]
     pub fn process_batch_tokens(
         &mut self,
-        token_sequences: Vec<Vec<LlamaToken>>,
+        token_sequences: &[Vec<LlamaToken>],
     ) -> Result<Vec<Vec<f32>>> {
         if token_sequences.is_empty() {
             return Ok(Vec::new());
@@ -499,6 +523,7 @@ impl EmbeddingModel {
         );
 
         // If we have more sequences than n_seq_max, process in chunks
+        #[allow(clippy::cast_lossless)]
         if token_sequences.len() > self.n_seq_max as usize {
             debug!(
                 "Batch size {} exceeds n_seq_max {}, chunking",
@@ -509,9 +534,10 @@ impl EmbeddingModel {
             let mut all_embeddings = Vec::with_capacity(token_sequences.len());
 
             // Process sequences in chunks of n_seq_max
+            #[allow(clippy::cast_lossless)]
             for chunk in token_sequences.chunks(self.n_seq_max as usize) {
                 debug!("Processing chunk of {} sequences", chunk.len());
-                let chunk_embeddings = self.process_batch_tokens_internal(chunk.to_vec())?;
+                let chunk_embeddings = self.process_batch_tokens_internal(chunk)?;
                 all_embeddings.extend(chunk_embeddings);
             }
 
@@ -525,7 +551,7 @@ impl EmbeddingModel {
     /// Internal method to process a batch of token sequences that fits within `n_seq_max`.
     fn process_batch_tokens_internal(
         &mut self,
-        token_sequences: Vec<Vec<LlamaToken>>,
+        token_sequences: &[Vec<LlamaToken>],
     ) -> Result<Vec<Vec<f32>>> {
         // Calculate total tokens needed for batch
         let total_tokens: usize = token_sequences.iter().map(std::vec::Vec::len).sum();
@@ -541,12 +567,21 @@ impl EmbeddingModel {
         }
 
         // Create a batch with all sequences (using actual n_seq_max)
-        let mut batch = LlamaBatch::new(total_tokens, self.n_seq_max as i32);
+        let n_seq_max_i32 = i32::try_from(self.n_seq_max)
+            .map_err(|_| Error::EmbeddingGenerationError {
+                message: "n_seq_max too large for i32".to_string(),
+                source: None,
+            })?;
+        let mut batch = LlamaBatch::new(total_tokens, n_seq_max_i32);
 
         // Add each sequence with unique ID
         for (seq_id, tokens) in token_sequences.iter().enumerate() {
             batch
-                .add_sequence(tokens, seq_id as i32, true)
+                .add_sequence(tokens, i32::try_from(seq_id)
+                    .map_err(|_| Error::EmbeddingGenerationError {
+                        message: format!("Sequence ID {seq_id} too large for i32"),
+                        source: None,
+                    })?, true)
                 .map_err(|e| Error::EmbeddingGenerationError {
                     message: format!("Failed to add sequence {seq_id} to batch: {e}"),
                     source: Some(anyhow::anyhow!(e)),
@@ -570,33 +605,39 @@ impl EmbeddingModel {
                 self.cell
                     .with_dependent(|_, ctx| -> Result<Vec<Vec<f32>>> {
                         // Try to get sequence embeddings first (for BERT models)
-                        if let Ok(seq_embeddings) = ctx.embeddings_seq_ith(seq_id as i32) {
-                            // For BERT models with pooling, we get one embedding for the whole sequence
-                            Ok(vec![seq_embeddings.to_vec()])
-                        } else {
-                            // Fall back to token-wise embeddings (for LLaMA-style models)
-                            // Need to extract tokens for this specific sequence
-                            let seq_tokens = &token_sequences[seq_id];
-                            let mut token_embeddings = Vec::with_capacity(seq_tokens.len());
-
-                            // Calculate token offset for this sequence
-                            let token_offset: usize =
-                                token_sequences[..seq_id].iter().map(std::vec::Vec::len).sum();
-
-                            for i in 0..seq_tokens.len() {
-                                let global_idx = token_offset + i;
-                                let embeddings = ctx.embeddings_ith(global_idx as i32).map_err(
-                                    |e| Error::EmbeddingGenerationError {
-                                        message: format!(
-                                            "Failed to get embeddings for token {i} in sequence {seq_id}"
-                                        ),
-                                        source: Some(anyhow::anyhow!(e)),
-                                    },
-                                )?;
-                                token_embeddings.push(embeddings.to_vec());
-                            }
-                            Ok(token_embeddings)
+                        if let Ok(seq_id_i32) = i32::try_from(seq_id)
+                            && let Ok(seq_embeddings) = ctx.embeddings_seq_ith(seq_id_i32) {
+                                // For BERT models with pooling, we get one embedding for the whole sequence
+                                return Ok(vec![seq_embeddings.to_vec()]);
                         }
+                        
+                        // Fall back to token-wise embeddings (for LLaMA-style models)
+                        // Need to extract tokens for this specific sequence
+                        let seq_tokens = &token_sequences[seq_id];
+                        let mut token_embeddings = Vec::with_capacity(seq_tokens.len());
+
+                        // Calculate token offset for this sequence
+                        let token_offset: usize =
+                            token_sequences[..seq_id].iter().map(std::vec::Vec::len).sum();
+
+                        for i in 0..seq_tokens.len() {
+                            let global_idx = token_offset + i;
+                            let global_idx_i32 = i32::try_from(global_idx)
+                                .map_err(|_| Error::EmbeddingGenerationError {
+                                    message: format!("Global index {global_idx} too large for i32"),
+                                    source: None,
+                                })?;
+                            let embeddings = ctx.embeddings_ith(global_idx_i32).map_err(
+                                |e| Error::EmbeddingGenerationError {
+                                    message: format!(
+                                        "Failed to get embeddings for token {i} in sequence {seq_id}"
+                                    ),
+                                    source: Some(anyhow::anyhow!(e)),
+                                },
+                            )?;
+                            token_embeddings.push(embeddings.to_vec());
+                        }
+                        Ok(token_embeddings)
                     })?;
 
             // Apply pooling and normalization
@@ -605,11 +646,11 @@ impl EmbeddingModel {
                 embeddings[0].clone()
             } else {
                 // Apply our pooling strategy
-                self.apply_pooling(&embeddings, &self.config.pooling_strategy)?
+                Self::apply_pooling(&embeddings, self.config.pooling_strategy)?
             };
 
             let final_embedding = if self.config.normalize_embeddings {
-                self.normalize_embedding(pooled)?
+                Self::normalize_embedding(pooled)?
             } else {
                 pooled
             };
@@ -631,6 +672,13 @@ impl EmbeddingModel {
     /// # Returns
     ///
     /// Returns the processed embedding vector.
+    ///
+    /// # Errors
+    ///
+    /// Returns an error if:
+    /// - Token processing fails
+    /// - Pooling operation fails
+    /// - Normalization fails (if enabled)
     #[instrument(skip(self, tokens), fields(token_count = tokens.len()))]
     pub fn process_tokens(&mut self, tokens: &[i32]) -> Result<Vec<f32>> {
         // Convert i32 tokens to LlamaToken and process
@@ -638,11 +686,11 @@ impl EmbeddingModel {
         let embeddings = self.process_tokens_internal(&llama_tokens)?;
 
         // Apply pooling strategy
-        let pooled = self.apply_pooling(&embeddings, &self.config.pooling_strategy)?;
+        let pooled = Self::apply_pooling(&embeddings, self.config.pooling_strategy)?;
 
         // Normalize if configured
         let final_embedding = if self.config.normalize_embeddings {
-            self.normalize_embedding(pooled)?
+            Self::normalize_embedding(pooled)?
         } else {
             pooled
         };
@@ -690,7 +738,12 @@ impl EmbeddingModel {
                     // Fall back to token-wise embeddings (for LLaMA-style models)
                     let mut token_embeddings = Vec::with_capacity(n_tokens);
                     for i in 0..n_tokens {
-                        let embeddings = ctx.embeddings_ith(i as i32).map_err(|e| {
+                        let i_i32 = i32::try_from(i)
+                            .map_err(|_| Error::EmbeddingGenerationError {
+                                message: format!("Index {i} too large for i32"),
+                                source: None,
+                            })?;
+                        let embeddings = ctx.embeddings_ith(i_i32).map_err(|e| {
                             Error::EmbeddingGenerationError {
                                 message: format!("Failed to get embeddings for token {i}"),
                                 source: Some(anyhow::anyhow!(e)),
@@ -716,9 +769,8 @@ impl EmbeddingModel {
     ///
     /// Returns a single pooled embedding vector.
     fn apply_pooling(
-        &self,
         embeddings: &[Vec<f32>],
-        strategy: &PoolingStrategy,
+        strategy: PoolingStrategy,
     ) -> Result<Vec<f32>> {
         if embeddings.is_empty() {
             return Err(Error::EmbeddingGenerationError {
@@ -733,6 +785,7 @@ impl EmbeddingModel {
             PoolingStrategy::Mean => {
                 // Mean pooling across all tokens
                 let mut pooled = vec![0.0f32; embedding_dim];
+                #[allow(clippy::cast_precision_loss)]
                 let n_tokens = embeddings.len() as f32;
 
                 for token_emb in embeddings {
@@ -762,6 +815,7 @@ impl EmbeddingModel {
             PoolingStrategy::MeanSqrt => {
                 // Mean pooling with sqrt(length) normalization
                 let mut pooled = vec![0.0f32; embedding_dim];
+                #[allow(clippy::cast_precision_loss)]
                 let sqrt_n = (embeddings.len() as f32).sqrt();
 
                 for token_emb in embeddings {
@@ -789,7 +843,7 @@ impl EmbeddingModel {
     /// # Returns
     ///
     /// Returns the normalized embedding vector.
-    fn normalize_embedding(&self, mut embedding: Vec<f32>) -> Result<Vec<f32>> {
+    fn normalize_embedding(mut embedding: Vec<f32>) -> Result<Vec<f32>> {
         // Calculate L2 norm
         let norm: f32 = embedding.iter().map(|x| x * x).sum::<f32>().sqrt();
 
@@ -819,26 +873,6 @@ impl Drop for EmbeddingModel {
     }
 }
 
-/// Helper function to create a test model for unit tests.
-#[cfg(test)]
-pub(crate) fn create_test_config() -> ModelConfig {
-    use std::fs;
-    use tempfile::tempdir;
-
-    let dir = tempdir().unwrap();
-    let model_path = dir.path().join("test_model.gguf");
-
-    // Create a dummy file for testing
-    fs::write(&model_path, b"dummy model file").unwrap();
-
-    ModelConfig::builder()
-        .with_model_path(model_path)
-        .with_model_name("test-model")
-        .with_n_ctx(512)
-        .with_n_threads(1)
-        .build()
-        .unwrap()
-}
 
 #[cfg(test)]
 mod tests {
@@ -967,7 +1001,7 @@ mod tests {
     }
 
     #[test]
-    #[ignore] // Requires actual GGUF model file
+    #[ignore = "Requires actual GGUF model file"]
     fn test_model_loading_with_real_file() {
         // This test would require a real GGUF model file
         // It's marked as ignore but can be run with: cargo test -- --ignored

@@ -75,5 +75,5 @@ panic = "abort"
 inherits = "release"
 
 [lints.clippy]
-pedantic = "deny"
+pedantic = { level = "deny", priority = -1 }
 missing_errors_doc = "allow"

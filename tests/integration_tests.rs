@@ -141,7 +141,7 @@ fn test_batch_embeddings() {
     ];
 
     let embeddings = engine
-        .embed_batch(None, texts.clone())
+        .embed_batch(None, &texts)
         .expect("Failed to generate batch embeddings");
 
     assert_eq!(embeddings.len(), texts.len());
@@ -616,7 +616,7 @@ fn test_model_info() {
     assert_eq!(info.name, "test-model");
     assert!(info.dimensions > 0);
     assert!(info.max_tokens > 0);
-    assert!(info.model_size > 0);
+    assert!(info.model_size.unwrap_or(0) > 0);
 }
 
 #[test]
@@ -748,7 +748,7 @@ fn test_batch_processing_basic() {
     ];
 
     let embeddings = engine
-        .embed_batch(Some("test_batch"), texts.clone())
+        .embed_batch(Some("test_batch"), &texts)
         .unwrap();
 
     // Verify batch results
@@ -786,12 +786,13 @@ fn test_batch_processing_large() {
 
     let start = std::time::Instant::now();
     let embeddings = engine
-        .embed_batch(Some("test_large_batch"), text_refs)
+        .embed_batch(Some("test_large_batch"), &text_refs)
         .unwrap();
     let duration = start.elapsed();
 
     println!("Processed {} texts in {:?}", texts.len(), duration);
-    println!("Average time per text: {:?}", duration / texts.len() as u32);
+    let text_count = u32::try_from(texts.len()).unwrap_or(u32::MAX);
+    println!("Average time per text: {:?}", duration / text_count);
 
     assert_eq!(embeddings.len(), texts.len());
 }
@@ -809,7 +810,7 @@ fn test_batch_processing_empty() {
 
     // Test empty batch
     let texts: Vec<&str> = vec![];
-    let embeddings = engine.embed_batch(Some("test_empty_batch"), texts).unwrap();
+    let embeddings = engine.embed_batch(Some("test_empty_batch"), &texts).unwrap();
 
     assert!(embeddings.is_empty());
 }
@@ -828,7 +829,7 @@ fn test_batch_processing_single_item() {
     // Test single item batch
     let texts = vec!["Single text item"];
     let batch_embeddings = engine
-        .embed_batch(Some("test_single_batch"), texts.clone())
+        .embed_batch(Some("test_single_batch"), &texts)
         .unwrap();
 
     // Compare with single embedding
@@ -859,7 +860,7 @@ fn test_batch_processing_order_preservation() {
     ];
 
     let batch_embeddings = engine
-        .embed_batch(Some("test_order"), texts.clone())
+        .embed_batch(Some("test_order"), &texts)
         .unwrap();
 
     // Get individual embeddings
@@ -903,7 +904,7 @@ fn test_batch_vs_sequential_performance() {
 
     // Measure batch processing time
     let batch_start = std::time::Instant::now();
-    let batch_embeddings = engine.embed_batch(Some("test_perf"), text_refs).unwrap();
+    let batch_embeddings = engine.embed_batch(Some("test_perf"), &text_refs).unwrap();
     let batch_duration = batch_start.elapsed();
 
     println!("Sequential processing: {sequential_duration:?}");

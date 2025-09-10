@@ -20,6 +20,10 @@ use std::path::PathBuf;
 use tempfile::TempDir;
 
 /// Creates a dummy model file for testing purposes
+///
+/// # Panics
+///
+/// Panics if temp directory creation or file writing fails
 #[must_use] pub fn create_dummy_model() -> (TempDir, PathBuf) {
     let dir = TempDir::new().expect("Failed to create temp dir");
     let model_path = dir.path().join("test_model.gguf");
@@ -33,6 +37,10 @@ use tempfile::TempDir;
 }
 
 /// Creates a test configuration with sensible defaults
+///
+/// # Panics
+///
+/// Panics if configuration building fails
 #[must_use] pub fn create_test_config(model_path: PathBuf) -> EngineConfig {
     EngineConfig::builder()
         .with_model_path(model_path)
@@ -61,6 +69,10 @@ pub fn get_test_model_path() -> Option<PathBuf> {
 
 /// Initialize test logging
 /// Uses global tracing subscriber to prevent TLS issues
+///
+/// # Panics
+///
+/// Panics if logger initialization fails
 pub fn init_test_logger() {
     use std::sync::Once;
     static INIT: Once = Once::new();
@@ -84,6 +96,10 @@ pub fn init_test_logger() {
 }
 
 /// Assert that two embedding vectors are approximately equal
+///
+/// # Panics
+///
+/// Panics if embeddings have different dimensions or values differ by more than tolerance
 pub fn assert_embeddings_equal(emb1: &[f32], emb2: &[f32], tolerance: f32) {
     assert_eq!(
         emb1.len(),
@@ -106,6 +122,10 @@ pub fn assert_embeddings_equal(emb1: &[f32], emb2: &[f32], tolerance: f32) {
 }
 
 /// Assert that an embedding is normalized (L2 norm ≈ 1.0)
+///
+/// # Panics
+///
+/// Panics if the embedding is not normalized within the given tolerance
 pub fn assert_normalized(embedding: &[f32], tolerance: f32) {
     let norm = calculate_l2_norm(embedding);
     assert!(
@@ -122,7 +142,9 @@ mod tests {
     fn test_create_dummy_model() {
         let (_dir, model_path) = create_dummy_model();
         assert!(model_path.exists());
-        assert!(model_path.to_str().unwrap().ends_with(".gguf"));
+        assert!(model_path
+            .extension()
+            .is_some_and(|ext| ext.eq_ignore_ascii_case("gguf")));
     }
 
     #[test]

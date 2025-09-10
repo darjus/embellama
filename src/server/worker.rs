@@ -62,6 +62,10 @@ impl Worker {
     /// This method runs in a dedicated thread and processes requests
     /// until the channel is closed. The first request will trigger
     /// model loading in this thread via the engine's thread-local storage.
+    ///
+    /// # Panics
+    ///
+    /// Panics if the engine mutex lock cannot be acquired
     pub fn run(mut self) {
         info!("Worker {} starting", self.id);
 
@@ -83,7 +87,7 @@ impl Worker {
                     TextInput::Batch(texts) => {
                         // Generate batch embeddings
                         let text_refs: Vec<&str> = texts.iter().map(std::string::String::as_str).collect();
-                        engine.embed_batch(Some(&request.model), text_refs)
+                        engine.embed_batch(Some(&request.model), &text_refs)
                     }
                 }
             };
@@ -96,7 +100,8 @@ impl Worker {
                     WorkerResponse {
                         embeddings,
                         token_count,
-                        processing_time_ms: start.elapsed().as_millis() as u64,
+                        processing_time_ms: u64::try_from(start.elapsed().as_millis())
+                            .unwrap_or(u64::MAX),
                     }
                 }
                 Err(e) => {
@@ -106,7 +111,8 @@ impl Worker {
                     WorkerResponse {
                         embeddings: vec![],
                         token_count: 0,
-                        processing_time_ms: start.elapsed().as_millis() as u64,
+                        processing_time_ms: u64::try_from(start.elapsed().as_millis())
+                            .unwrap_or(u64::MAX),
                     }
                 }
             };

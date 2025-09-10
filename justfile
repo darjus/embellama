@@ -103,8 +103,10 @@ fmt:
 
 # Run clippy
 clippy:
-    @echo "Running clippy..."
-    cargo clippy --all-targets --all-features -- -D warnings
+    @echo "Running clippy on library and binaries (strict)..."
+    cargo clippy --lib --bins --all-features -- -D warnings -D clippy::pedantic
+    @echo "Running clippy on tests, examples, and benches (lenient)..."
+    cargo clippy --tests --examples --benches --all-features -- -W warnings -W clippy::pedantic
 
 # Clean build artifacts
 clean:

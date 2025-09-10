@@ -28,7 +28,7 @@ fn get_benchmark_model_path() -> Option<std::path::PathBuf> {
 
 /// Benchmark single embedding generation
 fn bench_single_embedding(c: &mut Criterion) {
-    let model_path = if let Some(path) = get_benchmark_model_path() { path } else {
+    let Some(model_path) = get_benchmark_model_path() else {
         eprintln!("Skipping benchmark: Set EMBELLAMA_BENCH_MODEL to a valid model path");
         return;
     };
@@ -74,7 +74,7 @@ fn bench_single_embedding(c: &mut Criterion) {
 
 /// Benchmark batch embedding processing
 fn bench_batch_embeddings(c: &mut Criterion) {
-    let model_path = if let Some(path) = get_benchmark_model_path() { path } else {
+    let Some(model_path) = get_benchmark_model_path() else {
         eprintln!("Skipping benchmark: Set EMBELLAMA_BENCH_MODEL to a valid model path");
         return;
     };
@@ -102,14 +102,14 @@ fn bench_batch_embeddings(c: &mut Criterion) {
             .collect();
         let text_refs: Vec<&str> = texts.iter().map(std::string::String::as_str).collect();
 
-        group.throughput(Throughput::Elements(size as u64));
+        group.throughput(Throughput::Elements(u64::try_from(size).unwrap()));
         group.bench_with_input(
             BenchmarkId::new("batch_size", size),
             &text_refs,
             |b, texts| {
                 b.iter(|| {
                     let _ = engine
-                        .embed_batch(None, black_box(texts.clone()))
+                        .embed_batch(None, black_box(texts))
                         .expect("Batch embedding failed");
                 });
             },
@@ -120,7 +120,7 @@ fn bench_batch_embeddings(c: &mut Criterion) {
 
 /// Benchmark different pooling strategies
 fn bench_pooling_strategies(c: &mut Criterion) {
-    let model_path = if let Some(path) = get_benchmark_model_path() { path } else {
+    let Some(model_path) = get_benchmark_model_path() else {
         eprintln!("Skipping benchmark: Set EMBELLAMA_BENCH_MODEL to a valid model path");
         return;
     };
@@ -165,7 +165,7 @@ fn bench_pooling_strategies(c: &mut Criterion) {
 
 /// Benchmark normalization overhead
 fn bench_normalization(c: &mut Criterion) {
-    let model_path = if let Some(path) = get_benchmark_model_path() { path } else {
+    let Some(model_path) = get_benchmark_model_path() else {
         eprintln!("Skipping benchmark: Set EMBELLAMA_BENCH_MODEL to a valid model path");
         return;
     };
@@ -218,7 +218,7 @@ fn bench_normalization(c: &mut Criterion) {
 
 /// Benchmark memory usage patterns
 fn bench_memory_patterns(c: &mut Criterion) {
-    let model_path = if let Some(path) = get_benchmark_model_path() { path } else {
+    let Some(model_path) = get_benchmark_model_path() else {
         eprintln!("Skipping benchmark: Set EMBELLAMA_BENCH_MODEL to a valid model path");
         return;
     };
@@ -253,7 +253,7 @@ fn bench_memory_patterns(c: &mut Criterion) {
 
         b.iter(|| {
             let _ = engine
-                .embed_batch(None, black_box(text_refs.clone()))
+                .embed_batch(None, black_box(text_refs.as_slice()))
                 .expect("Batch embedding failed");
         });
     });
@@ -263,7 +263,7 @@ fn bench_memory_patterns(c: &mut Criterion) {
 
 /// Benchmark model loading time
 fn bench_model_loading(c: &mut Criterion) {
-    let model_path = if let Some(path) = get_benchmark_model_path() { path } else {
+    let Some(model_path) = get_benchmark_model_path() else {
         eprintln!("Skipping benchmark: Set EMBELLAMA_BENCH_MODEL to a valid model path");
         return;
     };
@@ -290,7 +290,7 @@ fn bench_model_loading(c: &mut Criterion) {
 
 /// Benchmark thread scaling
 fn bench_thread_scaling(c: &mut Criterion) {
-    let model_path = if let Some(path) = get_benchmark_model_path() { path } else {
+    let Some(model_path) = get_benchmark_model_path() else {
         eprintln!("Skipping benchmark: Set EMBELLAMA_BENCH_MODEL to a valid model path");
         return;
     };

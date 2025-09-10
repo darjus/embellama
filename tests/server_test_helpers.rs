@@ -28,6 +28,7 @@ use tempfile::TempDir;
 /// Test server handle that ensures cleanup
 pub struct TestServer {
     pub base_url: String,
+    #[allow(dead_code)]
     pub port: u16,
     process: Option<Child>,
     _temp_dir: Option<TempDir>,
@@ -35,6 +36,18 @@ pub struct TestServer {
 
 impl TestServer {
     /// Spawn a test server with the given configuration
+    /// 
+    /// # Errors
+    /// 
+    /// Returns an error if:
+    /// - No available port can be found
+    /// - Server binary cannot be built
+    /// - Server process cannot be started
+    /// - Server fails to become ready within timeout
+    /// 
+    /// # Panics
+    /// 
+    /// Panics if the model path cannot be converted to a string
     pub async fn spawn(model_path: PathBuf, workers: usize) -> Result<Self, String> {
         // Find an available port
         let port = find_available_port()?;
@@ -90,6 +103,7 @@ impl TestServer {
     }
 
     /// Get the base URL for the test server
+    #[allow(dead_code)]
     #[must_use] pub fn url(&self, path: &str) -> String {
         format!("{}{}", self.base_url, path)
     }
@@ -150,6 +164,11 @@ impl Default for TestClient {
 }
 
 impl TestClient {
+    /// Creates a new test client
+    /// 
+    /// # Panics
+    /// 
+    /// Panics if the HTTP client cannot be built
     #[must_use] pub fn new() -> Self {
         Self {
             client: Client::builder()
@@ -160,6 +179,10 @@ impl TestClient {
     }
 
     /// Make an embedding request
+    /// 
+    /// # Errors
+    /// 
+    /// Returns an error if the HTTP request fails
     pub async fn embedding_request(
         &self,
         base_url: &str,
@@ -184,6 +207,11 @@ impl TestClient {
     }
 
     /// Get list of models
+    /// 
+    /// # Errors
+    /// 
+    /// Returns an error if the HTTP request fails
+    #[allow(dead_code)]
     pub async fn list_models(&self, base_url: &str) -> Result<Response, reqwest::Error> {
         self.client
             .get(format!("{base_url}/v1/models"))
@@ -192,6 +220,11 @@ impl TestClient {
     }
 
     /// Check health endpoint
+    /// 
+    /// # Errors
+    /// 
+    /// Returns an error if the HTTP request fails
+    #[allow(dead_code)]
     pub async fn health_check(&self, base_url: &str) -> Result<Response, reqwest::Error> {
         self.client.get(format!("{base_url}/health")).send().await
     }
@@ -249,6 +282,7 @@ pub struct ErrorDetail {
 }
 
 /// Generate test texts of various lengths
+#[allow(dead_code)]
 #[must_use] pub fn generate_test_texts(count: usize) -> Vec<String> {
     (0..count)
         .map(|i| {
@@ -263,7 +297,20 @@ pub struct ErrorDetail {
 }
 
 /// Validate embedding response structure
+/// 
+/// # Panics
+/// 
+/// Panics if the response structure is invalid, including:
+/// - Wrong object type
+/// - Incorrect number of embeddings
+/// - Invalid embedding data
+/// - Non-finite values in embeddings
+/// - Invalid base64 encoding
+/// - Invalid usage metrics
+#[allow(dead_code)]
 pub fn validate_embedding_response(response: &EmbeddingResponse, expected_count: usize) {
+    use base64::Engine;
+    
     assert_eq!(response.object, "list");
     assert_eq!(response.data.len(), expected_count);
 
@@ -282,7 +329,6 @@ pub fn validate_embedding_response(response: &EmbeddingResponse, expected_count:
             EmbeddingValue::Base64(s) => {
                 assert!(!s.is_empty(), "Base64 embedding should not be empty");
                 // Verify it's valid base64
-                use base64::Engine;
                 base64::engine::general_purpose::STANDARD
                     .decode(s)
                     .expect("Invalid base64 encoding");
@@ -296,6 +342,11 @@ pub fn validate_embedding_response(response: &EmbeddingResponse, expected_count:
 }
 
 /// Assert that embeddings are normalized (L2 norm ≈ 1.0)
+/// 
+/// # Panics
+/// 
+/// Panics if any embedding's L2 norm deviates from 1.0 by more than the specified tolerance
+#[allow(dead_code)]
 pub fn assert_embeddings_normalized(embeddings: &[Vec<f32>], tolerance: f32) {
     for embedding in embeddings {
         let norm: f32 = embedding.iter().map(|x| x * x).sum::<f32>().sqrt();
@@ -307,6 +358,11 @@ pub fn assert_embeddings_normalized(embeddings: &[Vec<f32>], tolerance: f32) {
 }
 
 /// Helper to make concurrent requests
+/// 
+/// # Panics
+/// 
+/// Panics if any spawned task panics
+#[allow(dead_code)]
 pub async fn make_concurrent_requests(
     client: &TestClient,
     base_url: &str,
@@ -340,6 +396,11 @@ pub async fn make_concurrent_requests(
 }
 
 /// Measure request latency percentiles
+/// 
+/// # Panics
+/// 
+/// Panics if no latency measurements are collected
+#[allow(dead_code)]
 pub async fn measure_latencies(
     client: &TestClient,
     base_url: &str,
@@ -357,6 +418,7 @@ pub async fn measure_latencies(
                 None,
             )
             .await;
+        #[allow(clippy::cast_possible_truncation)]
         latencies.push(start.elapsed().as_millis() as u64);
     }
 
@@ -368,11 +430,12 @@ pub async fn measure_latencies(
         p99: latencies[latencies.len() * 99 / 100],
         min: *latencies.first().unwrap(),
         max: *latencies.last().unwrap(),
-        avg: latencies.iter().sum::<u64>() / latencies.len() as u64,
+        avg: latencies.iter().sum::<u64>() / u64::try_from(latencies.len()).unwrap_or(1),
     }
 }
 
 #[derive(Debug)]
+#[allow(dead_code)]
 pub struct LatencyStats {
     pub p50: u64,
     pub p95: u64,
@@ -383,6 +446,10 @@ pub struct LatencyStats {
 }
 
 /// Get path to test model
+/// 
+/// # Errors
+/// 
+/// Returns an error if the test model cannot be found
 pub fn get_test_model_path() -> Result<PathBuf, String> {
     // First check environment variable
     if let Ok(path) = std::env::var("EMBELLAMA_TEST_MODEL") {

@@ -104,7 +104,7 @@ fn test_concurrent_batch_processing() {
                     format!("Thread {i} text 3")];
 
                 let text_refs: Vec<&str> = texts.iter().map(std::string::String::as_str).collect();
-                let result = engine.embed_batch(None, text_refs);
+                let result = engine.embed_batch(None, &text_refs);
 
                 assert!(result.is_ok());
                 let embeddings = result.unwrap();

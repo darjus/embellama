@@ -70,6 +70,12 @@ impl AppState {
     ///
     /// # Returns
     /// A new `AppState` instance or an error
+    ///
+    /// # Errors
+    ///
+    /// Returns an error if:
+    /// - Engine configuration validation fails
+    /// - Engine initialization fails
     pub fn new(config: ServerConfig) -> crate::Result<Self> {
         // Initialize the embedding engine singleton
         let engine_config = EngineConfig::builder()

@@ -249,7 +249,7 @@ impl ModelData {
         Self {
             id,
             object: "model".to_string(),
-            created: 1700000000, // Fixed timestamp for consistency
+            created: 1_700_000_000, // Fixed timestamp for consistency
             owned_by: "embellama".to_string(),
         }
     }

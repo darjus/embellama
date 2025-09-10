@@ -19,6 +19,7 @@ use std::env;
 use std::path::PathBuf;
 use std::time::Instant;
 
+#[allow(clippy::too_many_lines)]
 fn main() -> Result<(), Box<dyn std::error::Error>> {
     // Initialize logging
     tracing_subscriber::fmt()
@@ -28,15 +29,17 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
     // Get model path from environment
     let model_path = env::var("EMBELLAMA_MODEL")
         .ok()
-        .map(PathBuf::from)
-        .unwrap_or_else(|| {
-            eprintln!("Set EMBELLAMA_MODEL environment variable to model path");
-            std::process::exit(1);
-        });
+        .map_or_else(
+            || {
+                eprintln!("Set EMBELLAMA_MODEL environment variable to model path");
+                std::process::exit(1);
+            },
+            PathBuf::from,
+        );
 
     println!("Batch Processing Example");
     println!("========================");
-    println!("Model: {model_path:?}\n");
+    println!("Model: {}\n", model_path.display());
 
     // Create configuration optimized for batch processing
     let config = EngineConfig::builder()
@@ -74,12 +77,14 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
 
         // Measure batch processing time
         let start = Instant::now();
-        let embeddings = engine.embed_batch(None, text_refs)?;
+        let embeddings = engine.embed_batch(None, &text_refs)?;
         let duration = start.elapsed();
 
         // Calculate metrics
         let total_ms = duration.as_millis();
+        #[allow(clippy::cast_precision_loss)]
         let per_item_ms = total_ms as f64 / size as f64;
+        #[allow(clippy::cast_precision_loss)]
         let items_per_sec = (size as f64 * 1000.0) / total_ms as f64;
 
         println!(
@@ -112,7 +117,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
     // Batch processing
     let text_refs: Vec<&str> = test_texts.iter().map(std::string::String::as_str).collect();
     let start = Instant::now();
-    let batch_embeddings = engine.embed_batch(None, text_refs)?;
+    let batch_embeddings = engine.embed_batch(None, &text_refs)?;
     let batch_time = start.elapsed();
 
     println!("Sequential: {sequential_time:?}");
@@ -141,14 +146,18 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
         let text_refs: Vec<&str> = texts.iter().map(std::string::String::as_str).collect();
 
         let start = Instant::now();
-        let embeddings = engine.embed_batch(None, text_refs)?;
+        let embeddings = engine.embed_batch(None, &text_refs)?;
         let duration = start.elapsed();
 
+        // Cast is acceptable for display purposes - showing approximate texts/sec
+        #[allow(clippy::cast_precision_loss)]
+        let texts_per_sec = size as f64 / duration.as_secs_f64();
+        
         println!(
             "Processed {} texts in {:?} ({:.1} texts/sec)",
             size,
             duration,
-            size as f64 / duration.as_secs_f64()
+            texts_per_sec
         );
 
         assert_eq!(embeddings.len(), size);

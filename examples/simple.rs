@@ -27,14 +27,16 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
     // Get model path from environment or use default
     let model_path = env::var("EMBELLAMA_MODEL")
         .ok()
-        .map(PathBuf::from)
-        .unwrap_or_else(|| {
-            eprintln!("Set EMBELLAMA_MODEL environment variable to model path");
-            eprintln!("Example: EMBELLAMA_MODEL=/path/to/model.gguf cargo run --example simple");
-            std::process::exit(1);
-        });
+        .map_or_else(
+            || {
+                eprintln!("Set EMBELLAMA_MODEL environment variable to model path");
+                eprintln!("Example: EMBELLAMA_MODEL=/path/to/model.gguf cargo run --example simple");
+                std::process::exit(1);
+            },
+            PathBuf::from,
+        );
 
-    println!("Loading model from: {model_path:?}");
+    println!("Loading model from: {}", model_path.display());
 
     // Create configuration
     let config = EngineConfig::builder()
@@ -76,7 +78,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
     ];
 
     println!("Generating embeddings for {} texts...", texts.len());
-    let embeddings = engine.embed_batch(None, texts.clone())?;
+    let embeddings = engine.embed_batch(None, &texts)?;
 
     for (i, (text, emb)) in texts.iter().zip(embeddings.iter()).enumerate() {
         println!("\nText {}: \"{}\"", i + 1, text);

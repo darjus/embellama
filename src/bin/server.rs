@@ -59,7 +59,7 @@ impl Args {
     fn validate(&self) -> Result<(), String> {
         // Check if model path exists
         if !self.model_path.exists() {
-            return Err(format!("Model file not found: {:?}", self.model_path));
+            return Err(format!("Model file not found: {}", self.model_path.display()));
         }
 
         // Validate workers count
@@ -90,7 +90,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     let args = Args::parse();
 
     // Initialize logging
-    init_logging(&args.log_level)?;
+    init_logging(&args.log_level);
 
     // Validate arguments
     args.validate()?;
@@ -197,7 +197,7 @@ fn build_router(state: AppState) -> axum::Router {
 }
 
 /// Initialize logging with the specified level
-fn init_logging(level: &str) -> Result<(), Box<dyn std::error::Error>> {
+fn init_logging(level: &str) {
     use tracing_subscriber::{EnvFilter, fmt, layer::SubscriberExt, util::SubscriberInitExt};
 
     let env_filter = EnvFilter::try_from_default_env().unwrap_or_else(|_| EnvFilter::new(level));
@@ -213,8 +213,6 @@ fn init_logging(level: &str) -> Result<(), Box<dyn std::error::Error>> {
         )
         .with(env_filter)
         .init();
-
-    Ok(())
 }
 
 /// Signal handler for graceful shutdown

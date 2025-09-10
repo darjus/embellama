@@ -134,7 +134,7 @@ async fn test_concurrent_requests_50() {
 
 #[tokio::test]
 #[serial]
-#[ignore] // This test is resource-intensive
+#[ignore = "This test is resource-intensive"]
 async fn test_concurrent_requests_100() {
     let model_path = get_test_model_path().expect("Test model not found");
     let server = TestServer::spawn(model_path, 8)
@@ -170,6 +170,7 @@ async fn test_concurrent_requests_100() {
         match result {
             Ok((_, Ok(response), latency)) if response.status() == StatusCode::OK => {
                 success_count += 1;
+                #[allow(clippy::cast_possible_truncation)]
                 latencies.push(latency.as_millis() as u64);
             }
             _ => {
@@ -310,7 +311,7 @@ async fn test_latency_percentiles() {
 
 #[tokio::test]
 #[serial]
-#[ignore] // This test runs for a longer duration
+#[ignore = "This test runs for a longer duration"]
 async fn test_sustained_load() {
     let model_path = get_test_model_path().expect("Test model not found");
     let server = TestServer::spawn(model_path, 4)
@@ -550,7 +551,9 @@ async fn test_memory_stability() {
     }
 
     // Check that performance doesn't degrade significantly
+    #[allow(clippy::cast_precision_loss)]
     let first_batch = batch_times[0].as_millis() as f64;
+    #[allow(clippy::cast_precision_loss)]
     let last_batch = batch_times[4].as_millis() as f64;
     let degradation = (last_batch - first_batch) / first_batch * 100.0;
 

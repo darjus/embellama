@@ -36,7 +36,7 @@ fn run_examples() -> Result<(), Box<dyn std::error::Error>> {
     println!("=======================\n");
 
     // Example 1: Handle missing model file
-    handle_missing_model()?;
+    handle_missing_model();
 
     // Example 2: Handle invalid configuration
     handle_invalid_config()?;
@@ -51,7 +51,7 @@ fn run_examples() -> Result<(), Box<dyn std::error::Error>> {
 }
 
 /// Example 1: Gracefully handle missing model file
-fn handle_missing_model() -> Result<(), Box<dyn std::error::Error>> {
+fn handle_missing_model() {
     println!("1. Handling Missing Model File:");
     println!("-------------------------------");
 
@@ -76,7 +76,6 @@ fn handle_missing_model() -> Result<(), Box<dyn std::error::Error>> {
     }
 
     println!();
-    Ok(())
 }
 
 /// Example 2: Handle invalid configuration
@@ -215,7 +214,7 @@ fn handle_batch_errors() -> Result<(), Box<dyn std::error::Error>> {
         texts.len()
     );
 
-    match engine.embed_batch(None, texts.clone()) {
+    match engine.embed_batch(None, &texts) {
         Ok(embeddings) => {
             println!(
                 "  Batch succeeded! Generated {} embeddings",
@@ -248,7 +247,7 @@ fn handle_batch_errors() -> Result<(), Box<dyn std::error::Error>> {
 
             if !valid_texts.is_empty() {
                 println!("  Retrying with only valid texts...");
-                match engine.embed_batch(None, valid_texts) {
+                match engine.embed_batch(None, &valid_texts) {
                     Ok(embeddings) => {
                         println!(
                             "  Retry succeeded! Generated {} embeddings",

@@ -132,6 +132,10 @@ impl EmbeddingEngine {
     /// This function will return an error if:
     /// - The configuration is invalid (on first initialization)
     /// - Model loading fails (on first initialization)
+    ///
+    /// # Panics
+    ///
+    /// Panics if the initialization lock cannot be acquired.
     #[instrument(skip(config), fields(model_name = %config.model_name))]
     pub fn get_or_init(config: EngineConfig) -> Result<Arc<Mutex<Self>>> {
         // Fast path: check if already initialized
@@ -188,6 +192,10 @@ impl EmbeddingEngine {
     ///
     /// This method should only be called when no other code is using the engine.
     /// Tests using this must be marked with `#[serial]` to prevent parallel execution.
+    ///
+    /// # Panics
+    ///
+    /// Panics if the mutex lock cannot be acquired
     #[cfg(test)]
     pub fn reset() {
         let _lock = INIT_LOCK.lock().unwrap();
@@ -221,6 +229,10 @@ impl EmbeddingEngine {
     /// Convenience method for tests to get a fresh instance.
     ///
     /// Resets the singleton and initializes with the given config.
+    ///
+    /// # Errors
+    ///
+    /// Returns an error if engine creation fails
     #[cfg(test)]
     pub fn fresh_instance(config: EngineConfig) -> Result<Arc<Mutex<Self>>> {
         Self::reset();
@@ -270,6 +282,10 @@ impl EmbeddingEngine {
     /// # Returns
     ///
     /// Returns a `Result` containing the engine or an error.
+    ///
+    /// # Errors
+    ///
+    /// Returns an error if model loading fails
     pub fn new(config: EngineConfig) -> Result<Self> {
         // Use the internal method directly for backward compatibility
         // This allows tests to create instances without singleton
@@ -522,7 +538,7 @@ impl EmbeddingEngine {
     /// - The model is not found
     /// - Any embedding generation fails
     #[instrument(skip(self, texts), fields(batch_size = texts.len()))]
-    pub fn embed_batch(&self, model_name: Option<&str>, texts: Vec<&str>) -> Result<Vec<Vec<f32>>> {
+    pub fn embed_batch(&self, model_name: Option<&str>, texts: &[&str]) -> Result<Vec<Vec<f32>>> {
         // Determine which model to use
         let model_name = model_name
             .map(std::string::ToString::to_string)
@@ -663,6 +679,10 @@ impl EmbeddingEngine {
     /// # Returns
     ///
     /// Returns model information if the model is loaded.
+    ///
+    /// # Errors
+    ///
+    /// Returns an error if the model is not found
     pub fn model_info(&self, model_name: &str) -> Result<ModelInfo> {
         // Ensure model is loaded in current thread
         self.ensure_model_loaded(model_name)?;
@@ -729,8 +749,8 @@ pub struct ModelInfo {
     pub dimensions: usize,
     /// Maximum token count
     pub max_tokens: usize,
-    /// Approximate model size in bytes
-    pub model_size: usize,
+    /// Approximate model size in bytes (None if unable to calculate)
+    pub model_size: Option<usize>,
 }
 
 #[cfg(test)]
@@ -763,7 +783,7 @@ mod tests {
     }
 
     #[test]
-    #[ignore] // Requires actual GGUF model file
+    #[ignore = "Requires actual GGUF model file"]
     fn test_embedding_generation() {
         let config = create_test_config();
         let engine = EmbeddingEngine::new(config).unwrap();

@@ -101,7 +101,7 @@ async fn test_single_embedding_short_text() {
         EmbeddingValue::Float(vec) => {
             assert!(!vec.is_empty());
         }
-        _ => panic!("Expected float embedding format"),
+        EmbeddingValue::Base64(_) => panic!("Expected float embedding format"),
     }
 }
 
@@ -275,7 +275,7 @@ async fn test_batch_embeddings_large() {
 
 #[tokio::test]
 #[serial]
-#[ignore] // This test is slow
+#[ignore = "This test is slow"]
 async fn test_batch_embeddings_very_large() {
     let model_path = get_test_model_path().expect("Test model not found");
     let server = TestServer::spawn(model_path, 4)
@@ -404,7 +404,7 @@ async fn test_encoding_format_float() {
     // Verify it's float format
     match &embedding_response.data[0].embedding {
         EmbeddingValue::Float(_) => {}
-        _ => panic!("Expected float embedding format"),
+        EmbeddingValue::Base64(_) => panic!("Expected float embedding format"),
     }
 }
 
@@ -435,7 +435,7 @@ async fn test_encoding_format_base64() {
     // Verify it's base64 format
     match &embedding_response.data[0].embedding {
         EmbeddingValue::Base64(_) => {}
-        _ => panic!("Expected base64 embedding format"),
+        EmbeddingValue::Float(_) => panic!("Expected base64 embedding format"),
     }
 }
 
