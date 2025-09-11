@@ -60,6 +60,9 @@
 //! # }
 //! ```
 
+/// Backend detection and configuration
+mod backend;
+
 /// Error handling module
 mod error;
 
@@ -80,6 +83,7 @@ mod batch;
 pub mod server;
 
 // Re-export main types
+pub use backend::{BackendInfo, BackendType, detect_best_backend, get_compiled_backend};
 pub use batch::{BatchProcessor, BatchProcessorBuilder};
 pub use config::{
     EngineConfig, EngineConfigBuilder, ModelConfig, ModelConfigBuilder, PoolingStrategy,

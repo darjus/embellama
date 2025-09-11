@@ -68,6 +68,19 @@ impl ModelConfig {
         ModelConfigBuilder::new()
     }
 
+    /// Create configuration with backend auto-detection
+    pub fn with_backend_detection() -> ModelConfigBuilder {
+        let backend = crate::backend::detect_best_backend();
+        let mut builder = ModelConfigBuilder::new();
+
+        // Set GPU layers based on backend
+        if let Some(gpu_layers) = backend.recommended_gpu_layers() {
+            builder = builder.with_n_gpu_layers(gpu_layers);
+        }
+
+        builder
+    }
+
     /// Validate the configuration
     ///
     /// # Errors
@@ -87,6 +100,14 @@ impl ModelConfig {
         if !self.model_path.exists() {
             return Err(Error::config(format!(
                 "Model file does not exist: {}",
+                self.model_path.display()
+            )));
+        }
+
+        // Validate GGUF extension
+        if self.model_path.extension().and_then(|e| e.to_str()) != Some("gguf") {
+            return Err(Error::config(format!(
+                "Model file must have .gguf extension: {}",
                 self.model_path.display()
             )));
         }
@@ -382,6 +403,22 @@ impl EngineConfig {
         EngineConfigBuilder::new()
     }
 
+    /// Create configuration with backend auto-detection
+    pub fn with_backend_detection() -> EngineConfigBuilder {
+        let backend = crate::backend::detect_best_backend();
+        let mut builder = EngineConfigBuilder::new();
+
+        // Set GPU configuration based on backend
+        if backend.is_gpu_accelerated() {
+            builder = builder.with_use_gpu(true);
+            if let Some(gpu_layers) = backend.recommended_gpu_layers() {
+                builder = builder.with_n_gpu_layers(gpu_layers);
+            }
+        }
+
+        builder
+    }
+
     /// Validate the configuration
     ///
     /// # Errors
@@ -401,6 +438,14 @@ impl EngineConfig {
         if !self.model_path.exists() {
             return Err(Error::config(format!(
                 "Model file does not exist: {}",
+                self.model_path.display()
+            )));
+        }
+
+        // Validate GGUF extension
+        if self.model_path.extension().and_then(|e| e.to_str()) != Some("gguf") {
+            return Err(Error::config(format!(
+                "Model file must have .gguf extension: {}",
                 self.model_path.display()
             )));
         }

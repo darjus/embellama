@@ -53,7 +53,35 @@ hyper = { version = "1.0", features = ["full"] }
 hyper-util = "0.1"
 
 [features]
-default = []
+# Default features - safe for all platforms
+default = ["openmp"]
+
+# Backend acceleration features (pass-through to llama-cpp-2)
+# Note: These are mutually exclusive in practice - use only one GPU backend at a time
+metal = ["llama-cpp-2/metal"]  # macOS Metal acceleration
+cuda = ["llama-cpp-2/cuda"]  # NVIDIA CUDA acceleration
+cuda-no-vmm = ["cuda", "llama-cpp-2/cuda-no-vmm"]  # CUDA without virtual memory management
+vulkan = ["llama-cpp-2/vulkan"]  # Vulkan acceleration (cross-platform GPU)
+
+# CPU optimization features
+openmp = ["llama-cpp-2/openmp"]  # OpenMP parallel processing
+native = ["llama-cpp-2/native"]  # Native CPU optimizations
+
+# Other llama-cpp-2 features
+dynamic-link = ["llama-cpp-2/dynamic-link"]  # Dynamic linking
+sampler = ["llama-cpp-2/sampler"]  # Sampler support
+
+# Android-specific features
+android-shared-stdcxx = ["llama-cpp-2/android-shared-stdcxx"]
+mtmd = ["llama-cpp-2/mtmd"]
+
+# Backend feature groups (convenience aliases)
+cuda-backend = ["cuda"]
+metal-backend = ["metal"]
+vulkan-backend = ["vulkan"]
+cpu-optimized = ["native", "openmp"]
+
+# Server feature
 server = ["dep:axum", "dep:tokio", "dep:clap", "dep:tower", "dep:tower-http", "dep:uuid", "dep:base64", "dep:governor", "dep:prometheus", "dep:dashmap", "dep:rand", "dep:subtle"]
 
 [[bin]]
@@ -73,6 +101,11 @@ panic = "abort"
 
 [profile.bench]
 inherits = "release"
+
+[package.metadata.docs.rs]
+# Documentation build configuration
+features = ["metal", "cuda", "vulkan", "server"]
+targets = ["x86_64-unknown-linux-gnu", "x86_64-apple-darwin", "x86_64-pc-windows-msvc"]
 
 [lints.clippy]
 pedantic = { level = "deny", priority = -1 }

@@ -15,6 +15,7 @@ High-performance Rust library for generating text embeddings using llama-cpp.
 - **Batch Processing**: Efficient batch embedding generation
 - **Flexible Configuration**: Extensive configuration options for model tuning
 - **Multiple Pooling Strategies**: Mean, CLS, Max, and MeanSqrt pooling
+- **Hardware Acceleration**: Support for Metal (macOS), CUDA (NVIDIA), Vulkan, and optimized CPU backends
 
 ## Quick Start
 
@@ -76,6 +77,32 @@ Add this to your `Cargo.toml`:
 embellama = "0.1.0"
 ```
 
+### Backend Features
+
+The library supports multiple backends for hardware acceleration. By default, it uses OpenMP for CPU parallelization. You can enable specific backends based on your hardware:
+
+```toml
+# Default - OpenMP CPU parallelization
+embellama = "0.1.0"
+
+# macOS Metal GPU acceleration
+embellama = { version = "0.1.0", features = ["metal"] }
+
+# NVIDIA CUDA GPU acceleration
+embellama = { version = "0.1.0", features = ["cuda"] }
+
+# Vulkan GPU acceleration (cross-platform)
+embellama = { version = "0.1.0", features = ["vulkan"] }
+
+# Native CPU optimizations
+embellama = { version = "0.1.0", features = ["native"] }
+
+# CPU-optimized build (native + OpenMP)
+embellama = { version = "0.1.0", features = ["cpu-optimized"] }
+```
+
+**Note**: GPU backends (Metal, CUDA, Vulkan) are mutually exclusive. Use only one at a time for best results.
+
 ## Configuration
 
 ### Basic Configuration
@@ -102,6 +129,25 @@ let config = EngineConfig::builder()
     .with_pooling_strategy(PoolingStrategy::Mean)  // Pooling method
     .with_add_bos_token(Some(false))   // Disable BOS for encoder models (Option<bool>)
     .build()?;
+```
+
+### Backend Auto-Detection
+
+The library can automatically detect and use the best available backend:
+
+```rust
+use embellama::{EngineConfig, detect_best_backend, BackendInfo};
+
+// Automatic backend detection
+let config = EngineConfig::with_backend_detection()
+    .with_model_path("/path/to/model.gguf")
+    .with_model_name("my-model")
+    .build()?;
+
+// Check which backend was selected
+let backend_info = BackendInfo::new();
+println!("Using backend: {}", backend_info.backend);
+println!("Available features: {:?}", backend_info.available_features);
 ```
 
 ## Pooling Strategies

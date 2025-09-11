@@ -46,7 +46,7 @@ jobs:
       - name: Download test models
         run: just download-test-model
 
-      - name: Build
+      - name: Build with platform-specific features
         run: just check
 
       - name: Run unit tests
@@ -59,7 +59,7 @@ jobs:
         run: just test-concurrency
 
       - name: Build documentation
-        run: cargo doc --verbose --no-deps --all-features
+        run: just doc
         env:
           RUSTDOCFLAGS: -D warnings
 
@@ -68,6 +68,9 @@ jobs:
 
       - name: Check with server feature
         run: just check-server
+
+      - name: Check backend features compilation
+        run: just check-backends
 
   fmt:
     name: Rustfmt

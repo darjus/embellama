@@ -10,6 +10,25 @@ models_dir := "models"
 test_model_dir := models_dir + "/test"
 bench_model_dir := models_dir + "/bench"
 
+# Platform-specific feature selection
+# Use appropriate backend based on OS to avoid conflicts
+platform_features := if os() == "macos" {
+    "server,metal"
+} else if os() == "linux" {
+    "server,openmp"
+} else {
+    "server,openmp"
+}
+
+# Backend-only features (no server)
+backend_features := if os() == "macos" {
+    "metal"
+} else if os() == "linux" {
+    "openmp"
+} else {
+    "openmp"
+}
+
 # Model URLs
 test_model_url := "https://huggingface.co/Jarbas/all-MiniLM-L6-v2-Q4_K_M-GGUF/resolve/main/all-minilm-l6-v2-q4_k_m.gguf"
 bench_model_url := "https://huggingface.co/gaianet/jina-embeddings-v2-base-code-GGUF/resolve/main/jina-embeddings-v2-base-code-Q4_K_M.gguf"
@@ -48,33 +67,33 @@ download-all: download-test-model download-bench-model
 
 # Run unit tests (no models required)
 test-unit:
-    @echo "Running unit tests..."
-    cargo test --lib
+    @echo "Running unit tests with backend features ({{backend_features}})..."
+    cargo test --lib --features "{{backend_features}}"
 
 # Run integration tests with real model
 test-integration: download-test-model
-    @echo "Running integration tests with real model..."
+    @echo "Running integration tests with backend features ({{backend_features}})..."
     RUST_BACKTRACE=1 EMBELLAMA_TEST_MODEL={{test_model_file}} \
-    cargo test --test integration_tests -- --nocapture
+    cargo test --test integration_tests --features "{{backend_features}}" -- --nocapture
 
 # Run concurrency tests
 test-concurrency: download-test-model
-    @echo "Running concurrency tests..."
+    @echo "Running concurrency tests with backend features ({{backend_features}})..."
     EMBELLAMA_TEST_MODEL={{test_model_file}} \
-    cargo test --test concurrency_tests -- --nocapture
+    cargo test --test concurrency_tests --features "{{backend_features}}" -- --nocapture
 
 # Run property-based tests
 test-property: download-test-model
-    @echo "Running property-based tests..."
+    @echo "Running property-based tests with backend features ({{backend_features}})..."
     EMBELLAMA_TEST_MODEL={{test_model_file}} \
-    cargo test --test property_tests -- --nocapture
+    cargo test --test property_tests --features "{{backend_features}}" -- --nocapture
 
 # Run property-based tests with fewer cases (faster)
 test-property-quick: download-test-model
-    @echo "Running property-based tests (quick mode)..."
+    @echo "Running property-based tests (quick mode) with backend features ({{backend_features}})..."
     EMBELLAMA_TEST_MODEL={{test_model_file}} \
     PROPTEST_CASES=10 \
-    cargo test --test property_tests -- --nocapture
+    cargo test --test property_tests --features "{{backend_features}}" -- --nocapture
 
 # Run all tests
 test: test-unit test-integration test-concurrency test-property
@@ -100,7 +119,12 @@ example NAME="simple": download-test-model
 
 # Check for compilation warnings
 check:
-    @echo "Checking for warnings..."
+    @echo "Checking for warnings with platform features ({{platform_features}})..."
+    cargo check --all-targets --features "{{platform_features}}"
+
+# Check with all features (may fail due to backend conflicts)
+check-all-features:
+    @echo "Checking with all features (may fail on some platforms)..."
     cargo check --all-targets --all-features
 
 # Fix common issues
@@ -119,21 +143,69 @@ fmtcheck:
     @echo "Formatting code..."
     cargo fmt -- --check
 
-# Run clippy
+# Check different backend features compilation
+check-backends:
+    @echo "Checking backend features compilation..."
+    @echo "✓ Checking OpenMP backend..."
+    @cargo check --no-default-features --features openmp
+    @echo "✓ Checking Native backend..."
+    @cargo check --no-default-features --features native
+    @if [ "$(uname)" = "Darwin" ]; then \
+        echo "✓ Checking Metal backend (macOS)..."; \
+        cargo check --no-default-features --features metal; \
+    fi
+    @if [ "$(uname)" = "Linux" ]; then \
+        echo "✓ Checking CUDA backend (compile only)..."; \
+        cargo check --no-default-features --features cuda; \
+        echo "✓ Checking Vulkan backend (compile only)..."; \
+        cargo check --no-default-features --features vulkan; \
+    fi
+    @echo "✓ All backend features compile successfully"
+
+# Test with platform-specific backend
+test-backend: download-test-model
+    @echo "Testing with platform-specific backend..."
+    @if [ "$(uname)" = "Darwin" ]; then \
+        echo "Testing with Metal backend on macOS..."; \
+        EMBELLAMA_TEST_MODEL={{test_model_file}} \
+        cargo test --features metal -- --nocapture; \
+    elif [ "$(uname)" = "Linux" ]; then \
+        echo "Testing with OpenMP backend on Linux..."; \
+        EMBELLAMA_TEST_MODEL={{test_model_file}} \
+        cargo test --features openmp -- --nocapture; \
+    else \
+        echo "Testing with OpenMP backend..."; \
+        EMBELLAMA_TEST_MODEL={{test_model_file}} \
+        cargo test --features openmp -- --nocapture; \
+    fi
+
+# Run clippy with platform-appropriate features
 clippy:
-    @echo "Running clippy on library and binaries (strict)..."
+    @echo "Running clippy with platform features ({{platform_features}})..."
+    @echo "Library and binaries (strict)..."
+    cargo clippy --lib --bins --features "{{platform_features}}" -- -D warnings -D clippy::pedantic
+    @echo "Tests, examples, and benches (lenient)..."
+    cargo clippy --tests --examples --benches --features "{{platform_features}}" -- -W warnings -W clippy::pedantic
+
+# Run clippy with all features (may fail due to backend conflicts)
+clippy-all-features:
+    @echo "Running clippy with all features (may fail on some platforms)..."
     cargo clippy --lib --bins --all-features -- -D warnings -D clippy::pedantic
-    @echo "Running clippy on tests, examples, and benches (lenient)..."
     cargo clippy --tests --examples --benches --all-features -- -W warnings -W clippy::pedantic
 
 # Compile tests without running them (for pre-commit)
 test-compile:
-    @echo "Compiling tests..."
-    cargo test --no-run --lib --all-features
+    @echo "Compiling tests with platform features ({{platform_features}})..."
+    cargo test --no-run --lib --features "{{platform_features}}"
 
-# Build documentation
+# Build documentation with platform features
 doc:
-    @echo "Building documentation..."
+    @echo "Building documentation with platform features ({{platform_features}})..."
+    cargo doc --no-deps --features "{{platform_features}}"
+
+# Build documentation with all features (for docs.rs)
+doc-all-features:
+    @echo "Building documentation with all features..."
     cargo doc --no-deps --all-features
 
 # Clean build artifacts
