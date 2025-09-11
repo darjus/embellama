@@ -41,7 +41,8 @@ runs:
           cmake \
           build-essential \
           libvulkan-dev \
-          libshaderc-dev
+          libshaderc-dev \
+          glslc
 
     - name: Install LLVM and Clang (non-Linux)
       if: runner.os != 'Linux'
@@ -55,6 +56,10 @@ runs:
       run: |
         export SDKROOT=$(xcrun --show-sdk-path)
         echo "SDKROOT=$SDKROOT" >> $GITHUB_ENV
+        # Disable i8mm intrinsics for GitHub Actions runners
+        # Use armv8.2-a to avoid i8mm which requires armv8.6-a
+        echo "CFLAGS=-march=armv8.2-a" >> $GITHUB_ENV
+        echo "CXXFLAGS=-march=armv8.2-a" >> $GITHUB_ENV
 
     - name: Setup CMake (non-Linux)
       if: runner.os != 'Linux'
