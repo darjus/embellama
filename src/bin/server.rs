@@ -59,7 +59,10 @@ impl Args {
     fn validate(&self) -> Result<(), String> {
         // Check if model path exists
         if !self.model_path.exists() {
-            return Err(format!("Model file not found: {}", self.model_path.display()));
+            return Err(format!(
+                "Model file not found: {}",
+                self.model_path.display()
+            ));
         }
 
         // Validate workers count

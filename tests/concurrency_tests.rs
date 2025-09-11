@@ -99,9 +99,11 @@ fn test_concurrent_batch_processing() {
                 barrier.wait();
 
                 // Each thread processes its own batch
-                let texts = [format!("Thread {i} text 1"),
+                let texts = [
+                    format!("Thread {i} text 1"),
                     format!("Thread {i} text 2"),
-                    format!("Thread {i} text 3")];
+                    format!("Thread {i} text 3"),
+                ];
 
                 let text_refs: Vec<&str> = texts.iter().map(std::string::String::as_str).collect();
                 let result = engine.embed_batch(None, &text_refs);
@@ -350,9 +352,7 @@ fn test_batch_consistency() {
     let batch_sizes = vec![1, 10, 50, 100, 500];
 
     for size in batch_sizes {
-        let texts: Vec<String> = (0..size)
-            .map(|i| format!("Consistency test {i}"))
-            .collect();
+        let texts: Vec<String> = (0..size).map(|i| format!("Consistency test {i}")).collect();
 
         // Simulate parallel processing
         let processed: HashSet<String> = texts.iter().cloned().collect();

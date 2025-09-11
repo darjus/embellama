@@ -86,7 +86,8 @@ impl Worker {
                     }
                     TextInput::Batch(texts) => {
                         // Generate batch embeddings
-                        let text_refs: Vec<&str> = texts.iter().map(std::string::String::as_str).collect();
+                        let text_refs: Vec<&str> =
+                            texts.iter().map(std::string::String::as_str).collect();
                         engine.embed_batch(Some(&request.model), &text_refs)
                     }
                 }
@@ -132,7 +133,7 @@ impl Worker {
     /// Spawn a worker in a new thread
     ///
     /// # Arguments
-    /// * `id` - Worker identifier  
+    /// * `id` - Worker identifier
     /// * `engine` - Shared embedding engine instance
     /// * `receiver` - Channel to receive requests
     ///

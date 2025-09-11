@@ -66,14 +66,14 @@ impl RateLimitConfig {
         if !self.enabled {
             return None;
         }
-        
+
         let quota = Quota::per_second(
             NonZeroU32::new(self.requests_per_second).expect("Invalid requests_per_second"),
         )
         .allow_burst(
             NonZeroU32::new(self.burst_size).expect("Invalid burst_size"),
         );
-        
+
         Some(Arc::new(GovernorRateLimiter::new(
             quota,
             InMemoryState::default(),
@@ -92,7 +92,7 @@ pub async fn rate_limit_middleware(
     let Some(limiter) = limiter else {
         return next.run(request).await;
     };
-    
+
     // Try to acquire a token
     match limiter.check() {
         Ok(_) => {
@@ -103,15 +103,15 @@ pub async fn rate_limit_middleware(
             // Rate limit exceeded
             let retry_after = not_until.wait_time_from(DefaultClock::default().now());
             let retry_after_secs = retry_after.as_secs();
-            
+
             // Record metrics
             metrics::record_rate_limited("global", "token_exhausted");
-            
+
             tracing::warn!(
                 "Rate limit exceeded, retry after {} seconds",
                 retry_after_secs
             );
-            
+
             // Return 429 with Retry-After header
             let mut response = (
                 StatusCode::TOO_MANY_REQUESTS,
@@ -125,12 +125,12 @@ pub async fn rate_limit_middleware(
                 })),
             )
                 .into_response();
-            
+
             response.headers_mut().insert(
                 "Retry-After",
                 HeaderValue::from_str(&retry_after_secs.to_string()).unwrap(),
             );
-            
+
             response
         }
     }
@@ -152,7 +152,7 @@ impl ClientRateLimiter {
             config,
         }
     }
-    
+
     /// Get or create a rate limiter for a client
     pub fn get_limiter(&self, client_id: &str) -> RateLimiter {
         let now = std::time::Instant::now();
@@ -170,17 +170,17 @@ impl ClientRateLimiter {
             .0
             .clone()
     }
-    
+
     /// Clean up old entries (call periodically)
     pub fn cleanup(&self, max_age: Duration) {
         let now = std::time::Instant::now();
         let before_size = self.limiters.len();
-        
+
         // Remove entries older than max_age
         self.limiters.retain(|_key, (_limiter, last_access)| {
             now.duration_since(*last_access) < max_age
         });
-        
+
         let after_size = self.limiters.len();
         if before_size > after_size {
             tracing::debug!(
@@ -189,7 +189,7 @@ impl ClientRateLimiter {
                 after_size
             );
         }
-        
+
         // Warn if cache is still very large
         if after_size > 10000 {
             tracing::warn!(

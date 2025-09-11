@@ -55,7 +55,7 @@ jobs:
       - name: Run integration tests
         run: just test-integration
 
-      - name: Run concurrency tests  
+      - name: Run concurrency tests
         run: just test-concurrency
 
       - name: Build documentation

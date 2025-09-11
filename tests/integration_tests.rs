@@ -747,9 +747,7 @@ fn test_batch_processing_basic() {
         "Third text to complete the batch",
     ];
 
-    let embeddings = engine
-        .embed_batch(Some("test_batch"), &texts)
-        .unwrap();
+    let embeddings = engine.embed_batch(Some("test_batch"), &texts).unwrap();
 
     // Verify batch results
     assert_eq!(embeddings.len(), texts.len());
@@ -810,7 +808,9 @@ fn test_batch_processing_empty() {
 
     // Test empty batch
     let texts: Vec<&str> = vec![];
-    let embeddings = engine.embed_batch(Some("test_empty_batch"), &texts).unwrap();
+    let embeddings = engine
+        .embed_batch(Some("test_empty_batch"), &texts)
+        .unwrap();
 
     assert!(embeddings.is_empty());
 }
@@ -859,9 +859,7 @@ fn test_batch_processing_order_preservation() {
         "Epsilon text",
     ];
 
-    let batch_embeddings = engine
-        .embed_batch(Some("test_order"), &texts)
-        .unwrap();
+    let batch_embeddings = engine.embed_batch(Some("test_order"), &texts).unwrap();
 
     // Get individual embeddings
     let mut individual_embeddings = Vec::new();

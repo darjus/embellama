@@ -368,13 +368,14 @@ async fn test_batch_embeddings_duplicate_texts() {
     // Verify duplicate texts produce same embeddings
     if let EmbeddingValue::Float(emb1) = &embedding_response.data[0].embedding
         && let EmbeddingValue::Float(emb2) = &embedding_response.data[2].embedding
-            && let EmbeddingValue::Float(emb3) = &embedding_response.data[4].embedding {
-                // Check embeddings are identical for duplicate texts
-                for i in 0..emb1.len() {
-                    assert!((emb1[i] - emb2[i]).abs() < 1e-6);
-                    assert!((emb1[i] - emb3[i]).abs() < 1e-6);
-                }
-            }
+        && let EmbeddingValue::Float(emb3) = &embedding_response.data[4].embedding
+    {
+        // Check embeddings are identical for duplicate texts
+        for i in 0..emb1.len() {
+            assert!((emb1[i] - emb2[i]).abs() < 1e-6);
+            assert!((emb1[i] - emb3[i]).abs() < 1e-6);
+        }
+    }
 }
 
 #[tokio::test]

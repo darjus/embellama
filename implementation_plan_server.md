@@ -20,13 +20,13 @@ Set up the basic server infrastructure with Axum and establish the project struc
 - [x] Configure server dependencies in `Cargo.toml`
   - [x] Add server feature flag configuration
   - [x] Add `axum = { version = "0.8", optional = true }`
-  - [x] Add `tokio = { version = "1.35", features = ["full"], optional = true }` 
+  - [x] Add `tokio = { version = "1.35", features = ["full"], optional = true }`
   - [x] Add `clap = { version = "4.4", features = ["derive"], optional = true }`
   - [x] Add `tower = { version = "0.4", optional = true }` > NOTE: Updated to 0.5 for compatibility
   - [x] Add `tower-http = { version = "0.6", features = ["cors", "trace"], optional = true }`
   - [x] Add `uuid = { version = "1.11", features = ["v4", "serde"], optional = true }`
   - [x] Configure binary target with required features
-  
+
 - [x] Create server module structure
   - [x] Create `src/server/mod.rs` with submodule declarations
   - [x] Create `src/server/worker.rs` for worker thread implementation (stub for Phase 2)
@@ -34,7 +34,7 @@ Set up the basic server infrastructure with Axum and establish the project struc
   - [x] Create `src/server/channel.rs` for message types
   - [x] Create `src/server/state.rs` for application state
   - [x] Create `src/bin/server.rs` for server binary
-  
+
 - [x] Implement CLI argument parsing (`src/bin/server.rs`)
   - [x] Define `Args` struct with `clap` derive
   - [x] Add arguments:
@@ -47,7 +47,7 @@ Set up the basic server infrastructure with Axum and establish the project struc
     - [x] `--log-level` - Log level configuration
   - [x] Implement argument validation
   - [x] Support environment variables for all arguments
-  
+
 - [x] Set up basic Axum application
   - [x] Create `Router` with basic routes
   - [x] Add `/health` endpoint
@@ -55,7 +55,7 @@ Set up the basic server infrastructure with Axum and establish the project struc
   - [x] Set up graceful shutdown
   - [x] Implement server binding and listening
   > BUG: Fixed layer ordering issue - TraceLayer must come before CorsLayer
-  
+
 - [x] Configure logging for server
   - [x] Set up `tracing_subscriber` with env filter
   - [x] Add request/response logging middleware
@@ -91,7 +91,7 @@ Implement the worker pool pattern to handle the `!Send` constraint with thread-l
     - [x] `token_count: usize`
     - [x] `processing_time_ms: u64`
   - [x] Create `TextInput` enum for single/batch
-  
+
 - [x] Implement worker thread (`src/server/worker.rs`)
   - [x] Create `Worker` struct with:
     - [x] Shared `EmbeddingEngine` instance (thread-safe via Arc<Mutex>)
@@ -107,7 +107,7 @@ Implement the worker pool pattern to handle the `!Send` constraint with thread-l
     - [x] Graceful shutdown handling
     - [x] Error recovery mechanisms
   > NOTE: Using EmbeddingEngine singleton pattern instead of direct model management
-  
+
 - [x] Implement dispatcher (`src/server/dispatcher.rs`)
   - [x] Create `Dispatcher` struct with:
     - [x] Vector of worker sender channels
@@ -118,21 +118,21 @@ Implement the worker pool pattern to handle the `!Send` constraint with thread-l
     - [x] Forward request to worker
     - [x] Handle backpressure
     - [ ] Implement timeout handling (deferred to Phase 4)
-  
+
 - [x] Create worker pool management
   - [x] Spawn worker threads on startup
   - [x] Each worker gets engine reference (models loaded on first use)
   - [ ] Monitor worker health (deferred to Phase 4)
   - [ ] Handle worker failures/restarts (deferred to Phase 4)
   - [x] Implement graceful shutdown
-  
+
 - [x] Implement `AppState` (`src/server/state.rs`)
   - [x] Store dispatcher instance
   - [x] Store engine instance
   - [x] Configuration parameters
   - [ ] Metrics and statistics (deferred to Phase 4)
   - [x] Health check status
-  
+
 - [x] Add worker pool tests
   - [x] Test basic server startup
   - [x] Test health endpoint
@@ -182,7 +182,7 @@ Implement the OpenAI-compatible `/v1/embeddings` endpoint with proper request/re
     }
     ```
   - [x] Add supporting types (EmbeddingData, Usage)
-  
+
 - [x] Implement embeddings handler
   - [x] Create async handler function
   - [x] Parse and validate request
@@ -190,24 +190,24 @@ Implement the OpenAI-compatible `/v1/embeddings` endpoint with proper request/re
   - [x] Send request to dispatcher
   - [x] Await response with timeout
   - [x] Format OpenAI-compatible response
-  
+
 - [x] Add input validation
   - [x] Validate model name exists
   - [x] Check input text length limits
   - [x] Validate encoding format
   - [x] Handle empty inputs gracefully
-  
+
 - [x] Implement error responses
   - [x] OpenAI-compatible error format
   - [x] Appropriate HTTP status codes
   - [x] Helpful error messages
   - [x] Request ID in errors
-  
+
 - [x] Add routes to router
   - [x] Mount `/v1/embeddings` POST endpoint
   - [x] Add `/v1/models` GET endpoint
   - [ ] Add OpenAPI/Swagger documentation (deferred to Phase 6)
-  
+
 - [x] Implement content negotiation
   - [x] Support JSON requests/responses
   - [x] Handle content-type headers
@@ -237,40 +237,40 @@ Implement the complete request processing pipeline with proper error handling an
   - [x] Add request size limits (10MB default via limit_request_size)
   - [x] Validate authentication (API key auth with constant-time comparison)
   > NOTE: Fixed critical timing attack vulnerability using subtle crate
-  
+
 - [ ] Enhance request flow
   - [ ] Add request queuing with priorities
   - [ ] Implement request cancellation
   - [ ] Add request deduplication
   - [ ] Handle batch request optimization
-  
+
 - [ ] Implement response post-processing
   - [ ] Format embeddings (float vs base64)
   - [ ] Calculate token usage statistics
   - [ ] Add response caching headers
   - [ ] Implement response compression
-  
+
 - [x] Add timeout handling (PARTIAL)
   - [ ] Configure per-request timeouts
   - [ ] Implement timeout response
   - [ ] Clean up timed-out requests
   - [ ] Return partial results option
   > NOTE: Basic timeout support exists in handler, full implementation deferred
-  
+
 - [x] Implement backpressure handling
   - [x] Monitor queue depths (via metrics)
   - [x] Return 503 when overloaded (via circuit breaker)
   - [x] Add retry-after headers (in rate limiter responses)
   - [x] Implement circuit breaker pattern
   > NOTE: Fixed critical race conditions in circuit breaker using single mutex
-  
+
 - [x] Add observability
   - [x] Request/response metrics (Prometheus)
   - [x] Latency histograms (with configurable buckets)
   - [x] Queue depth monitoring (via gauges)
   - [x] Worker utilization metrics
   > NOTE: Comprehensive Prometheus metrics at /metrics endpoint
-  
+
 - [x] Error recovery mechanisms (PARTIAL)
   - [ ] Retry failed requests
   - [ ] Dead letter queue for failures
@@ -301,39 +301,39 @@ Ensure server functionality with comprehensive integration tests and OpenAI comp
   - [x] Download test models for CI (using justfile infrastructure)
   - [x] Configure test environment
   - [x] Set up test fixtures and data generators
-  
+
 - [x] Write API integration tests (`tests/server_api_tests.rs`)
   - [x] Test single embedding requests (various text lengths)
   - [x] Test batch embedding requests (small, medium, large batches)
   - [x] Test error scenarios (empty input, invalid format, missing fields)
   - [ ] Test timeout handling (basic support, needs full implementation)
   - [x] Test concurrent requests (via load tests)
-  
+
 - [x] OpenAI compatibility tests (`tests/openai_compat_tests.rs`)
   - [x] Test with OpenAI Python client (`scripts/test-openai-python.py`)
   - [x] Test with OpenAI JavaScript client (`scripts/test-openai-js.mjs`)
   - [x] Validate response format exactly
   - [ ] Test streaming if applicable (not yet implemented)
-  
+
 - [x] Load testing (`tests/server_load_tests.rs`)
   - [ ] Use `oha` or `wrk` for load testing (script not yet created)
   - [x] Test various concurrency levels (10, 50, 100 concurrent)
   - [x] Measure latency percentiles (P50, P95, P99)
   - [x] Find breaking points (queue saturation test)
   - [x] Test sustained load
-  
+
 - [ ] Worker pool tests
   - [ ] Test worker failures (deferred - needs error recovery)
   - [ ] Test model reloading (deferred - not yet implemented)
   - [ ] Test graceful shutdown (basic coverage in load tests)
   - [ ] Test resource cleanup (basic coverage)
-  
+
 - [ ] End-to-end scenarios
   - [ ] RAG pipeline simulation
-  - [ ] Semantic search workflow  
+  - [ ] Semantic search workflow
   - [ ] High-volume batch processing (partial - in load tests)
   - [x] Mixed workload patterns (implemented in load tests)
-  
+
 - [x] Performance benchmarks
   - [x] Single request latency
   - [x] Throughput at various batch sizes
@@ -381,43 +381,43 @@ Add production-ready features for monitoring, operations, and deployment.
     - [ ] Worker utilization
     - [ ] Error rates
   - [ ] Add custom business metrics
-  
+
 - [ ] Add operational endpoints
   - [ ] `/admin/reload` - Reload models
   - [ ] `/admin/workers` - Worker status
   - [ ] `/admin/config` - View configuration
   - [ ] `/admin/drain` - Graceful drain
-  
+
 - [ ] Implement configuration management
   - [ ] Support environment variables
   - [ ] Add configuration file support (YAML/TOML)
   - [ ] Hot-reload configuration
   - [ ] Validate configuration changes
-  
+
 - [ ] Add deployment features
   - [ ] Docker container support
   - [ ] Kubernetes readiness/liveness probes
   - [ ] Horizontal scaling support
   - [ ] Rolling update compatibility
-  
+
 - [ ] Enhance security
   - [ ] Add API key authentication
   - [ ] Implement rate limiting per client
   - [ ] Add request signing/verification
   - [ ] Audit logging for requests
-  
+
 - [ ] Implement caching layer
   - [ ] Cache frequent embeddings
   - [ ] LRU eviction policy
   - [ ] Cache metrics
   - [ ] Cache invalidation API
-  
+
 - [ ] Add multi-model support
   - [ ] Load multiple models
   - [ ] Route by model name
   - [ ] Model versioning
   - [ ] A/B testing support
-  
+
 - [ ] Production documentation
   - [ ] Deployment guide
   - [ ] Operations runbook
@@ -448,31 +448,31 @@ Optimize server performance based on profiling and real-world usage patterns.
   - [ ] Memory profiling with heaptrack
   - [ ] Async runtime analysis
   - [ ] Channel contention analysis
-  
+
 - [ ] Optimize request routing
   - [ ] Implement smart load balancing
   - [ ] Add work-stealing queue
   - [ ] Optimize channel implementations
   - [ ] Reduce context switching
-  
+
 - [ ] Improve batching efficiency
   - [ ] Dynamic batch aggregation
   - [ ] Adaptive batch sizing
   - [ ] Optimize batch timeout
   - [ ] Coalesce small requests
-  
+
 - [ ] Optimize serialization
   - [ ] Use faster JSON library (simd-json)
   - [ ] Implement zero-copy where possible
   - [ ] Optimize base64 encoding
   - [ ] Buffer pool for responses
-  
+
 - [ ] Network optimizations
   - [ ] TCP tuning parameters
   - [ ] HTTP/2 support
   - [ ] Keep-alive optimization
   - [ ] Response streaming
-  
+
 - [ ] Worker pool tuning
   - [ ] Optimal worker count discovery
   - [ ] CPU affinity settings

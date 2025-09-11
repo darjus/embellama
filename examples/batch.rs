@@ -27,15 +27,13 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
         .init();
 
     // Get model path from environment
-    let model_path = env::var("EMBELLAMA_MODEL")
-        .ok()
-        .map_or_else(
-            || {
-                eprintln!("Set EMBELLAMA_MODEL environment variable to model path");
-                std::process::exit(1);
-            },
-            PathBuf::from,
-        );
+    let model_path = env::var("EMBELLAMA_MODEL").ok().map_or_else(
+        || {
+            eprintln!("Set EMBELLAMA_MODEL environment variable to model path");
+            std::process::exit(1);
+        },
+        PathBuf::from,
+    );
 
     println!("Batch Processing Example");
     println!("========================");
@@ -87,9 +85,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
         #[allow(clippy::cast_precision_loss)]
         let items_per_sec = (size as f64 * 1000.0) / total_ms as f64;
 
-        println!(
-            "{size:<12} {total_ms:>11}ms {per_item_ms:>11.2}ms {items_per_sec:>14.1}/s"
-        );
+        println!("{size:<12} {total_ms:>11}ms {per_item_ms:>11.2}ms {items_per_sec:>14.1}/s");
 
         // Verify results
         assert_eq!(embeddings.len(), size);
@@ -140,9 +136,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
 
     let large_batch_sizes = vec![500, 1000];
     for &size in &large_batch_sizes {
-        let texts: Vec<String> = (0..size)
-            .map(|i| format!("Large batch text {i}"))
-            .collect();
+        let texts: Vec<String> = (0..size).map(|i| format!("Large batch text {i}")).collect();
         let text_refs: Vec<&str> = texts.iter().map(std::string::String::as_str).collect();
 
         let start = Instant::now();
@@ -152,12 +146,10 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
         // Cast is acceptable for display purposes - showing approximate texts/sec
         #[allow(clippy::cast_precision_loss)]
         let texts_per_sec = size as f64 / duration.as_secs_f64();
-        
+
         println!(
             "Processed {} texts in {:?} ({:.1} texts/sec)",
-            size,
-            duration,
-            texts_per_sec
+            size, duration, texts_per_sec
         );
 
         assert_eq!(embeddings.len(), size);

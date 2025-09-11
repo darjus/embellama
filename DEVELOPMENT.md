@@ -76,7 +76,7 @@ Install the Rust plugin and configure it to use `cargo clippy` for on-save check
 
 ### Development Commands with `just`
 
-This project uses [just](https://github.com/casey/just) for task automation. 
+This project uses [just](https://github.com/casey/just) for task automation.
 
 #### Available Commands
 
@@ -244,7 +244,7 @@ When writing tests that create multiple engines, use a single engine with `load_
 #[serial]  // Required for all integration tests
 fn test_multiple_configurations() {
     let mut engine = EmbeddingEngine::new(initial_config)?;
-    
+
     // Load additional models instead of creating new engines
     engine.load_model(config2)?;
     engine.load_model(config3)?;
@@ -263,10 +263,10 @@ mod tests {
     fn test_something() {
         // Arrange
         let input = "test";
-        
+
         // Act
         let result = function_under_test(input);
-        
+
         // Assert
         assert_eq!(result, expected);
     }

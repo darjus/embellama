@@ -273,9 +273,7 @@ impl EmbeddingModel {
         // More accurate measurement would require llama.cpp API support
         let params = self.cell.borrow_owner().n_params();
         let size_per_param = 2; // Approximate bytes per parameter for quantized models
-        usize::try_from(params)
-            .ok()
-            .map(|p| p * size_per_param)
+        usize::try_from(params).ok().map(|p| p * size_per_param)
     }
 
     /// Returns the model's metadata.
@@ -567,8 +565,8 @@ impl EmbeddingModel {
         }
 
         // Create a batch with all sequences (using actual n_seq_max)
-        let n_seq_max_i32 = i32::try_from(self.n_seq_max)
-            .map_err(|_| Error::EmbeddingGenerationError {
+        let n_seq_max_i32 =
+            i32::try_from(self.n_seq_max).map_err(|_| Error::EmbeddingGenerationError {
                 message: "n_seq_max too large for i32".to_string(),
                 source: None,
             })?;
@@ -577,11 +575,14 @@ impl EmbeddingModel {
         // Add each sequence with unique ID
         for (seq_id, tokens) in token_sequences.iter().enumerate() {
             batch
-                .add_sequence(tokens, i32::try_from(seq_id)
-                    .map_err(|_| Error::EmbeddingGenerationError {
+                .add_sequence(
+                    tokens,
+                    i32::try_from(seq_id).map_err(|_| Error::EmbeddingGenerationError {
                         message: format!("Sequence ID {seq_id} too large for i32"),
                         source: None,
-                    })?, true)
+                    })?,
+                    true,
+                )
                 .map_err(|e| Error::EmbeddingGenerationError {
                     message: format!("Failed to add sequence {seq_id} to batch: {e}"),
                     source: Some(anyhow::anyhow!(e)),
@@ -601,44 +602,48 @@ impl EmbeddingModel {
         let mut all_embeddings = Vec::with_capacity(token_sequences.len());
 
         for seq_id in 0..token_sequences.len() {
-            let embeddings =
-                self.cell
-                    .with_dependent(|_, ctx| -> Result<Vec<Vec<f32>>> {
-                        // Try to get sequence embeddings first (for BERT models)
-                        if let Ok(seq_id_i32) = i32::try_from(seq_id)
-                            && let Ok(seq_embeddings) = ctx.embeddings_seq_ith(seq_id_i32) {
-                                // For BERT models with pooling, we get one embedding for the whole sequence
-                                return Ok(vec![seq_embeddings.to_vec()]);
-                        }
-                        
-                        // Fall back to token-wise embeddings (for LLaMA-style models)
-                        // Need to extract tokens for this specific sequence
-                        let seq_tokens = &token_sequences[seq_id];
-                        let mut token_embeddings = Vec::with_capacity(seq_tokens.len());
+            let embeddings = self
+                .cell
+                .with_dependent(|_, ctx| -> Result<Vec<Vec<f32>>> {
+                    // Try to get sequence embeddings first (for BERT models)
+                    if let Ok(seq_id_i32) = i32::try_from(seq_id)
+                        && let Ok(seq_embeddings) = ctx.embeddings_seq_ith(seq_id_i32)
+                    {
+                        // For BERT models with pooling, we get one embedding for the whole sequence
+                        return Ok(vec![seq_embeddings.to_vec()]);
+                    }
 
-                        // Calculate token offset for this sequence
-                        let token_offset: usize =
-                            token_sequences[..seq_id].iter().map(std::vec::Vec::len).sum();
+                    // Fall back to token-wise embeddings (for LLaMA-style models)
+                    // Need to extract tokens for this specific sequence
+                    let seq_tokens = &token_sequences[seq_id];
+                    let mut token_embeddings = Vec::with_capacity(seq_tokens.len());
 
-                        for i in 0..seq_tokens.len() {
-                            let global_idx = token_offset + i;
-                            let global_idx_i32 = i32::try_from(global_idx)
-                                .map_err(|_| Error::EmbeddingGenerationError {
-                                    message: format!("Global index {global_idx} too large for i32"),
-                                    source: None,
-                                })?;
-                            let embeddings = ctx.embeddings_ith(global_idx_i32).map_err(
-                                |e| Error::EmbeddingGenerationError {
-                                    message: format!(
-                                        "Failed to get embeddings for token {i} in sequence {seq_id}"
-                                    ),
-                                    source: Some(anyhow::anyhow!(e)),
-                                },
-                            )?;
-                            token_embeddings.push(embeddings.to_vec());
-                        }
-                        Ok(token_embeddings)
-                    })?;
+                    // Calculate token offset for this sequence
+                    let token_offset: usize = token_sequences[..seq_id]
+                        .iter()
+                        .map(std::vec::Vec::len)
+                        .sum();
+
+                    for i in 0..seq_tokens.len() {
+                        let global_idx = token_offset + i;
+                        let global_idx_i32 = i32::try_from(global_idx).map_err(|_| {
+                            Error::EmbeddingGenerationError {
+                                message: format!("Global index {global_idx} too large for i32"),
+                                source: None,
+                            }
+                        })?;
+                        let embeddings = ctx.embeddings_ith(global_idx_i32).map_err(|e| {
+                            Error::EmbeddingGenerationError {
+                                message: format!(
+                                    "Failed to get embeddings for token {i} in sequence {seq_id}"
+                                ),
+                                source: Some(anyhow::anyhow!(e)),
+                            }
+                        })?;
+                        token_embeddings.push(embeddings.to_vec());
+                    }
+                    Ok(token_embeddings)
+                })?;
 
             // Apply pooling and normalization
             let pooled = if embeddings.len() == 1 && token_sequences[seq_id].len() > 1 {
@@ -738,8 +743,8 @@ impl EmbeddingModel {
                     // Fall back to token-wise embeddings (for LLaMA-style models)
                     let mut token_embeddings = Vec::with_capacity(n_tokens);
                     for i in 0..n_tokens {
-                        let i_i32 = i32::try_from(i)
-                            .map_err(|_| Error::EmbeddingGenerationError {
+                        let i_i32 =
+                            i32::try_from(i).map_err(|_| Error::EmbeddingGenerationError {
                                 message: format!("Index {i} too large for i32"),
                                 source: None,
                             })?;
@@ -768,10 +773,7 @@ impl EmbeddingModel {
     /// # Returns
     ///
     /// Returns a single pooled embedding vector.
-    fn apply_pooling(
-        embeddings: &[Vec<f32>],
-        strategy: PoolingStrategy,
-    ) -> Result<Vec<f32>> {
+    fn apply_pooling(embeddings: &[Vec<f32>], strategy: PoolingStrategy) -> Result<Vec<f32>> {
         if embeddings.is_empty() {
             return Err(Error::EmbeddingGenerationError {
                 message: "No embeddings to pool".to_string(),
@@ -872,7 +874,6 @@ impl Drop for EmbeddingModel {
         // The self_cell will handle dropping both the model and context in the correct order
     }
 }
-
 
 #[cfg(test)]
 mod tests {

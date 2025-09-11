@@ -108,6 +108,16 @@ clippy:
     @echo "Running clippy on tests, examples, and benches (lenient)..."
     cargo clippy --tests --examples --benches --all-features -- -W warnings -W clippy::pedantic
 
+# Compile tests without running them (for pre-commit)
+test-compile:
+    @echo "Compiling tests..."
+    cargo test --no-run --lib --all-features
+
+# Build documentation
+doc:
+    @echo "Building documentation..."
+    cargo doc --no-deps --all-features
+
 # Clean build artifacts
 clean:
     @echo "Cleaning build artifacts..."
@@ -148,9 +158,71 @@ models-status:
 dev: fix fmt clippy test-unit
     @echo "✓ Ready for integration testing"
 
-# Pre-commit checks
-pre-commit: fmt clippy test
-    @echo "✓ All pre-commit checks passed"
+# Install pre-commit hooks
+install-hooks:
+    @echo "Installing pre-commit hooks..."
+    @if command -v uvx >/dev/null 2>&1; then \
+        uvx pre-commit install; \
+        echo "✓ Pre-commit hooks installed using uvx"; \
+    elif command -v pipx >/dev/null 2>&1; then \
+        pipx run pre-commit install; \
+        echo "✓ Pre-commit hooks installed using pipx"; \
+    elif command -v pre-commit >/dev/null 2>&1; then \
+        pre-commit install; \
+        echo "✓ Pre-commit hooks installed"; \
+    else \
+        echo "pre-commit not found. Install uv with: curl -LsSf https://astral.sh/uv/install.sh | sh"; \
+        echo "Or install pipx with: pip install --user pipx"; \
+        exit 1; \
+    fi
+
+# Run pre-commit hooks on all files
+pre-commit-all:
+    @echo "Running pre-commit on all files..."
+    @if command -v uvx >/dev/null 2>&1; then \
+        uvx pre-commit run --all-files; \
+    elif command -v pipx >/dev/null 2>&1; then \
+        pipx run pre-commit run --all-files; \
+    elif command -v pre-commit >/dev/null 2>&1; then \
+        pre-commit run --all-files; \
+    else \
+        echo "pre-commit not found. Install uv with: curl -LsSf https://astral.sh/uv/install.sh | sh"; \
+        echo "Or install pipx with: pip install --user pipx"; \
+        exit 1; \
+    fi
+
+# Run pre-commit hooks on staged files
+pre-commit:
+    @echo "Running pre-commit on staged files..."
+    @if command -v uvx >/dev/null 2>&1; then \
+        uvx pre-commit run; \
+    elif command -v pipx >/dev/null 2>&1; then \
+        pipx run pre-commit run; \
+    elif command -v pre-commit >/dev/null 2>&1; then \
+        pre-commit run; \
+    else \
+        echo "pre-commit not found. Install uv with: curl -LsSf https://astral.sh/uv/install.sh | sh"; \
+        echo "Or install pipx with: pip install --user pipx"; \
+        exit 1; \
+    fi
+
+# Update pre-commit hooks to latest versions
+update-hooks:
+    @echo "Updating pre-commit hooks..."
+    @if command -v uvx >/dev/null 2>&1; then \
+        uvx pre-commit autoupdate; \
+        echo "✓ Pre-commit hooks updated using uvx"; \
+    elif command -v pipx >/dev/null 2>&1; then \
+        pipx run pre-commit autoupdate; \
+        echo "✓ Pre-commit hooks updated using pipx"; \
+    elif command -v pre-commit >/dev/null 2>&1; then \
+        pre-commit autoupdate; \
+        echo "✓ Pre-commit hooks updated"; \
+    else \
+        echo "pre-commit not found. Install uv with: curl -LsSf https://astral.sh/uv/install.sh | sh"; \
+        echo "Or install pipx with: pip install --user pipx"; \
+        exit 1; \
+    fi
 
 # Full CI simulation
 ci: clean check clippy test bench

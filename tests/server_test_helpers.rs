@@ -36,17 +36,17 @@ pub struct TestServer {
 
 impl TestServer {
     /// Spawn a test server with the given configuration
-    /// 
+    ///
     /// # Errors
-    /// 
+    ///
     /// Returns an error if:
     /// - No available port can be found
     /// - Server binary cannot be built
     /// - Server process cannot be started
     /// - Server fails to become ready within timeout
-    /// 
+    ///
     /// # Panics
-    /// 
+    ///
     /// Panics if the model path cannot be converted to a string
     pub async fn spawn(model_path: PathBuf, workers: usize) -> Result<Self, String> {
         // Find an available port
@@ -104,7 +104,8 @@ impl TestServer {
 
     /// Get the base URL for the test server
     #[allow(dead_code)]
-    #[must_use] pub fn url(&self, path: &str) -> String {
+    #[must_use]
+    pub fn url(&self, path: &str) -> String {
         format!("{}{}", self.base_url, path)
     }
 }
@@ -144,9 +145,10 @@ async fn wait_for_server(base_url: &str, timeout: Duration) -> Result<(), String
 
         // Use async client
         if let Ok(resp) = client.get(&health_url).send().await
-            && resp.status().is_success() {
-                return Ok(());
-            }
+            && resp.status().is_success()
+        {
+            return Ok(());
+        }
 
         tokio::time::sleep(Duration::from_millis(100)).await;
     }
@@ -165,11 +167,12 @@ impl Default for TestClient {
 
 impl TestClient {
     /// Creates a new test client
-    /// 
+    ///
     /// # Panics
-    /// 
+    ///
     /// Panics if the HTTP client cannot be built
-    #[must_use] pub fn new() -> Self {
+    #[must_use]
+    pub fn new() -> Self {
         Self {
             client: Client::builder()
                 .timeout(Duration::from_secs(30))
@@ -179,9 +182,9 @@ impl TestClient {
     }
 
     /// Make an embedding request
-    /// 
+    ///
     /// # Errors
-    /// 
+    ///
     /// Returns an error if the HTTP request fails
     pub async fn embedding_request(
         &self,
@@ -207,9 +210,9 @@ impl TestClient {
     }
 
     /// Get list of models
-    /// 
+    ///
     /// # Errors
-    /// 
+    ///
     /// Returns an error if the HTTP request fails
     #[allow(dead_code)]
     pub async fn list_models(&self, base_url: &str) -> Result<Response, reqwest::Error> {
@@ -220,9 +223,9 @@ impl TestClient {
     }
 
     /// Check health endpoint
-    /// 
+    ///
     /// # Errors
-    /// 
+    ///
     /// Returns an error if the HTTP request fails
     #[allow(dead_code)]
     pub async fn health_check(&self, base_url: &str) -> Result<Response, reqwest::Error> {
@@ -283,7 +286,8 @@ pub struct ErrorDetail {
 
 /// Generate test texts of various lengths
 #[allow(dead_code)]
-#[must_use] pub fn generate_test_texts(count: usize) -> Vec<String> {
+#[must_use]
+pub fn generate_test_texts(count: usize) -> Vec<String> {
     (0..count)
         .map(|i| {
             match i % 4 {
@@ -297,9 +301,9 @@ pub struct ErrorDetail {
 }
 
 /// Validate embedding response structure
-/// 
+///
 /// # Panics
-/// 
+///
 /// Panics if the response structure is invalid, including:
 /// - Wrong object type
 /// - Incorrect number of embeddings
@@ -310,7 +314,7 @@ pub struct ErrorDetail {
 #[allow(dead_code)]
 pub fn validate_embedding_response(response: &EmbeddingResponse, expected_count: usize) {
     use base64::Engine;
-    
+
     assert_eq!(response.object, "list");
     assert_eq!(response.data.len(), expected_count);
 
@@ -342,9 +346,9 @@ pub fn validate_embedding_response(response: &EmbeddingResponse, expected_count:
 }
 
 /// Assert that embeddings are normalized (L2 norm ≈ 1.0)
-/// 
+///
 /// # Panics
-/// 
+///
 /// Panics if any embedding's L2 norm deviates from 1.0 by more than the specified tolerance
 #[allow(dead_code)]
 pub fn assert_embeddings_normalized(embeddings: &[Vec<f32>], tolerance: f32) {
@@ -358,9 +362,9 @@ pub fn assert_embeddings_normalized(embeddings: &[Vec<f32>], tolerance: f32) {
 }
 
 /// Helper to make concurrent requests
-/// 
+///
 /// # Panics
-/// 
+///
 /// Panics if any spawned task panics
 #[allow(dead_code)]
 pub async fn make_concurrent_requests(
@@ -396,9 +400,9 @@ pub async fn make_concurrent_requests(
 }
 
 /// Measure request latency percentiles
-/// 
+///
 /// # Panics
-/// 
+///
 /// Panics if no latency measurements are collected
 #[allow(dead_code)]
 pub async fn measure_latencies(
@@ -446,9 +450,9 @@ pub struct LatencyStats {
 }
 
 /// Get path to test model
-/// 
+///
 /// # Errors
-/// 
+///
 /// Returns an error if the test model cannot be found
 pub fn get_test_model_path() -> Result<PathBuf, String> {
     // First check environment variable

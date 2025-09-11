@@ -24,7 +24,8 @@ use std::path::PathBuf;
 use std::sync::{Arc, Mutex};
 
 // Use Lazy and Arc<Mutex> for safer shared access
-static ENGINE: std::sync::LazyLock<Arc<Mutex<Option<EmbeddingEngine>>>> = std::sync::LazyLock::new(|| Arc::new(Mutex::new(None)));
+static ENGINE: std::sync::LazyLock<Arc<Mutex<Option<EmbeddingEngine>>>> =
+    std::sync::LazyLock::new(|| Arc::new(Mutex::new(None)));
 
 /// Initialize the engine once for all property tests
 fn ensure_engine_initialized() {

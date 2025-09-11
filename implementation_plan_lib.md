@@ -21,7 +21,7 @@ Establish the foundational project structure, dependencies, and core error handl
   - [x] Set package name, version, authors, description
   - [x] Configure license (Apache-2.0)
   - [x] Add repository and documentation links
-  
+
 - [x] Configure dependencies in `Cargo.toml`
   - [x] Add `llama-cpp-2 = "0.1.117"` for model backend
   - [x] Add `thiserror = "1.0"` for error handling
@@ -29,13 +29,13 @@ Establish the foundational project structure, dependencies, and core error handl
   - [x] Add `tracing = "0.1"` for structured logging
   - [x] Add `serde = { version = "1.0", features = ["derive"] }` for serialization
   - [x] Add `rayon = "1.8"` for parallel batch processing
-  
+
 - [x] Create module structure
   - [x] Create `src/lib.rs` with module declarations
   - [x] Create `src/error.rs` for error types
   - [x] Create `src/config.rs` for configuration types
   - [x] Create placeholder files for other modules
-  
+
 - [x] Implement error handling foundation (`src/error.rs`)
   - [x] Define `EmbellamaError` enum with `thiserror`
   - [x] Add variants for common error cases:
@@ -45,12 +45,12 @@ Establish the foundational project structure, dependencies, and core error handl
     - [x] `InvalidInput(String)`
     - [x] `ConfigurationError(String)`
   - [x] Implement `From` conversions for underlying errors
-  
+
 - [x] Set up logging infrastructure
   - [x] Configure `tracing` subscriber in examples/tests
   - [x] Define logging macros/utilities if needed
   - [x] Add instrumentation attributes to key functions
-  
+
 - [x] Add license headers to all source files
   - [x] Create script or template for Apache 2.0 headers
   - [x] Apply to all `.rs` files
@@ -78,14 +78,14 @@ Implement the core model loading and management functionality, respecting the `!
   - [x] Use `ModelCell` to safely store both `LlamaModel` and `LlamaContext`
   - [x] Ensure struct is marked as `!Send` (automatic due to `LlamaContext`)
   - [x] Add model metadata fields (name, path, dimensions)
-  
+
 - [x] Implement model initialization
   - [x] Create `new()` method accepting model path
   - [x] Initialize `LlamaBackend` (once per process)
   - [x] Load model with `LlamaModelParams`
   - [x] Create context with `LlamaContextParams`
   - [x] Configure thread count settings
-  
+
 - [x] Implement model configuration (`src/config.rs`)
   - [x] Define `ModelConfig` struct with:
     - [x] `model_path: PathBuf`
@@ -95,18 +95,18 @@ Implement the core model loading and management functionality, respecting the `!
     - [x] `n_gpu_layers: Option<u32>` (GPU offload)
     - [x] ~~`seed: Option<u32>`~~ (removed - not applicable for embeddings)
   - [x] Implement builder pattern for `ModelConfig`
-  
+
 - [x] Add model lifecycle methods
   - [x] `load()` - Load model from disk
   - [x] `unload()` - Clean up resources
   - [x] `is_loaded()` - Check model state
   - [x] Implement `Drop` trait for cleanup
-  
+
 - [x] Add basic model information methods
   - [x] `embedding_dimensions()` - Get output dimension size
   - [x] `max_sequence_length()` - Get max input length
   - [x] `model_size()` - Get model memory footprint
-  
+
 - [x] Write unit tests
   - [x] Test model loading with valid path
   - [x] Test error handling for invalid paths
@@ -136,7 +136,7 @@ Implement single-text embedding generation with proper tokenization and processi
   - [x] Handle text encoding properly (UTF-8)
   - [x] Implement token limit checking
   - [x] Add special tokens handling (BOS/EOS)
-  
+
 - [x] Implement embedding generation
   - [x] Create `generate_embedding(&self, text: &str) -> Result<Vec<f32>>`
   - [x] Tokenize input text
@@ -144,28 +144,28 @@ Implement single-text embedding generation with proper tokenization and processi
   - [x] Perform forward pass through model
   - [x] Extract embedding vector from output
   - [x] Normalize embeddings if required
-  
+
 - [x] Implement `EmbeddingEngine` (`src/engine.rs`)
   - [x] Define public interface struct
   - [x] Store model instances (thread-local)
   - [x] Implement model registry/lookup
   - [x] Add `embed()` public method
-  
+
 - [x] Add embedding post-processing
   - [x] L2 normalization option
   - [x] Pooling strategies (Mean, CLS, Max, MeanSqrt)
   - [x] Output format configuration
-  
+
 - [x] Implement builder pattern for `EmbeddingEngine`
   - [x] `EngineConfig` struct with defaults (already existed)
   - [x] Builder methods for configuration
   - [x] Validation of configuration
-  
+
 - [x] Error handling improvements
   - [x] Add specific error types for embedding failures
   - [x] Provide helpful error messages
   - [x] Include context in errors (model name, text length)
-  
+
 - [x] Write integration tests
   - [x] Test with small test model (requires actual model)
   - [x] Verify embedding dimensions
@@ -195,42 +195,42 @@ Implement efficient batch processing with parallel pre/post-processing while res
   - [x] Implement text collection and validation
   - [x] Handle variable-length inputs
   - [x] Optimize memory allocation
-  
+
 - [x] Implement parallel tokenization
   - [x] Use `rayon` for parallel text processing
   - [x] Tokenize multiple texts concurrently
   - [x] Collect tokens into batches
   - [x] Handle tokenization errors gracefully
-  
+
 - [x] Implement sequential model inference
   - [x] Process token batches through model (single-threaded)
   - [x] Handle batch size limits
   - [x] Implement progress tracking
   - [x] Manage memory efficiently
-  
+
 - [x] Implement parallel post-processing
   - [x] Normalize embeddings in parallel
   - [x] Format output concurrently
   - [x] Aggregate results efficiently
-  
+
 - [x] Add batch API to `EmbeddingEngine`
   - [x] `embed_batch()` method using `BatchProcessor`
   - [x] Configure batch size limits
   - [x] Add progress callback option
   - [x] Return results in input order
-  
+
 - [x] Optimize batch performance
   - [x] ~~Profile with `flamegraph`~~ (deferred to Phase 6)
   - [x] Minimize allocations with pre-allocation
   - [x] Optimize memory layout
   - [x] Tune batch sizes (default: 64)
-  
+
 - [x] Handle edge cases
   - [x] Empty batch
   - [x] Single item batch
   - [x] Very large batches
   - [x] Mixed text lengths
-  
+
 - [x] Write comprehensive tests
   - [x] Test various batch sizes
   - [x] Verify order preservation
@@ -260,7 +260,7 @@ Ensure code quality with comprehensive testing and provide excellent documentati
   - [x] Create test fixtures
   - [ ] Set up CI test environment
   - [ ] Configure code coverage
-  
+
 - [x] Write unit tests (per module)
   - [x] Test `error.rs` - Error conversions and display
   - [x] Test `config.rs` - Builder patterns and validation
@@ -269,34 +269,34 @@ Ensure code quality with comprehensive testing and provide excellent documentati
   - [ ] Test `engine.rs` - Public API
   > NOTE: Enhanced unit tests for error.rs and config.rs with comprehensive coverage
   > BUG: Fixed config defaults and whitespace validation after code review
-  
+
 - [x] Write integration tests
   - [x] End-to-end embedding generation
   - [x] Model loading and unloading cycles
   - [x] Batch processing with real models
   - [x] Error recovery scenarios
-  
+
 - [x] Write concurrency tests
   - [x] Verify thread-local model isolation
   - [x] Test parallel batch operations
   - [x] Ensure no data races
   - [x] Test resource cleanup
   > NOTE: Added #[serial] attributes for test isolation and fixed panic test
-  
+
 - [x] Write performance benchmarks
   - [x] Single embedding latency
   - [x] Batch throughput
   - [x] Memory usage patterns
   - [x] Scaling characteristics
   > PERFORMANCE ISSUE: Benchmarks require real model file (set EMBELLAMA_BENCH_MODEL)
-  
+
 - [x] Create documentation
   - [ ] Write rustdoc for all public APIs
   - [x] Create usage examples
   - [x] Write README with quickstart
   - [x] Document configuration options
   - [x] Add architecture diagrams
-  
+
 - [x] Create example applications
   - [x] Simple embedding generation
   - [x] Batch processing example
@@ -304,7 +304,7 @@ Ensure code quality with comprehensive testing and provide excellent documentati
   - [x] Error handling patterns
   - [ ] Multi-model usage example
   > NOTE: Added comprehensive error_handling.rs example with retry logic and batch error recovery
-  
+
 - [ ] Set up quality checks
   - [ ] Configure `clippy` lints
   - [x] Set up `rustfmt` configuration (exists)
@@ -334,37 +334,37 @@ Optimize performance based on profiling results and real-world usage patterns.
   - [ ] Measure memory allocations with `valgrind`
   - [ ] Identify bottlenecks
   - [ ] Create baseline benchmarks
-  
+
 - [ ] Optimize hot paths
   - [ ] Minimize allocations in embedding loop
   - [ ] Use `SmallVec` for small collections
   - [ ] Optimize vector operations
   - [ ] Consider SIMD for normalization
-  
+
 - [ ] Improve memory efficiency
   - [ ] Implement token buffer pooling
   - [ ] Reuse embedding buffers
   - [ ] Optimize batch memory layout
   - [ ] Reduce temporary allocations
-  
+
 - [ ] Enhance caching strategies
   - [ ] Cache tokenization results
   - [ ] Implement LRU cache for frequent inputs
   - [ ] Cache model metadata
   - [ ] Consider memory-mapped models
-  
+
 - [ ] Optimize configuration
   - [ ] Auto-tune thread counts
   - [ ] Optimize batch sizes
   - [ ] Profile-guided optimization
   - [ ] Platform-specific optimizations
-  
+
 - [ ] Consider alternative implementations
   - [ ] Evaluate `parking_lot` mutexes
   - [ ] Test different channel implementations
   - [ ] Compare allocator options
   - [ ] Investigate GPU acceleration
-  
+
 - [ ] Validate optimizations
   - [ ] Ensure correctness maintained
   - [ ] Verify performance improvements
@@ -400,7 +400,7 @@ The `LlamaContext` holds a reference to `LlamaModel`, creating a self-referentia
        }
    }
    ```
-4. **Access Pattern**: 
+4. **Access Pattern**:
    - Use `cell.borrow_owner()` to access the model
    - Use `cell.borrow_dependent()` to access the context
    - The macro ensures proper lifetime management and drop order
@@ -413,7 +413,7 @@ Due to the `!Send` constraint of `LlamaContext`:
    ```rust
    // ❌ Won't compile
    let model = Arc::new(EmbeddingModel::new(...)?);
-   
+
    // ✅ Correct approach
    thread_local! {
        static MODEL: RefCell<Option<EmbeddingModel>> = RefCell::new(None);

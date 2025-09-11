@@ -25,16 +25,14 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
         .init();
 
     // Get model path from environment or use default
-    let model_path = env::var("EMBELLAMA_MODEL")
-        .ok()
-        .map_or_else(
-            || {
-                eprintln!("Set EMBELLAMA_MODEL environment variable to model path");
-                eprintln!("Example: EMBELLAMA_MODEL=/path/to/model.gguf cargo run --example simple");
-                std::process::exit(1);
-            },
-            PathBuf::from,
-        );
+    let model_path = env::var("EMBELLAMA_MODEL").ok().map_or_else(
+        || {
+            eprintln!("Set EMBELLAMA_MODEL environment variable to model path");
+            eprintln!("Example: EMBELLAMA_MODEL=/path/to/model.gguf cargo run --example simple");
+            std::process::exit(1);
+        },
+        PathBuf::from,
+    );
 
     println!("Loading model from: {}", model_path.display());
 

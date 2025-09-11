@@ -267,7 +267,7 @@ engine.unload_model("my-model")?;
 
 ```rust
 // First model - loaded immediately
-let engine = EmbeddingEngine::new(config)?;  
+let engine = EmbeddingEngine::new(config)?;
 assert!(engine.is_model_loaded_in_thread("model1"));
 
 // Additional model - lazy loaded

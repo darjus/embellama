@@ -49,13 +49,13 @@ pub async fn inject_request_id(
         .and_then(|v| v.to_str().ok())
         .and_then(|s| Uuid::parse_str(s).ok())
         .unwrap_or_else(Uuid::new_v4);
-    
+
     // Inject or update the request ID header
     request.headers_mut().insert(
         REQUEST_ID_HEADER,
         HeaderValue::from_str(&request_id.to_string()).unwrap(),
     );
-    
+
     // Add request ID to span
     let span = tracing::info_span!(
         "request",
@@ -63,17 +63,17 @@ pub async fn inject_request_id(
         method = %request.method(),
         uri = %request.uri(),
     );
-    
+
     // Process request with span
     let _guard = span.enter();
     let mut response = next.run(request).await;
-    
+
     // Add request ID to response headers
     response.headers_mut().insert(
         REQUEST_ID_HEADER,
         HeaderValue::from_str(&request_id.to_string()).unwrap(),
     );
-    
+
     response
 }
 
@@ -97,7 +97,7 @@ pub async fn limit_request_size(
             }
         }
     }
-    
+
     Ok(next.run(request).await)
 }
 
@@ -130,12 +130,12 @@ pub async fn authenticate_api_key(
     let Some(required_key) = &config.api_key else {
         return next.run(request).await;
     };
-    
+
     // Check for API key in headers
     let provided_key = headers
         .get(API_KEY_HEADER)
         .and_then(|v| v.to_str().ok());
-    
+
     match provided_key {
         Some(key) if key.as_bytes().ct_eq(required_key.as_bytes()).into() => {
             // Valid API key - using constant-time comparison to prevent timing attacks

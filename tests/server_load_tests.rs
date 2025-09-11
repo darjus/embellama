@@ -231,9 +231,7 @@ async fn test_throughput_single_requests() {
     let duration = start.elapsed();
     let requests_per_second = f64::from(num_requests) / duration.as_secs_f64();
 
-    println!(
-        "Sequential throughput: {requests_per_second:.2} requests/second"
-    );
+    println!("Sequential throughput: {requests_per_second:.2} requests/second");
 
     // Should handle at least 5 requests per second sequentially
     assert!(requests_per_second > 5.0, "Throughput too low");
@@ -275,9 +273,7 @@ async fn test_throughput_batch_requests() {
     let duration = start.elapsed();
     let embeddings_per_second = f64::from(total_embeddings) / duration.as_secs_f64();
 
-    println!(
-        "Batch throughput: {embeddings_per_second:.2} embeddings/second"
-    );
+    println!("Batch throughput: {embeddings_per_second:.2} embeddings/second");
     println!("({total_embeddings} embeddings in {duration:?})");
 
     // Should process many embeddings per second in batches
@@ -475,17 +471,19 @@ async fn test_queue_saturation() {
     let mut max_latency = Duration::ZERO;
 
     while let Some(result) = tasks.join_next().await {
-        if let Ok((Ok(response), latency)) = result { match response.status() {
-            StatusCode::OK => {
-                success_count += 1;
-                if latency > max_latency {
-                    max_latency = latency;
+        if let Ok((Ok(response), latency)) = result {
+            match response.status() {
+                StatusCode::OK => {
+                    success_count += 1;
+                    if latency > max_latency {
+                        max_latency = latency;
+                    }
                 }
+                StatusCode::REQUEST_TIMEOUT => timeout_count += 1,
+                StatusCode::SERVICE_UNAVAILABLE => service_unavailable_count += 1,
+                _ => {}
             }
-            StatusCode::REQUEST_TIMEOUT => timeout_count += 1,
-            StatusCode::SERVICE_UNAVAILABLE => service_unavailable_count += 1,
-            _ => {}
-        } }
+        }
     }
 
     println!("\nQueue saturation test results:");

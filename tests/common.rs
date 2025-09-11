@@ -24,7 +24,8 @@ use tempfile::TempDir;
 /// # Panics
 ///
 /// Panics if temp directory creation or file writing fails
-#[must_use] pub fn create_dummy_model() -> (TempDir, PathBuf) {
+#[must_use]
+pub fn create_dummy_model() -> (TempDir, PathBuf) {
     let dir = TempDir::new().expect("Failed to create temp dir");
     let model_path = dir.path().join("test_model.gguf");
 
@@ -41,7 +42,8 @@ use tempfile::TempDir;
 /// # Panics
 ///
 /// Panics if configuration building fails
-#[must_use] pub fn create_test_config(model_path: PathBuf) -> EngineConfig {
+#[must_use]
+pub fn create_test_config(model_path: PathBuf) -> EngineConfig {
     EngineConfig::builder()
         .with_model_path(model_path)
         .with_model_name("test-model")
@@ -63,7 +65,8 @@ pub fn get_test_model_path() -> Option<PathBuf> {
 }
 
 /// Checks if real model tests should be run
-#[must_use] pub fn should_run_model_tests() -> bool {
+#[must_use]
+pub fn should_run_model_tests() -> bool {
     get_test_model_path().is_some()
 }
 
@@ -89,7 +92,8 @@ pub fn init_test_logger() {
 }
 
 /// Generate sample texts for batch testing
-#[must_use] pub fn generate_sample_texts(count: usize) -> Vec<String> {
+#[must_use]
+pub fn generate_sample_texts(count: usize) -> Vec<String> {
     (0..count)
         .map(|i| format!("Sample text number {i} for testing embeddings"))
         .collect()
@@ -117,7 +121,8 @@ pub fn assert_embeddings_equal(emb1: &[f32], emb2: &[f32], tolerance: f32) {
 }
 
 /// Calculate L2 norm of an embedding vector
-#[must_use] pub fn calculate_l2_norm(embedding: &[f32]) -> f32 {
+#[must_use]
+pub fn calculate_l2_norm(embedding: &[f32]) -> f32 {
     embedding.iter().map(|x| x * x).sum::<f32>().sqrt()
 }
 
@@ -142,9 +147,11 @@ mod tests {
     fn test_create_dummy_model() {
         let (_dir, model_path) = create_dummy_model();
         assert!(model_path.exists());
-        assert!(model_path
-            .extension()
-            .is_some_and(|ext| ext.eq_ignore_ascii_case("gguf")));
+        assert!(
+            model_path
+                .extension()
+                .is_some_and(|ext| ext.eq_ignore_ascii_case("gguf"))
+        );
     }
 
     #[test]

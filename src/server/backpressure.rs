@@ -99,7 +99,7 @@ impl CircuitBreaker {
             total_failures: AtomicU64::new(0),
         }
     }
-    
+
     /// Check if request should be allowed
     pub fn should_allow(&self) -> bool {
         let mut inner = self.inner.lock();
@@ -127,11 +127,11 @@ impl CircuitBreaker {
             }
         }
     }
-    
+
     /// Record a successful request
     pub fn record_success(&self) {
         self.total_requests.fetch_add(1, Ordering::Relaxed);
-        
+
         let mut inner = self.inner.lock();
         match inner.state {
             CircuitState::Closed => {
@@ -154,17 +154,17 @@ impl CircuitBreaker {
             }
         }
     }
-    
+
     /// Record a failed request
     pub fn record_failure(&self) {
         self.total_requests.fetch_add(1, Ordering::Relaxed);
         self.total_failures.fetch_add(1, Ordering::Relaxed);
-        
+
         let mut inner = self.inner.lock();
         match inner.state {
             CircuitState::Closed => {
                 inner.failure_count += 1;
-                
+
                 // Check failure threshold
                 if inner.failure_count >= self.config.failure_threshold {
                     // Transition to open
@@ -175,13 +175,13 @@ impl CircuitBreaker {
                     tracing::warn!("Circuit breaker opened");
                     return;
                 }
-                
+
                 // Check failure rate
                 let total_requests = self.total_requests.load(Ordering::Relaxed);
                 if total_requests >= self.config.min_requests as u64 {
                     let total_failures = self.total_failures.load(Ordering::Relaxed);
                     let failure_rate = total_failures as f64 / total_requests as f64;
-                    
+
                     if failure_rate >= self.config.failure_rate_threshold {
                         // Transition to open
                         inner.state = CircuitState::Open;
@@ -205,14 +205,14 @@ impl CircuitBreaker {
             }
         }
     }
-    
+
     // Note: transition methods are no longer needed as state changes happen atomically within the lock
-    
+
     /// Get current state
     pub fn state(&self) -> CircuitState {
         self.inner.lock().state
     }
-    
+
     /// Get statistics
     pub fn stats(&self) -> CircuitBreakerStats {
         CircuitBreakerStats {
@@ -260,7 +260,7 @@ impl LoadShedder {
             }
         }))
     }
-    
+
     /// Create load shedder with custom rejection curve
     pub fn with_curve(curve: Box<dyn Fn(f64) -> f64 + Send + Sync>) -> Self {
         Self {
@@ -268,24 +268,24 @@ impl LoadShedder {
             rejection_curve: curve,
         }
     }
-    
+
     /// Update current load level
     pub fn update_load(&self, load: f64) {
         let clamped = load.clamp(0.0, 1.0);
         *self.load_level.write() = clamped;
     }
-    
+
     /// Check if request should be shed
     pub fn should_shed(&self) -> bool {
         let load = *self.load_level.read();
         let rejection_prob = (self.rejection_curve)(load);
-        
+
         // Random decision based on rejection probability
         use rand::Rng;
         let mut rng = rand::thread_rng();
         rng.r#gen::<f64>() < rejection_prob
     }
-    
+
     /// Get current load level
     pub fn load(&self) -> f64 {
         *self.load_level.read()
@@ -318,33 +318,33 @@ impl SystemHealth {
             queue_depth: AtomicUsize::new(0),
         }
     }
-    
+
     /// Update queue depth
     pub fn update_queue_depth(&self, depth: usize) {
         self.queue_depth.store(depth, Ordering::Relaxed);
-        
+
         // Update load shedder based on queue depth
         let load = depth as f64 / self.queue_threshold as f64;
         self.load_shedder.update_load(load);
     }
-    
+
     /// Check if system is healthy enough to accept request
     pub fn is_healthy(&self) -> bool {
         // Check circuit breaker
         if !self.circuit_breaker.should_allow() {
             return false;
         }
-        
+
         // Check load shedding
         if self.load_shedder.should_shed() {
             return false;
         }
-        
+
         // Check queue depth
         let depth = self.queue_depth.load(Ordering::Relaxed);
         depth < self.queue_threshold
     }
-    
+
     /// Get health status
     pub fn status(&self) -> HealthStatus {
         HealthStatus {

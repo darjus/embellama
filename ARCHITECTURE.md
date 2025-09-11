@@ -242,7 +242,7 @@ async fn embeddings_handler(
 ) -> Result<Json<EmbeddingsResponse>, Error> {
     // 2. Create one-shot channel for response
     let (tx, rx) = tokio::sync::oneshot::channel();
-    
+
     // 3. Send request to dispatcher
     app_state.dispatcher_tx
         .send(WorkerRequest {
@@ -251,10 +251,10 @@ async fn embeddings_handler(
             response_tx: tx,
         })
         .await?;
-    
+
     // 4. Await response from worker
     let embeddings = rx.await??;
-    
+
     // 5. Format and return response
     Ok(Json(format_response(embeddings)))
 }
@@ -263,11 +263,11 @@ async fn embeddings_handler(
 fn worker_thread(receiver: Receiver<WorkerRequest>) {
     // Own thread-local model instance
     let model = EmbeddingModel::new(config).unwrap();
-    
+
     while let Ok(request) = receiver.recv() {
         // Process with thread-local model
         let result = model.generate_embedding(&request.input);
-        
+
         // Send back through one-shot channel
         let _ = request.response_tx.send(result);
     }

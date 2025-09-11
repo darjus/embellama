@@ -132,7 +132,9 @@ fn handle_embedding_errors() -> Result<(), Box<dyn std::error::Error>> {
     println!("----------------------------------------");
 
     // Get model path from environment or skip
-    let model_path = if let Ok(path) = env::var("EMBELLAMA_MODEL") { PathBuf::from(path) } else {
+    let model_path = if let Ok(path) = env::var("EMBELLAMA_MODEL") {
+        PathBuf::from(path)
+    } else {
         println!("  Skipping: Set EMBELLAMA_MODEL to run this example");
         println!();
         return Ok(());
@@ -187,7 +189,9 @@ fn handle_batch_errors() -> Result<(), Box<dyn std::error::Error>> {
     println!("------------------------------------");
 
     // Get model path from environment or skip
-    let model_path = if let Ok(path) = env::var("EMBELLAMA_MODEL") { PathBuf::from(path) } else {
+    let model_path = if let Ok(path) = env::var("EMBELLAMA_MODEL") {
+        PathBuf::from(path)
+    } else {
         println!("  Skipping: Set EMBELLAMA_MODEL to run this example");
         println!();
         return Ok(());

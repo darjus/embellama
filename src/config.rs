@@ -92,14 +92,16 @@ impl ModelConfig {
         }
 
         if let Some(n_ctx) = self.n_ctx
-            && n_ctx == 0 {
-                return Err(Error::config("Context size must be greater than 0"));
-            }
+            && n_ctx == 0
+        {
+            return Err(Error::config("Context size must be greater than 0"));
+        }
 
         if let Some(n_threads) = self.n_threads
-            && n_threads == 0 {
-                return Err(Error::config("Number of threads must be greater than 0"));
-            }
+            && n_threads == 0
+        {
+            return Err(Error::config("Number of threads must be greater than 0"));
+        }
 
         if let Some(n_seq) = self.n_seq_max {
             if n_seq == 0 {
@@ -385,24 +387,28 @@ impl EngineConfig {
         }
 
         if let Some(context_size) = self.context_size
-            && context_size == 0 {
-                return Err(Error::config("Context size must be greater than 0"));
-            }
+            && context_size == 0
+        {
+            return Err(Error::config("Context size must be greater than 0"));
+        }
 
         if let Some(n_threads) = self.n_threads
-            && n_threads == 0 {
-                return Err(Error::config("Number of threads must be greater than 0"));
-            }
+            && n_threads == 0
+        {
+            return Err(Error::config("Number of threads must be greater than 0"));
+        }
 
         if let Some(batch_size) = self.batch_size
-            && batch_size == 0 {
-                return Err(Error::config("Batch size must be greater than 0"));
-            }
+            && batch_size == 0
+        {
+            return Err(Error::config("Batch size must be greater than 0"));
+        }
 
         if let Some(max_tokens) = self.max_tokens
-            && max_tokens == 0 {
-                return Err(Error::config("Max tokens must be greater than 0"));
-            }
+            && max_tokens == 0
+        {
+            return Err(Error::config("Max tokens must be greater than 0"));
+        }
 
         if let Some(n_seq) = self.n_seq_max {
             if n_seq == 0 {

@@ -84,10 +84,10 @@ use thiserror::Error;
 pub enum EmbellamaError {
     #[error("Model not found: {0}")]
     ModelNotFound(String),
-    
+
     #[error("Failed to load model from {path}")]
     ModelLoadFailed { path: String, #[source] source: llama_cpp_2::Error },
-    
+
     #[error("Embedding generation failed")]
     EmbeddingFailed(#[from] llama_cpp_2::Error),
 }
@@ -133,7 +133,7 @@ use tracing::{debug, error, info, warn, trace};
 pub fn load_model(path: &str, model_data: &[u8]) -> Result<Model, EmbellamaError> {
     info!(path = %path, "Loading embedding model");
     debug!(size = model_data.len(), "Model data size");
-    
+
     match internal_load(model_data) {
         Ok(model) => {
             info!("Model loaded successfully");
@@ -438,17 +438,17 @@ The project uses `just` for test automation. Key commands:
 ### Rustdoc Requirements
 ```rust
 /// Generates embeddings for the given text.
-/// 
+///
 /// # Arguments
 /// * `model_name` - The name of the model to use
 /// * `text` - The text to generate embeddings for
-/// 
+///
 /// # Returns
 /// A vector of floating-point embeddings
-/// 
+///
 /// # Errors
 /// Returns `EmbellamaError::ModelNotFound` if the model doesn't exist
-/// 
+///
 /// # Example
 /// ```
 /// let embeddings = engine.embed("my-model", "Hello, world!")?;
@@ -481,7 +481,7 @@ just pre-commit # Full validation before committing
 1. **Planning**: Use zen:thinkdeeper for design decisions
 2. **Research**: Use Fetch/Brave for documentation lookup
 3. **Implementation**: Follow Rust best practices
-4. **Testing**: 
+4. **Testing**:
    - Run `just test-unit` for quick feedback
    - Run `just test-integration` for real model testing
    - Run `just test-concurrency` for thread safety

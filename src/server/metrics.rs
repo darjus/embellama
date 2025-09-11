@@ -188,6 +188,6 @@ pub fn init_metrics() {
     Lazy::force(&WORKER_UTILIZATION);
     Lazy::force(&RATE_LIMITED_REQUESTS);
     Lazy::force(&ERROR_COUNTER);
-    
+
     tracing::info!("Prometheus metrics initialized");
 }

@@ -14,7 +14,7 @@ echo "1. Testing /health endpoint:"
 curl -s "$SERVER/health" | jq .
 echo
 
-# Test models endpoint  
+# Test models endpoint
 echo "2. Testing /v1/models endpoint:"
 curl -s "$SERVER/v1/models" | jq .
 echo
