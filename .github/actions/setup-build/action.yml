@@ -39,13 +39,22 @@ runs:
           llvm-dev \
           libclang-dev \
           cmake \
-          build-essential
+          build-essential \
+          libvulkan-dev \
+          libshaderc-dev
 
     - name: Install LLVM and Clang (non-Linux)
       if: runner.os != 'Linux'
       uses: KyleMayes/install-llvm-action@v2
       with:
         version: "14"
+
+    - name: Setup macOS SDK Path
+      if: runner.os == 'macOS'
+      shell: bash
+      run: |
+        export SDKROOT=$(xcrun --show-sdk-path)
+        echo "SDKROOT=$SDKROOT" >> $GITHUB_ENV
 
     - name: Setup CMake (non-Linux)
       if: runner.os != 'Linux'
