@@ -101,6 +101,11 @@ fmt:
     @echo "Formatting code..."
     cargo fmt
 
+# Check formatting for code
+fmtcheck:
+    @echo "Formatting code..."
+    cargo fmt -- --check
+
 # Run clippy
 clippy:
     @echo "Running clippy on library and binaries (strict)..."
