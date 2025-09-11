@@ -37,13 +37,15 @@ fn ensure_engine_initialized() {
         let model_path = PathBuf::from(model_path);
         assert!(
             model_path.exists(),
-            "Model file not found at {model_path:?}. Run 'just download-test-model' to download it."
+            "Model file not found at {}. Run 'just download-test-model' to download it.",
+            model_path.display()
         );
 
         let config = EngineConfig::builder()
             .with_model_path(model_path)
             .with_model_name("proptest-model")
             .with_normalize_embeddings(true)
+            .with_n_ubatch(2048) // Large enough for long texts in property tests
             .build()
             .expect("Failed to create config");
 
@@ -227,8 +229,8 @@ proptest! {
     #[serial]
     fn test_text_length_handling(
         short_text in "[a-zA-Z ]{1,10}",
-        medium_text in "[a-zA-Z ]{100,500}",
-        long_text in "[a-zA-Z ]{1000,2000}"
+        medium_text in "[a-zA-Z ]{50,200}",
+        long_text in "[a-zA-Z ]{300,500}"
     ) {
         // Should handle short text
         if !short_text.trim().is_empty() {

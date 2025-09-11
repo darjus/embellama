@@ -29,6 +29,10 @@ pub struct ModelConfig {
     /// Context size (number of tokens)
     pub n_ctx: Option<u32>,
 
+    /// Micro-batch size for prompt processing
+    /// This must be >= the number of tokens in any single input
+    pub n_ubatch: Option<u32>,
+
     /// Number of threads for CPU inference
     pub n_threads: Option<usize>,
 
@@ -97,6 +101,12 @@ impl ModelConfig {
             return Err(Error::config("Context size must be greater than 0"));
         }
 
+        if let Some(n_ubatch) = self.n_ubatch
+            && n_ubatch == 0
+        {
+            return Err(Error::config("Micro-batch size must be greater than 0"));
+        }
+
         if let Some(n_threads) = self.n_threads
             && n_threads == 0
         {
@@ -124,6 +134,7 @@ impl Default for ModelConfig {
             model_path: PathBuf::new(),
             model_name: String::new(),
             n_ctx: None,
+            n_ubatch: None,
             n_threads: None,
             n_gpu_layers: None,
             use_mmap: true,
@@ -168,6 +179,13 @@ impl ModelConfigBuilder {
     #[must_use]
     pub fn with_n_ctx(mut self, ctx: u32) -> Self {
         self.config.n_ctx = Some(ctx);
+        self
+    }
+
+    /// Set the micro-batch size for prompt processing
+    #[must_use]
+    pub fn with_n_ubatch(mut self, ubatch: u32) -> Self {
+        self.config.n_ubatch = Some(ubatch);
         self
     }
 
@@ -259,6 +277,10 @@ pub struct EngineConfig {
     /// Context size for the model (defaults to model's default if None)
     pub context_size: Option<usize>,
 
+    /// Micro-batch size for prompt processing
+    /// This must be >= the number of tokens in any single input
+    pub n_ubatch: Option<u32>,
+
     /// Number of threads to use for CPU inference (defaults to number of CPU cores)
     pub n_threads: Option<usize>,
 
@@ -334,6 +356,7 @@ impl Default for EngineConfig {
             model_path: PathBuf::new(),
             model_name: String::new(),
             context_size: None,
+            n_ubatch: None,
             n_threads: None,
             use_gpu: false,
             n_gpu_layers: None,
@@ -390,6 +413,12 @@ impl EngineConfig {
             && context_size == 0
         {
             return Err(Error::config("Context size must be greater than 0"));
+        }
+
+        if let Some(n_ubatch) = self.n_ubatch
+            && n_ubatch == 0
+        {
+            return Err(Error::config("Micro-batch size must be greater than 0"));
         }
 
         if let Some(n_threads) = self.n_threads
@@ -470,6 +499,7 @@ impl EngineConfig {
             model_path: self.model_path.clone(),
             model_name: self.model_name.clone(),
             n_ctx: self.context_size.and_then(|s| u32::try_from(s).ok()),
+            n_ubatch: self.n_ubatch,
             n_threads: self.n_threads,
             n_gpu_layers: self.n_gpu_layers,
             use_mmap: self.use_mmap,
@@ -514,6 +544,13 @@ impl EngineConfigBuilder {
     #[must_use]
     pub fn with_context_size(mut self, size: usize) -> Self {
         self.config.context_size = Some(size);
+        self
+    }
+
+    /// Set the micro-batch size for prompt processing
+    #[must_use]
+    pub fn with_n_ubatch(mut self, ubatch: u32) -> Self {
+        self.config.n_ubatch = Some(ubatch);
         self
     }
 

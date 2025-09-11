@@ -150,6 +150,11 @@ impl EmbeddingModel {
         let n_ctx = NonZeroU32::new(ctx_size);
         ctx_params = ctx_params.with_n_ctx(n_ctx);
 
+        // Set micro-batch size (default to 512 if not specified)
+        // This must be >= the number of tokens in any single input
+        let n_ubatch = config.n_ubatch.unwrap_or(512);
+        ctx_params = ctx_params.with_n_ubatch(n_ubatch);
+
         // Set thread counts
         ctx_params = ctx_params.with_n_threads(n_threads);
         ctx_params = ctx_params.with_n_threads_batch(n_threads);

@@ -63,8 +63,21 @@ test-concurrency: download-test-model
     EMBELLAMA_TEST_MODEL={{test_model_file}} \
     cargo test --test concurrency_tests -- --nocapture
 
+# Run property-based tests
+test-property: download-test-model
+    @echo "Running property-based tests..."
+    EMBELLAMA_TEST_MODEL={{test_model_file}} \
+    cargo test --test property_tests -- --nocapture
+
+# Run property-based tests with fewer cases (faster)
+test-property-quick: download-test-model
+    @echo "Running property-based tests (quick mode)..."
+    EMBELLAMA_TEST_MODEL={{test_model_file}} \
+    PROPTEST_CASES=10 \
+    cargo test --test property_tests -- --nocapture
+
 # Run all tests
-test: test-unit test-integration test-concurrency
+test: test-unit test-integration test-concurrency test-property
     @echo "✓ All tests completed"
 
 # Run benchmarks with real model
