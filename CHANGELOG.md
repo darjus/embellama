@@ -5,6 +5,45 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.2.0] - 2025-09-12
+
+### Bug Fixes
+
+- Complete Phase 5 integration test fixes ([f96b479](https://github.com/darjus/embellama/commit/f96b47954ddcee8ed19a9f2fb792af81273e54b8))
+- Normalize embeddings and fix error response format for OpenAI compatibility ([20a3299](https://github.com/darjus/embellama/commit/20a329941c7908d96230499036cecc898354a85a))
+- Correct test assertion for normalize_embeddings default value ([2b6fdb8](https://github.com/darjus/embellama/commit/2b6fdb82e4c21c414b2d4a96a46c04f85141d368))
+- Escape [CLS] in rustdoc comment to fix broken intra-doc link ([7600ef6](https://github.com/darjus/embellama/commit/7600ef664d5e83abfae5a6f7f91b90d0b06aaddf))
+- Resolve clippy pedantic warnings and improve code quality ([5749a0e](https://github.com/darjus/embellama/commit/5749a0e3ff1391e867c70309c8513bd631a013ad))
+- Resolve property test failures by adding n_ubatch configuration ([b1a21bf](https://github.com/darjus/embellama/commit/b1a21bf7b32ed088f3b4555ebf1321bc0c64603d))
+- Add missing CI dependencies for Linux and macOS ([b63dd8b](https://github.com/darjus/embellama/commit/b63dd8be3df09424050e0ee715871511da34d7de))
+- Add missing CI dependencies for Linux and macOS ([91cf85f](https://github.com/darjus/embellama/commit/91cf85f1d3770761fc790ccddf3e1a2f4e4adfd8))
+
+### Features
+
+- Implement Phase 1 - server foundation ([59081a7](https://github.com/darjus/embellama/commit/59081a7dead5e1016215dc703b6a07524c93db2e))
+- Implement Phase 2 - worker pool architecture ([f7c3a15](https://github.com/darjus/embellama/commit/f7c3a15bc64f94d7e16c439daa7e0fe3c088e587))
+- Implement Phase 3 - OpenAI-compatible API endpoints ([a56e8e6](https://github.com/darjus/embellama/commit/a56e8e65ce4571d8c79137629c4f650bfc042f73))
+- Implement Phase 4 - Request/Response Pipeline with security fixes ([8e8c3be](https://github.com/darjus/embellama/commit/8e8c3be6f87802de811c4b5bc2a54c242ee51ec9))
+- [**breaking**] Add backend feature support for hardware acceleration ([bff6b7c](https://github.com/darjus/embellama/commit/bff6b7c8572205fc1a1fb8141fd9ace0e4ddd6ca))
+
+### Miscellaneous Tasks
+
+- Prepare for v0.1.0 release to crates.io ([9aa780d](https://github.com/darjus/embellama/commit/9aa780d09bac57901293b775a7cc5a70a4811a78))
+- Prepare for crates.io publishing ([6b0e2a9](https://github.com/darjus/embellama/commit/6b0e2a9395f87ecec6ac3d622250bddaa41ef0ee))
+- Update .gitignore ([51ea9a7](https://github.com/darjus/embellama/commit/51ea9a71bc5eb5478be76f88eacd4ef66e12cf53))
+- Cargo fmt ([f51cd8e](https://github.com/darjus/embellama/commit/f51cd8ed3916aead4ddd17e242ebc2d9f3c09c81))
+- Cargo clippy -- -W clippy::pedantic --fix ([ca663aa](https://github.com/darjus/embellama/commit/ca663aa8436539ffff2dd0e501e8885512e7d988))
+- Update versions ([58668d0](https://github.com/darjus/embellama/commit/58668d0c2be3f648e4cac918fae72543179451c7))
+- Clippy fix across features and targets ([6855a5a](https://github.com/darjus/embellama/commit/6855a5a3652a6ea85a4fbe35faf5c731ca93e67c))
+- Update deps ([70248d6](https://github.com/darjus/embellama/commit/70248d6fe9aabb41766b8f1f992d5620ccf0e7ba))
+- Add pre-commit hooks with uvx/pipx support ([2203b1e](https://github.com/darjus/embellama/commit/2203b1ed32ef344cba6f4473cdd08778c2eb2378))
+- Fix fmtcheck ([3abd194](https://github.com/darjus/embellama/commit/3abd1940d1d807b824b426c90751291c758eade7))
+
+### Ci
+
+- Enhance CI/CD pipeline with just commands and model downloads ([52a54e6](https://github.com/darjus/embellama/commit/52a54e65abd01d0a8f3630fa9cde7d4516088ea5))
+- Use Ubuntu clang and llvm on linux instead of compiling one ([17f1373](https://github.com/darjus/embellama/commit/17f1373aa9abc799943d67812fc333312daa5d25))
+
 ## [0.1.0] - 2025-09-02
 
 ### Bug Fixes
@@ -29,7 +68,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Miscellaneous Tasks
 
-- Migrate from clog to git-cliff for changelog generation ([35be49d](https://github.com/darjus/embellama/commit/35be49d51de7dcccf4cf33fdb42dad5c39a93b25))
+- Migrate from clog to git-cliff for changelog generation ([1d1066c](https://github.com/darjus/embellama/commit/1d1066ca1d462340818ff8e8436a1d4d586f1170))
 
 ### Refactoring
 
