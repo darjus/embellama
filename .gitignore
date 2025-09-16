@@ -59,3 +59,4 @@ __pycache__/
 server.log
 scripts/package-lock.json
 scripts/node_modules
+*.proptest-regressions

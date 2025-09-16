@@ -5,3 +5,4 @@
 # It is recommended to check this file in to source control so that
 # everyone who runs the test benefits from these saved cases.
 cc 473e9fbac1de97f82024041270c0cb1481d49a2384e0220a42f2fbd391e5f28d # shrinks to base_text = "  AAN  in ", suffix = "fXDf"
+cc 0731e8ac554dfd7f7eee5864b436612fdfd118a7cc1ecc2a4c0e3205c883fc00 # shrinks to base_text = "AAaaMrdIGg", suffix = "Z Izdsm A"
