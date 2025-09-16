@@ -5,6 +5,17 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.3.0] - 2025-09-16
+
+### Bug Fixes
+
+- Remove GPU features from docs.rs build configuration ([dad3e9b](https://github.com/darjus/embellama/commit/dad3e9bad772c7b94a378f67331fcf8ad4c413f1))
+- Adjust semantic similarity thresholds based on proportional text change ([46f6f69](https://github.com/darjus/embellama/commit/46f6f69bf47f12c20c9960f8ed3b92ee61936f85))
+
+### Features
+
+- Add embedded server support and library interface ([7a4e375](https://github.com/darjus/embellama/commit/7a4e3753f6fef177d8b96caa7651545629d3dc56))
+
 ## [0.2.0] - 2025-09-12
 
 ### Bug Fixes
