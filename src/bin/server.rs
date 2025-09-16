@@ -13,14 +13,9 @@
 // limitations under the License.
 
 use clap::Parser;
-use embellama::server::state::{AppState, ServerConfig};
-use std::net::SocketAddr;
+use embellama::server::ServerConfig;
 use std::path::PathBuf;
-use tokio::signal;
-use tower_http::cors::CorsLayer;
-use tower_http::trace::TraceLayer;
 use tracing::info;
-use uuid::Uuid;
 
 /// Embellama server - OpenAI-compatible embedding API
 #[derive(Parser, Debug)]
@@ -55,38 +50,6 @@ struct Args {
     log_level: String,
 }
 
-impl Args {
-    fn validate(&self) -> Result<(), String> {
-        // Check if model path exists
-        if !self.model_path.exists() {
-            return Err(format!(
-                "Model file not found: {}",
-                self.model_path.display()
-            ));
-        }
-
-        // Validate workers count
-        if self.workers == 0 {
-            return Err("Worker count must be at least 1".to_string());
-        }
-
-        if self.workers > 128 {
-            return Err("Worker count cannot exceed 128".to_string());
-        }
-
-        // Validate queue size
-        if self.queue_size == 0 {
-            return Err("Queue size must be at least 1".to_string());
-        }
-
-        if self.queue_size > 10000 {
-            return Err("Queue size cannot exceed 10000".to_string());
-        }
-
-        Ok(())
-    }
-}
-
 #[tokio::main]
 async fn main() -> Result<(), Box<dyn std::error::Error>> {
     // Parse command line arguments
@@ -95,108 +58,24 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     // Initialize logging
     init_logging(&args.log_level);
 
-    // Validate arguments
-    args.validate()?;
-
     info!("Starting Embellama server v{}", env!("CARGO_PKG_VERSION"));
     info!("Model: {:?} ({})", args.model_path, args.model_name);
     info!("Workers: {}, Queue size: {}", args.workers, args.queue_size);
 
-    // Create server configuration
-    let config = ServerConfig {
-        model_name: args.model_name,
-        model_path: args.model_path.to_string_lossy().to_string(),
-        worker_count: args.workers,
-        queue_size: args.queue_size,
-        host: args.host.clone(),
-        port: args.port,
-    };
+    // Create server configuration using the library API
+    let config = ServerConfig::builder()
+        .model_name(args.model_name)
+        .model_path(args.model_path.to_string_lossy().to_string())
+        .worker_count(args.workers)
+        .queue_size(args.queue_size)
+        .host(args.host)
+        .port(args.port)
+        .build()?;
 
-    // Create application state
-    let state = AppState::new(config.clone())?;
+    // Use the library's run_server function
+    embellama::server::run_server(config).await?;
 
-    // Build the router
-    let app = build_router(state);
-
-    // Create socket address
-    let addr: SocketAddr = format!("{}:{}", args.host, args.port).parse()?;
-    info!("Server listening on http://{}", addr);
-
-    // Create TCP listener
-    let listener = tokio::net::TcpListener::bind(addr).await?;
-
-    // Run server with graceful shutdown
-    axum::serve(listener, app)
-        .with_graceful_shutdown(shutdown_signal())
-        .await?;
-
-    info!("Server shutdown complete");
     Ok(())
-}
-
-/// Build the Axum router with all routes and middleware
-fn build_router(state: AppState) -> axum::Router {
-    use axum::{
-        Router,
-        extract::State,
-        http::StatusCode,
-        response::{IntoResponse, Json},
-        routing::get,
-    };
-    use serde_json::json;
-
-    // Health check handler
-    async fn health_handler(State(state): State<AppState>) -> impl IntoResponse {
-        if state.is_ready() {
-            (
-                StatusCode::OK,
-                Json(json!({
-                    "status": "healthy",
-                    "model": state.model_name(),
-                    "version": env!("CARGO_PKG_VERSION"),
-                })),
-            )
-        } else {
-            (
-                StatusCode::SERVICE_UNAVAILABLE,
-                Json(json!({
-                    "status": "unhealthy",
-                    "error": "Service not ready",
-                })),
-            )
-        }
-    }
-
-    // Build router with routes and middleware
-    Router::new()
-        .route("/health", get(health_handler))
-        // OpenAI-compatible API routes
-        .route(
-            "/v1/embeddings",
-            axum::routing::post(embellama::server::handlers::embeddings_handler),
-        )
-        .route(
-            "/v1/models",
-            get(embellama::server::handlers::list_models_handler),
-        )
-        .layer(
-            tower::ServiceBuilder::new()
-                // Add tracing/logging middleware
-                .layer(TraceLayer::new_for_http().make_span_with(
-                    |request: &axum::http::Request<_>| {
-                        let request_id = Uuid::new_v4();
-                        tracing::info_span!(
-                            "http_request",
-                            request_id = %request_id,
-                            method = %request.method(),
-                            uri = %request.uri(),
-                        )
-                    },
-                ))
-                // Add CORS middleware
-                .layer(CorsLayer::permissive()),
-        )
-        .with_state(state)
 }
 
 /// Initialize logging with the specified level
@@ -216,33 +95,4 @@ fn init_logging(level: &str) {
         )
         .with(env_filter)
         .init();
-}
-
-/// Signal handler for graceful shutdown
-async fn shutdown_signal() {
-    let ctrl_c = async {
-        signal::ctrl_c()
-            .await
-            .expect("Failed to install Ctrl+C handler");
-    };
-
-    #[cfg(unix)]
-    let terminate = async {
-        signal::unix::signal(signal::unix::SignalKind::terminate())
-            .expect("Failed to install signal handler")
-            .recv()
-            .await;
-    };
-
-    #[cfg(not(unix))]
-    let terminate = std::future::pending::<()>();
-
-    tokio::select! {
-        () = ctrl_c => {
-            info!("Received Ctrl+C, shutting down");
-        }
-        () = terminate => {
-            info!("Received terminate signal, shutting down");
-        }
-    }
 }

@@ -17,9 +17,9 @@
 //! This module provides mechanisms to handle system overload gracefully,
 //! including circuit breakers and adaptive load shedding.
 
-use parking_lot::Mutex;
-use std::sync::atomic::{AtomicU64, AtomicUsize, Ordering};
+use parking_lot::RwLock;
 use std::sync::Arc;
+use std::sync::atomic::{AtomicU64, AtomicUsize, Ordering};
 use std::time::{Duration, Instant};
 
 /// Circuit breaker states
@@ -104,7 +104,7 @@ impl CircuitBreaker {
     pub fn should_allow(&self) -> bool {
         let mut inner = self.inner.lock();
         match inner.state {
-            CircuitState::Closed => true,
+            CircuitState::Closed | CircuitState::HalfOpen => true,
             CircuitState::Open => {
                 // Check if timeout has expired
                 if let Some(opened_at) = inner.opened_at {
@@ -120,10 +120,6 @@ impl CircuitBreaker {
                 } else {
                     false
                 }
-            }
-            CircuitState::HalfOpen => {
-                // Allow limited requests in half-open state
-                true
             }
         }
     }
@@ -180,6 +176,7 @@ impl CircuitBreaker {
                 let total_requests = self.total_requests.load(Ordering::Relaxed);
                 if total_requests >= self.config.min_requests as u64 {
                     let total_failures = self.total_failures.load(Ordering::Relaxed);
+                    #[allow(clippy::cast_precision_loss)]
                     let failure_rate = total_failures as f64 / total_requests as f64;
 
                     if failure_rate >= self.config.failure_rate_threshold {
@@ -222,7 +219,10 @@ impl CircuitBreaker {
             failure_rate: {
                 let total = self.total_requests.load(Ordering::Relaxed);
                 if total > 0 {
-                    self.total_failures.load(Ordering::Relaxed) as f64 / total as f64
+                    #[allow(clippy::cast_precision_loss)]
+                    {
+                        self.total_failures.load(Ordering::Relaxed) as f64 / total as f64
+                    }
                 } else {
                     0.0
                 }
@@ -234,9 +234,13 @@ impl CircuitBreaker {
 /// Circuit breaker statistics
 #[derive(Debug, Clone)]
 pub struct CircuitBreakerStats {
+    /// Current state of the circuit breaker
     pub state: CircuitState,
+    /// Total number of requests processed
     pub total_requests: u64,
+    /// Total number of failed requests
     pub total_failures: u64,
+    /// Current failure rate (0.0 to 1.0)
     pub failure_rate: f64,
 }
 
@@ -248,17 +252,19 @@ pub struct LoadShedder {
     rejection_curve: Box<dyn Fn(f64) -> f64 + Send + Sync>,
 }
 
+impl Default for LoadShedder {
+    fn default() -> Self {
+        Self::with_curve(Box::new(|load| {
+            // Linear curve: 0% rejection at 0.8 load, 100% at 1.0 load
+            if load < 0.8 { 0.0 } else { (load - 0.8) * 5.0 }
+        }))
+    }
+}
+
 impl LoadShedder {
     /// Create a new load shedder with linear rejection curve
     pub fn new() -> Self {
-        Self::with_curve(Box::new(|load| {
-            // Linear curve: 0% rejection at 0.8 load, 100% at 1.0 load
-            if load < 0.8 {
-                0.0
-            } else {
-                (load - 0.8) * 5.0
-            }
-        }))
+        Self::default()
     }
 
     /// Create load shedder with custom rejection curve
@@ -277,13 +283,14 @@ impl LoadShedder {
 
     /// Check if request should be shed
     pub fn should_shed(&self) -> bool {
+        use rand::Rng;
+
         let load = *self.load_level.read();
         let rejection_prob = (self.rejection_curve)(load);
 
         // Random decision based on rejection probability
-        use rand::Rng;
         let mut rng = rand::thread_rng();
-        rng.r#gen::<f64>() < rejection_prob
+        rng.gen_range(0.0..1.0) < rejection_prob
     }
 
     /// Get current load level
@@ -324,6 +331,7 @@ impl SystemHealth {
         self.queue_depth.store(depth, Ordering::Relaxed);
 
         // Update load shedder based on queue depth
+        #[allow(clippy::cast_precision_loss)]
         let load = depth as f64 / self.queue_threshold as f64;
         self.load_shedder.update_load(load);
     }
@@ -360,9 +368,14 @@ impl SystemHealth {
 /// Health status information
 #[derive(Debug, Clone)]
 pub struct HealthStatus {
+    /// Current state of the circuit breaker
     pub circuit_state: CircuitState,
+    /// Current system load level (0.0 to 1.0)
     pub load_level: f64,
+    /// Current depth of the request queue
     pub queue_depth: usize,
+    /// Maximum allowed queue depth threshold
     pub queue_threshold: usize,
+    /// Overall health status of the system
     pub is_healthy: bool,
 }

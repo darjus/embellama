@@ -18,16 +18,16 @@
 //! and ensure fair resource usage.
 
 use axum::{
+    Json,
     extract::{Request, State},
     http::{HeaderMap, HeaderValue, StatusCode},
     middleware::Next,
     response::{IntoResponse, Response},
-    Json,
 };
 use governor::{
+    Quota, RateLimiter as GovernorRateLimiter,
     clock::{Clock, DefaultClock},
     state::{InMemoryState, NotKeyed},
-    Quota, RateLimiter as GovernorRateLimiter,
 };
 use serde_json::json;
 use std::num::NonZeroU32;
@@ -62,6 +62,10 @@ impl Default for RateLimitConfig {
 
 impl RateLimitConfig {
     /// Create a new rate limiter from this config
+    ///
+    /// # Panics
+    ///
+    /// Panics if `requests_per_second` or `burst_size` is 0.
     pub fn build_limiter(&self) -> Option<RateLimiter> {
         if !self.enabled {
             return None;
@@ -70,9 +74,7 @@ impl RateLimitConfig {
         let quota = Quota::per_second(
             NonZeroU32::new(self.requests_per_second).expect("Invalid requests_per_second"),
         )
-        .allow_burst(
-            NonZeroU32::new(self.burst_size).expect("Invalid burst_size"),
-        );
+        .allow_burst(NonZeroU32::new(self.burst_size).expect("Invalid burst_size"));
 
         Some(Arc::new(GovernorRateLimiter::new(
             quota,
@@ -83,6 +85,11 @@ impl RateLimitConfig {
 }
 
 /// Rate limiting middleware
+///
+/// # Panics
+///
+/// Panics if the retry-after seconds value cannot be converted to a `HeaderValue`.
+/// This should never happen in practice as the value is always a valid u64.
 pub async fn rate_limit_middleware(
     State(limiter): State<Option<RateLimiter>>,
     request: Request,
@@ -95,7 +102,7 @@ pub async fn rate_limit_middleware(
 
     // Try to acquire a token
     match limiter.check() {
-        Ok(_) => {
+        Ok(()) => {
             // Token acquired, proceed with request
             next.run(request).await
         }
@@ -154,6 +161,10 @@ impl ClientRateLimiter {
     }
 
     /// Get or create a rate limiter for a client
+    ///
+    /// # Panics
+    ///
+    /// Panics if rate limiting is not enabled in the configuration.
     pub fn get_limiter(&self, client_id: &str) -> RateLimiter {
         let now = std::time::Instant::now();
         self.limiters
@@ -177,9 +188,8 @@ impl ClientRateLimiter {
         let before_size = self.limiters.len();
 
         // Remove entries older than max_age
-        self.limiters.retain(|_key, (_limiter, last_access)| {
-            now.duration_since(*last_access) < max_age
-        });
+        self.limiters
+            .retain(|_key, (_limiter, last_access)| now.duration_since(*last_access) < max_age);
 
         let after_size = self.limiters.len();
         if before_size > after_size {
@@ -213,7 +223,7 @@ pub fn extract_client_id(headers: &HeaderMap) -> String {
             headers
                 .get("X-Real-IP")
                 .and_then(|v| v.to_str().ok())
-                .map(|s| s.to_string())
+                .map(str::to_string)
         })
         .unwrap_or_else(|| "unknown".to_string())
 }

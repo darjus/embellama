@@ -51,6 +51,130 @@ impl Default for ServerConfig {
     }
 }
 
+impl ServerConfig {
+    /// Create a new builder for server configuration
+    pub fn builder() -> ServerConfigBuilder {
+        ServerConfigBuilder::default()
+    }
+}
+
+/// Builder for `ServerConfig`
+#[derive(Debug, Default)]
+pub struct ServerConfigBuilder {
+    model_name: Option<String>,
+    model_path: Option<String>,
+    worker_count: Option<usize>,
+    queue_size: Option<usize>,
+    host: Option<String>,
+    port: Option<u16>,
+}
+
+impl ServerConfigBuilder {
+    /// Set the model name
+    #[must_use]
+    pub fn model_name(mut self, name: impl Into<String>) -> Self {
+        self.model_name = Some(name.into());
+        self
+    }
+
+    /// Set the model path
+    #[must_use]
+    pub fn model_path(mut self, path: impl Into<String>) -> Self {
+        self.model_path = Some(path.into());
+        self
+    }
+
+    /// Set the number of worker threads
+    #[must_use]
+    pub fn worker_count(mut self, count: usize) -> Self {
+        self.worker_count = Some(count);
+        self
+    }
+
+    /// Set the queue size per worker
+    #[must_use]
+    pub fn queue_size(mut self, size: usize) -> Self {
+        self.queue_size = Some(size);
+        self
+    }
+
+    /// Set the server host address
+    #[must_use]
+    pub fn host(mut self, host: impl Into<String>) -> Self {
+        self.host = Some(host.into());
+        self
+    }
+
+    /// Set the server port
+    #[must_use]
+    pub fn port(mut self, port: u16) -> Self {
+        self.port = Some(port);
+        self
+    }
+
+    /// Build the `ServerConfig`
+    ///
+    /// # Errors
+    ///
+    /// Returns an error if:
+    /// - The `model_path` is not provided
+    /// - The model file does not exist
+    /// - Worker count is 0 or greater than 128
+    /// - Queue size is 0 or greater than 10000
+    pub fn build(self) -> crate::Result<ServerConfig> {
+        let default = ServerConfig::default();
+
+        let model_path = self
+            .model_path
+            .ok_or_else(|| crate::Error::ConfigurationError {
+                message: "Model path is required".to_string(),
+            })?;
+
+        // Validate model file exists
+        if !std::path::Path::new(&model_path).exists() {
+            return Err(crate::Error::ConfigurationError {
+                message: format!("Model file not found: {model_path}"),
+            });
+        }
+
+        let worker_count = self.worker_count.unwrap_or(default.worker_count);
+        let queue_size = self.queue_size.unwrap_or(default.queue_size);
+
+        // Validate worker count
+        if worker_count == 0 {
+            return Err(crate::Error::ConfigurationError {
+                message: "Worker count must be at least 1".to_string(),
+            });
+        }
+        if worker_count > 128 {
+            return Err(crate::Error::ConfigurationError {
+                message: "Worker count cannot exceed 128".to_string(),
+            });
+        }
+
+        // Validate queue size
+        if queue_size == 0 {
+            return Err(crate::Error::ConfigurationError {
+                message: "Queue size must be at least 1".to_string(),
+            });
+        }
+        if queue_size > 10000 {
+            return Err(crate::Error::ConfigurationError {
+                message: "Queue size cannot exceed 10000".to_string(),
+            });
+        }
+
+        Ok(ServerConfig {
+            model_name: self.model_name.unwrap_or(default.model_name),
+            model_path,
+            worker_count,
+            queue_size,
+            host: self.host.unwrap_or(default.host),
+            port: self.port.unwrap_or(default.port),
+        })
+    }
+}
+
 /// Application state shared across handlers
 #[derive(Clone)]
 pub struct AppState {

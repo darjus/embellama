@@ -18,18 +18,18 @@
 //! and request ID injection.
 
 use axum::{
+    Json,
     extract::{Request, State},
-    http::{header, HeaderMap, HeaderValue, StatusCode},
+    http::{HeaderMap, HeaderValue, StatusCode, header},
     middleware::Next,
     response::{IntoResponse, Response},
-    Json,
 };
 use serde_json::json;
 use subtle::ConstantTimeEq;
 use uuid::Uuid;
 
 /// Maximum request body size (default: 10MB)
-const MAX_REQUEST_SIZE: usize = 10 * 1024 * 1024;
+pub const MAX_REQUEST_SIZE: usize = 10 * 1024 * 1024;
 
 /// Request ID header name
 pub const REQUEST_ID_HEADER: &str = "X-Request-Id";
@@ -38,10 +38,12 @@ pub const REQUEST_ID_HEADER: &str = "X-Request-Id";
 pub const API_KEY_HEADER: &str = "X-API-Key";
 
 /// Middleware to inject request IDs
-pub async fn inject_request_id(
-    mut request: Request,
-    next: Next,
-) -> Response {
+///
+/// # Panics
+///
+/// Panics if the request ID string cannot be converted to a `HeaderValue`.
+/// This should never happen in practice as UUID strings are always valid header values.
+pub async fn inject_request_id(mut request: Request, next: Next) -> Response {
     // Check if request already has an ID
     let request_id = request
         .headers()
@@ -78,24 +80,19 @@ pub async fn inject_request_id(
 }
 
 /// Middleware to enforce request size limits
-pub async fn limit_request_size(
-    request: Request,
-    next: Next,
-) -> Result<Response, StatusCode> {
+///
+/// # Errors
+///
+/// Returns `StatusCode::PAYLOAD_TOO_LARGE` if the request body size exceeds `MAX_REQUEST_SIZE`.
+pub async fn limit_request_size(request: Request, next: Next) -> Result<Response, StatusCode> {
     // Check Content-Length header
-    if let Some(content_length) = request.headers().get(header::CONTENT_LENGTH) {
-        if let Ok(length_str) = content_length.to_str() {
-            if let Ok(length) = length_str.parse::<usize>() {
-                if length > MAX_REQUEST_SIZE {
-                    tracing::warn!(
-                        "Request size {} exceeds limit {}",
-                        length,
-                        MAX_REQUEST_SIZE
-                    );
-                    return Err(StatusCode::PAYLOAD_TOO_LARGE);
-                }
-            }
-        }
+    if let Some(content_length) = request.headers().get(header::CONTENT_LENGTH)
+        && let Ok(length_str) = content_length.to_str()
+        && let Ok(length) = length_str.parse::<usize>()
+        && length > MAX_REQUEST_SIZE
+    {
+        tracing::warn!("Request size {} exceeds limit {}", length, MAX_REQUEST_SIZE);
+        return Err(StatusCode::PAYLOAD_TOO_LARGE);
     }
 
     Ok(next.run(request).await)
@@ -132,9 +129,7 @@ pub async fn authenticate_api_key(
     };
 
     // Check for API key in headers
-    let provided_key = headers
-        .get(API_KEY_HEADER)
-        .and_then(|v| v.to_str().ok());
+    let provided_key = headers.get(API_KEY_HEADER).and_then(|v| v.to_str().ok());
 
     match provided_key {
         Some(key) if key.as_bytes().ct_eq(required_key.as_bytes()).into() => {
