@@ -107,7 +107,7 @@ inherits = "release"
 
 [package.metadata.docs.rs]
 # Documentation build configuration
-features = ["metal", "cuda", "vulkan", "server"]
+features = ["server", "openmp"]
 targets = ["x86_64-unknown-linux-gnu", "x86_64-apple-darwin", "x86_64-pc-windows-msvc"]
 
 [lints.clippy]
