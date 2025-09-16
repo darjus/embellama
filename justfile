@@ -433,3 +433,135 @@ clean-server: stop-server
     @echo "Cleaning server artifacts..."
     @rm -f server.log server.pid
     @echo "✓ Server artifacts cleaned"
+
+# Create a new release
+release VERSION:
+    #!/usr/bin/env bash
+    set -euo pipefail
+
+    echo "🚀 Creating release v{{VERSION}}..."
+    echo "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
+
+    # Check prerequisites
+    echo "📋 Checking prerequisites..."
+
+    # Check if git-cliff is installed
+    if ! command -v git-cliff &> /dev/null; then
+        echo "❌ git-cliff is not installed. Install with: cargo install git-cliff"
+        exit 1
+    fi
+
+    # Check if gh CLI is installed
+    if ! command -v gh &> /dev/null; then
+        echo "❌ GitHub CLI (gh) is not installed. Install from: https://cli.github.com"
+        exit 1
+    fi
+
+    # Ensure working directory is clean
+    if [ -n "$(git status --porcelain)" ]; then
+        echo "❌ Working directory is not clean. Please commit or stash changes."
+        exit 1
+    fi
+
+    # Get the default branch (usually main or master)
+    default_branch=$(git symbolic-ref refs/remotes/origin/HEAD 2>/dev/null | sed 's@^refs/remotes/origin/@@' || echo "master")
+    current_branch=$(git branch --show-current)
+
+    # Check we're on the default branch
+    if [ "$current_branch" != "$default_branch" ]; then
+        echo "❌ Not on $default_branch branch (currently on $current_branch)"
+        echo "   Run: git checkout $default_branch"
+        exit 1
+    fi
+
+    # Fetch latest from remote
+    echo "📡 Fetching latest from remote..."
+    git fetch origin
+
+    # Check we're up to date with remote
+    LOCAL=$(git rev-parse @)
+    REMOTE=$(git rev-parse @{u})
+    if [ "$LOCAL" != "$REMOTE" ]; then
+        echo "❌ Branch is not up to date with remote"
+        echo "   Run: git pull origin $default_branch"
+        exit 1
+    fi
+
+    # Check if tag already exists
+    if git rev-parse "v{{VERSION}}" >/dev/null 2>&1; then
+        echo "❌ Tag v{{VERSION}} already exists"
+        exit 1
+    fi
+
+    echo "✅ All prerequisites passed"
+    echo
+
+    # Run quality checks
+    echo "🧪 Running quality checks..."
+    echo "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
+
+    # Format check
+    echo "📝 Checking code formatting..."
+    just fmtcheck
+
+    # Clippy
+    echo "🔍 Running clippy..."
+    just clippy
+
+    # Tests
+    echo "🧪 Running tests..."
+    just test-unit
+
+    echo "✅ All quality checks passed"
+    echo
+
+    # Update version
+    echo "📦 Updating version to {{VERSION}}..."
+    echo "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
+
+    # Update version in Cargo.toml
+    sed -i.bak 's/^version = ".*"/version = "{{VERSION}}"/' Cargo.toml
+    rm Cargo.toml.bak
+
+    # Update Cargo.lock
+    cargo update -p embellama
+
+    # Generate changelog
+    echo "📋 Generating changelog..."
+    git-cliff --tag v{{VERSION}} -o CHANGELOG.md
+
+    # Commit release changes
+    echo "💾 Committing release changes..."
+    git add Cargo.toml Cargo.lock CHANGELOG.md
+    git commit -m "chore(release): prepare for v{{VERSION}}"
+
+    # Create git tag
+    echo "🏷️  Creating git tag v{{VERSION}}..."
+    git tag -a v{{VERSION}} -m "Release v{{VERSION}}"
+
+    # Push to GitHub
+    echo "🚀 Pushing to GitHub..."
+    git push origin $default_branch --tags
+
+    # Extract release notes for this version from CHANGELOG.md
+    echo "📝 Extracting release notes..."
+
+    # Get content between this version and the next version header
+    release_notes=$(awk '/^## \[{{VERSION}}\]/,/^## \[/' CHANGELOG.md | sed '$ d' | tail -n +3)
+
+    # Create GitHub release
+    echo "🎉 Creating GitHub release..."
+    gh release create v{{VERSION}} \
+        --title "v{{VERSION}}" \
+        --notes "$release_notes"
+
+    echo
+    echo "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
+    echo "✅ Release v{{VERSION}} created successfully!"
+    echo
+    echo "📦 GitHub Release: https://github.com/darjus/embellama/releases/tag/v{{VERSION}}"
+    echo
+    echo "📚 To publish to crates.io, run:"
+    echo "   cargo publish --dry-run  # Test first"
+    echo "   cargo publish            # Publish for real"
+    echo "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
