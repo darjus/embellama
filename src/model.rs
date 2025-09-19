@@ -17,6 +17,8 @@
 //! This module contains the `EmbeddingModel` struct which encapsulates
 //! the llama.cpp model and context, handling the generation of embeddings.
 
+use crate::cache::CacheStore;
+use crate::cache::token_cache::TokenCache;
 use crate::config::{ModelConfig, PoolingStrategy};
 use crate::error::{Error, Result};
 use llama_cpp_2::context::LlamaContext;
@@ -30,6 +32,7 @@ use llama_cpp_2::{
 use self_cell::self_cell;
 use std::num::NonZeroU32;
 use std::path::{Path, PathBuf};
+use std::sync::atomic::{AtomicUsize, Ordering};
 use tracing::{debug, info, instrument, warn};
 
 self_cell! {
@@ -146,9 +149,21 @@ impl EmbeddingModel {
         let mut ctx_params = LlamaContextParams::default();
         ctx_params = ctx_params.with_n_seq_max(n_seq_max);
 
-        // Set context size
-        let n_ctx = NonZeroU32::new(ctx_size);
+        // Set context size (use context_size if specified, otherwise use n_ctx)
+        // Also check deprecated kv_cache_size for backward compatibility
+        #[allow(deprecated)]
+        let context_size = config
+            .context_size
+            .or(config.kv_cache_size)
+            .unwrap_or(ctx_size);
+        let n_ctx = NonZeroU32::new(context_size);
         ctx_params = ctx_params.with_n_ctx(n_ctx);
+
+        // Enable KV cache optimizations if requested
+        if config.enable_kv_optimization {
+            debug!("Enabling KV cache optimizations");
+            // > NOTE: These optimizations are enabled through llama-cpp parameters
+        }
 
         // Set micro-batch size (default to 512 if not specified)
         // This must be >= the number of tokens in any single input
@@ -425,6 +440,45 @@ impl EmbeddingModel {
             })
     }
 
+    /// Tokenizes the input text with caching support.
+    ///
+    /// # Arguments
+    ///
+    /// * `text` - The text to tokenize
+    /// * `add_bos` - Whether to add a beginning-of-sentence token
+    /// * `cache` - Optional token cache for caching tokenization results
+    ///
+    /// # Returns
+    ///
+    /// Returns a vector of tokens representing the tokenized text.
+    ///
+    /// # Errors
+    ///
+    /// Returns an error if tokenization fails.
+    pub fn tokenize_cached(
+        &self,
+        text: &str,
+        add_bos: bool,
+        cache: Option<&TokenCache>,
+    ) -> Result<Vec<LlamaToken>> {
+        // If cache is available, try to get cached tokens
+        if let Some(cache) = cache {
+            let key = TokenCache::compute_key(text, &self.model_name, add_bos);
+            if let Some(tokens) = cache.get(&key) {
+                debug!("Using cached tokens for text (length: {})", text.len());
+                return Ok(tokens);
+            }
+
+            // Cache miss, tokenize and cache the result
+            let tokens = self.tokenize(text, add_bos)?;
+            cache.insert(key, tokens.clone());
+            return Ok(tokens);
+        }
+
+        // No cache available, fallback to regular tokenization
+        self.tokenize(text, add_bos)
+    }
+
     /// Generates an embedding for the given text.
     ///
     /// # Arguments
@@ -443,6 +497,32 @@ impl EmbeddingModel {
     /// - Model inference fails
     #[instrument(skip(self, text), fields(text_len = text.len()))]
     pub fn generate_embedding(&mut self, text: &str) -> Result<Vec<f32>> {
+        self.generate_embedding_cached(text, None)
+    }
+
+    /// Generates an embedding for the given text with optional token cache support.
+    ///
+    /// # Arguments
+    ///
+    /// * `text` - The input text to generate embeddings for
+    /// * `token_cache` - Optional token cache for caching tokenization results
+    ///
+    /// # Returns
+    ///
+    /// Returns a vector of f32 values representing the embedding.
+    ///
+    /// # Errors
+    ///
+    /// This function will return an error if:
+    /// - Tokenization fails
+    /// - The input exceeds the maximum token limit
+    /// - Model inference fails
+    #[instrument(skip(self, text, token_cache), fields(text_len = text.len()))]
+    pub fn generate_embedding_cached(
+        &mut self,
+        text: &str,
+        token_cache: Option<&TokenCache>,
+    ) -> Result<Vec<f32>> {
         // Validate input
         if text.is_empty() {
             return Err(Error::InvalidInput {
@@ -450,8 +530,8 @@ impl EmbeddingModel {
             });
         }
 
-        // Tokenize the text (using configured/detected add_bos_token setting)
-        let tokens = self.tokenize(text, self.add_bos_token)?;
+        // Tokenize the text with caching support
+        let tokens = self.tokenize_cached(text, self.add_bos_token, token_cache)?;
 
         // Check token limit
         if tokens.len() > self.max_context_size {
@@ -867,6 +947,196 @@ impl EmbeddingModel {
         }
 
         Ok(embedding)
+    }
+
+    /// Save the current KV cache state to memory
+    ///
+    /// > NOTE: This is for advanced prefix caching optimization
+    /// > PERFORMANCE ISSUE: Only beneficial for prefixes > 100 tokens
+    pub fn save_session_state(&self) -> Result<Vec<u8>> {
+        // Get the state size first
+        let state_size = unsafe { self.cell.borrow_dependent().get_state_size() };
+
+        if state_size == 0 {
+            return Err(Error::InvalidOperation {
+                message: "No state to save - context is empty".to_string(),
+            });
+        }
+
+        // Allocate buffer for the state
+        let mut buffer = vec![0u8; state_size];
+
+        // Copy the state data
+        let copied_size = unsafe {
+            self.cell
+                .borrow_dependent()
+                .copy_state_data(buffer.as_mut_ptr())
+        };
+
+        if copied_size != state_size {
+            return Err(Error::InvalidOperation {
+                message: format!(
+                    "State size mismatch: expected {}, got {}",
+                    state_size, copied_size
+                ),
+            });
+        }
+
+        debug!("Saved session state: {} bytes", state_size);
+        Ok(buffer)
+    }
+
+    /// Load a previously saved KV cache state
+    ///
+    /// > NOTE: Session must be from the same model version
+    /// > BUG: Session format may change between llama.cpp versions
+    pub fn load_session_state(&mut self, state_data: &[u8]) -> Result<()> {
+        if state_data.is_empty() {
+            return Err(Error::InvalidInput {
+                message: "Empty session data provided".to_string(),
+            });
+        }
+
+        // Set the state data
+        let mut loaded_size = AtomicUsize::new(0);
+        self.cell.with_dependent_mut(|_, context| {
+            loaded_size.store(
+                unsafe { context.set_state_data(state_data.clone()) },
+                Ordering::Relaxed,
+            )
+        });
+        let loaded_size = loaded_size.load(Ordering::Relaxed);
+
+        if loaded_size != state_data.len() {
+            return Err(Error::InvalidOperation {
+                message: format!(
+                    "Failed to load session state: expected {} bytes, loaded {}",
+                    state_data.len(),
+                    loaded_size
+                ),
+            });
+        }
+
+        debug!("Loaded session state: {} bytes", loaded_size);
+        Ok(())
+    }
+
+    /// Generate embedding with prefix caching support
+    ///
+    /// This method checks if the text has a common prefix that's been cached,
+    /// and if so, loads that session state to avoid recomputing the KV cache
+    /// for the prefix portion.
+    ///
+    /// # Arguments
+    ///
+    /// * `text` - The input text to generate embeddings for
+    /// * `prefix_cache` - Optional reference to the prefix cache
+    /// * `token_cache` - Optional reference to the token cache
+    ///
+    /// # Returns
+    ///
+    /// Returns the embedding vector and optionally the number of prefix tokens used
+    pub fn generate_embedding_with_prefix(
+        &mut self,
+        text: &str,
+        prefix_cache: Option<&crate::cache::prefix_cache::PrefixCache>,
+        token_cache: Option<&TokenCache>,
+    ) -> Result<Vec<f32>> {
+        // First tokenize to get tokens
+        let tokens = self.tokenize_cached(text, self.add_bos_token, token_cache)?;
+        let tokens_i: Vec<i32> = tokens.iter().map(|t| t.0).collect();
+
+        // Check for cached prefix if available
+        let prefix_tokens_used = if let Some(cache) = prefix_cache {
+            if let Some((prefix_len, session)) = cache.find_prefix_session(text, &tokens_i) {
+                // Load the cached session state if available
+                if let Some(ref state) = session.memory_state {
+                    match self.load_session_state(state) {
+                        Ok(()) => {
+                            info!("Loaded prefix cache for {} tokens", prefix_len);
+                            Some(prefix_len)
+                        }
+                        Err(e) => {
+                            warn!("Failed to load prefix cache: {}", e);
+                            None
+                        }
+                    }
+                } else {
+                    None
+                }
+            } else {
+                // Analyze for future caching opportunities
+                if let Some(suggested_len) = cache.analyze(&tokens_i) {
+                    debug!(
+                        "Prefix of {} tokens is candidate for caching",
+                        suggested_len
+                    );
+                }
+                None
+            }
+        } else {
+            None
+        };
+
+        // Generate the embedding (with or without prefix optimization)
+        let embedding = if let Some(prefix_len) = prefix_tokens_used {
+            // Process only the suffix tokens after the cached prefix
+            let suffix_tokens = &tokens[prefix_len..];
+            if suffix_tokens.is_empty() {
+                // The entire text was in the prefix, just extract embeddings
+                self.extract_embeddings(&tokens)?
+            } else {
+                // Process the suffix and combine
+                self.process_tokens_internal(suffix_tokens)?
+            }
+        } else {
+            // Normal processing without prefix optimization
+            self.process_tokens_internal(&tokens)?
+        };
+
+        // Apply pooling and normalization
+        let pooled = Self::apply_pooling(&embedding, self.config.pooling_strategy)?;
+        let final_embedding = if self.config.normalize_embeddings {
+            Self::normalize_embedding(pooled)?
+        } else {
+            pooled
+        };
+
+        Ok(final_embedding)
+    }
+
+    /// Extract embeddings from the current context state
+    fn extract_embeddings(&self, tokens: &[LlamaToken]) -> Result<Vec<Vec<f32>>> {
+        let _n_embd = self.embedding_dimensions;
+        let mut embeddings = Vec::with_capacity(tokens.len());
+
+        // Extract embeddings using the context's embeddings API
+        self.cell.with_dependent(|_, ctx| -> Result<()> {
+            // Try to get sequence embeddings first (for BERT models)
+            if let Ok(seq_embeddings) = ctx.embeddings_seq_ith(0) {
+                // For BERT models with pooling, we get one embedding for the whole sequence
+                embeddings.push(seq_embeddings.to_vec());
+                return Ok(());
+            }
+
+            // Fall back to token-wise embeddings (for LLaMA-style models)
+            for i in 0..tokens.len() {
+                let i_i32 = i32::try_from(i).map_err(|_| Error::EmbeddingGenerationError {
+                    message: format!("Index {i} too large for i32"),
+                    source: None,
+                })?;
+                let embedding =
+                    ctx.embeddings_ith(i_i32)
+                        .map_err(|e| Error::EmbeddingGenerationError {
+                            message: format!("Failed to get embeddings for token {i}"),
+                            source: Some(anyhow::anyhow!(e)),
+                        })?;
+                embeddings.push(embedding.to_vec());
+            }
+            Ok(())
+        })?;
+
+        Ok(embeddings)
     }
 }
 

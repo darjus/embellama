@@ -17,6 +17,7 @@
 //! This module defines the request and response structures that match
 //! the `OpenAI` API format for maximum compatibility.
 
+use crate::cache::CacheStats;
 use serde::{Deserialize, Serialize};
 
 /// Input type for embeddings - can be a single string or array of strings
@@ -257,3 +258,119 @@ impl ModelData {
 
 /// Add base64 encoding support
 use base64::{Engine as _, engine::general_purpose::STANDARD};
+
+/// Request to warm the cache with specific texts
+#[derive(Debug, Clone, Deserialize)]
+pub struct CacheWarmRequest {
+    /// Texts to pre-compute embeddings for
+    pub texts: Vec<String>,
+    /// Optional model name to use (defaults to engine's default model)
+    pub model: Option<String>,
+}
+
+/// Response from cache warm operation
+#[derive(Debug, Clone, Serialize)]
+pub struct CacheWarmResponse {
+    /// Status message
+    pub status: String,
+    /// Number of texts processed
+    pub texts_processed: usize,
+    /// Number of texts that were already cached
+    pub already_cached: usize,
+}
+
+/// Cache statistics response
+#[derive(Debug, Clone, Serialize)]
+pub struct CacheStatsResponse {
+    /// Cache enabled status
+    pub enabled: bool,
+    /// Cache statistics if available
+    pub stats: Option<CacheStats>,
+    /// System memory information
+    pub memory: MemoryInfo,
+}
+
+/// System memory information
+#[derive(Debug, Clone, Serialize)]
+pub struct MemoryInfo {
+    /// Total system memory in bytes
+    pub total_bytes: u64,
+    /// Available system memory in bytes
+    pub available_bytes: u64,
+    /// Used memory percentage
+    pub usage_percentage: f32,
+}
+
+/// Cache clear response
+#[derive(Debug, Clone, Serialize)]
+pub struct CacheClearResponse {
+    /// Status message
+    pub status: String,
+    /// Previous cache statistics before clearing
+    pub previous_stats: Option<CacheStats>,
+}
+
+// Prefix cache API types
+
+/// Request to register a prefix for caching
+#[derive(Debug, Clone, Deserialize)]
+pub struct PrefixRegisterRequest {
+    /// The prefix text to cache
+    pub prefix: String,
+    /// Optional model name (uses default if not specified)
+    pub model: Option<String>,
+}
+
+/// Response for prefix registration
+#[derive(Debug, Clone, Serialize)]
+pub struct PrefixRegisterResponse {
+    /// Status message
+    pub status: String,
+    /// Number of tokens in the prefix
+    pub token_count: usize,
+    /// Estimated memory usage in bytes
+    pub memory_usage: u64,
+}
+
+/// Response listing cached prefixes
+#[derive(Debug, Clone, Serialize)]
+pub struct PrefixListResponse {
+    /// List of cached prefix information
+    pub prefixes: Vec<PrefixInfo>,
+    /// Total number of cached prefixes
+    pub total_count: usize,
+}
+
+/// Information about a cached prefix
+#[derive(Debug, Clone, Serialize)]
+pub struct PrefixInfo {
+    /// Prefix key/identifier
+    pub key: String,
+    /// First 100 characters of the prefix text
+    pub preview: String,
+    /// Number of tokens in the prefix
+    pub token_count: usize,
+    /// Number of times accessed
+    pub access_count: usize,
+    /// Age in seconds
+    pub age_seconds: u64,
+}
+
+/// Response with prefix cache statistics
+#[derive(Debug, Clone, Serialize)]
+pub struct PrefixStatsResponse {
+    /// Whether prefix cache is enabled
+    pub enabled: bool,
+    /// Number of cached sessions
+    pub session_count: usize,
+    /// Total cache hits
+    pub total_hits: u64,
+    /// Total cache misses
+    pub total_misses: u64,
+    /// Total evictions
+    pub total_evictions: u64,
+    /// Estimated memory usage in bytes
+    pub memory_usage_bytes: u64,
+    /// Cache hit rate
+    pub hit_rate: f64,
+}

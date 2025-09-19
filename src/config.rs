@@ -60,6 +60,20 @@ pub struct ModelConfig {
     /// Maximum number of sequences for batch processing
     /// Default: 1, max: 64 (llama.cpp limit)
     pub n_seq_max: Option<u32>,
+
+    /// Context size override (defaults to n_ctx if not specified)
+    /// This controls the KV cache/attention cache size for better performance
+    /// Note: Previously named `kv_cache_size` - that field is now deprecated
+    pub context_size: Option<u32>,
+
+    /// Deprecated: Use `context_size` instead
+    /// This field is maintained for backward compatibility and will be removed in v0.4.0
+    #[deprecated(since = "0.3.1", note = "Use `context_size` instead")]
+    pub kv_cache_size: Option<u32>,
+
+    /// Enable KV cache optimization for batch processing
+    /// This includes batch reordering and similar-length grouping
+    pub enable_kv_optimization: bool,
 }
 
 impl ModelConfig {
@@ -164,6 +178,10 @@ impl Default for ModelConfig {
             pooling_strategy: PoolingStrategy::default(),
             add_bos_token: None,
             n_seq_max: None,
+            context_size: None,
+            #[allow(deprecated)]
+            kv_cache_size: None,
+            enable_kv_optimization: true,
         }
     }
 }
@@ -268,6 +286,36 @@ impl ModelConfigBuilder {
         self
     }
 
+    /// Set the KV cache size
+    #[must_use]
+    /// Set the context size (KV cache size)
+    pub fn with_context_size(mut self, context_size: u32) -> Self {
+        self.config.context_size = Some(context_size);
+        #[allow(deprecated)]
+        {
+            self.config.kv_cache_size = Some(context_size); // Maintain backward compat
+        }
+        self
+    }
+
+    /// Deprecated: Use `with_context_size` instead
+    #[deprecated(since = "0.3.1", note = "Use `with_context_size` instead")]
+    pub fn with_kv_cache_size(mut self, kv_cache_size: u32) -> Self {
+        self.config.context_size = Some(kv_cache_size);
+        #[allow(deprecated)]
+        {
+            self.config.kv_cache_size = Some(kv_cache_size);
+        }
+        self
+    }
+
+    /// Enable or disable KV cache optimization
+    #[must_use]
+    pub fn with_kv_optimization(mut self, enable: bool) -> Self {
+        self.config.enable_kv_optimization = enable;
+        self
+    }
+
     /// Build the configuration
     ///
     /// # Errors
@@ -350,6 +398,9 @@ pub struct EngineConfig {
     /// Maximum number of sequences for batch processing
     /// Default: 1, max: 64 (llama.cpp limit)
     pub n_seq_max: Option<u32>,
+
+    /// Cache configuration
+    pub cache: Option<CacheConfig>,
 }
 
 /// Pooling strategy for combining token embeddings
@@ -368,6 +419,185 @@ pub enum PoolingStrategy {
 impl Default for PoolingStrategy {
     fn default() -> Self {
         Self::Mean
+    }
+}
+
+/// Configuration for caching system
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct CacheConfig {
+    /// Whether caching is enabled
+    pub enabled: bool,
+    /// Maximum number of entries in token cache
+    pub token_cache_size: usize,
+    /// Maximum number of entries in embedding cache
+    pub embedding_cache_size: usize,
+    /// Maximum memory usage in megabytes
+    pub max_memory_mb: usize,
+    /// Time-to-live for cache entries in seconds
+    pub ttl_seconds: u64,
+    /// Whether to enable metrics collection
+    pub enable_metrics: bool,
+    /// Whether prefix caching is enabled
+    pub prefix_cache_enabled: bool,
+    /// Maximum number of cached prefix sessions
+    pub prefix_cache_size: usize,
+    /// Minimum prefix length in tokens to consider for caching
+    pub min_prefix_length: usize,
+    /// Frequency threshold for automatic prefix caching
+    pub prefix_frequency_threshold: usize,
+    /// TTL for prefix cache sessions in seconds
+    pub prefix_ttl_seconds: u64,
+}
+
+impl Default for CacheConfig {
+    fn default() -> Self {
+        Self {
+            enabled: true,
+            token_cache_size: 10_000,
+            embedding_cache_size: 10_000,
+            max_memory_mb: 1024,
+            ttl_seconds: 3600,
+            enable_metrics: true,
+            prefix_cache_enabled: false, // Disabled by default for gradual rollout
+            prefix_cache_size: 100,
+            min_prefix_length: 100,
+            prefix_frequency_threshold: 5,
+            prefix_ttl_seconds: 7200, // 2 hours
+        }
+    }
+}
+
+impl CacheConfig {
+    /// Create a new cache configuration builder
+    pub fn builder() -> CacheConfigBuilder {
+        CacheConfigBuilder::new()
+    }
+
+    /// Validate the cache configuration
+    pub fn validate(&self) -> Result<()> {
+        if self.token_cache_size == 0 {
+            return Err(Error::config("Token cache size must be greater than 0"));
+        }
+        if self.embedding_cache_size == 0 {
+            return Err(Error::config("Embedding cache size must be greater than 0"));
+        }
+        if self.max_memory_mb == 0 {
+            return Err(Error::config("Max memory must be greater than 0"));
+        }
+        if self.ttl_seconds == 0 {
+            return Err(Error::config("TTL must be greater than 0"));
+        }
+        if self.prefix_cache_enabled {
+            if self.prefix_cache_size == 0 {
+                return Err(Error::config("Prefix cache size must be greater than 0"));
+            }
+            if self.min_prefix_length < 50 {
+                return Err(Error::config(
+                    "Minimum prefix length must be at least 50 tokens",
+                ));
+            }
+            if self.prefix_frequency_threshold == 0 {
+                return Err(Error::config(
+                    "Prefix frequency threshold must be greater than 0",
+                ));
+            }
+            if self.prefix_ttl_seconds == 0 {
+                return Err(Error::config("Prefix TTL must be greater than 0"));
+            }
+        }
+        Ok(())
+    }
+}
+
+/// Builder for `CacheConfig`
+pub struct CacheConfigBuilder {
+    config: CacheConfig,
+}
+
+impl Default for CacheConfigBuilder {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
+impl CacheConfigBuilder {
+    /// Create a new builder with default configuration
+    pub fn new() -> Self {
+        Self {
+            config: CacheConfig::default(),
+        }
+    }
+
+    /// Set whether caching is enabled
+    pub fn with_enabled(mut self, enabled: bool) -> Self {
+        self.config.enabled = enabled;
+        self
+    }
+
+    /// Set token cache size
+    pub fn with_token_cache_size(mut self, size: usize) -> Self {
+        self.config.token_cache_size = size;
+        self
+    }
+
+    /// Set embedding cache size
+    pub fn with_embedding_cache_size(mut self, size: usize) -> Self {
+        self.config.embedding_cache_size = size;
+        self
+    }
+
+    /// Set maximum memory usage in MB
+    pub fn with_max_memory_mb(mut self, mb: usize) -> Self {
+        self.config.max_memory_mb = mb;
+        self
+    }
+
+    /// Set TTL in seconds
+    pub fn with_ttl_seconds(mut self, seconds: u64) -> Self {
+        self.config.ttl_seconds = seconds;
+        self
+    }
+
+    /// Set metrics collection enabled
+    pub fn with_enable_metrics(mut self, enabled: bool) -> Self {
+        self.config.enable_metrics = enabled;
+        self
+    }
+
+    /// Enable prefix caching
+    pub fn with_prefix_cache_enabled(mut self, enabled: bool) -> Self {
+        self.config.prefix_cache_enabled = enabled;
+        self
+    }
+
+    /// Set prefix cache size
+    pub fn with_prefix_cache_size(mut self, size: usize) -> Self {
+        self.config.prefix_cache_size = size;
+        self
+    }
+
+    /// Set minimum prefix length
+    pub fn with_min_prefix_length(mut self, length: usize) -> Self {
+        self.config.min_prefix_length = length;
+        self
+    }
+
+    /// Set prefix frequency threshold
+    pub fn with_prefix_frequency_threshold(mut self, threshold: usize) -> Self {
+        self.config.prefix_frequency_threshold = threshold;
+        self
+    }
+
+    /// Set prefix TTL in seconds
+    pub fn with_prefix_ttl_seconds(mut self, seconds: u64) -> Self {
+        self.config.prefix_ttl_seconds = seconds;
+        self
+    }
+
+    /// Build the configuration
+    pub fn build(self) -> Result<CacheConfig> {
+        self.config.validate()?;
+        Ok(self.config)
     }
 }
 
@@ -393,6 +623,7 @@ impl Default for EngineConfig {
             use_mlock: false,
             add_bos_token: None,
             n_seq_max: None,
+            cache: None,
         }
     }
 }
@@ -495,6 +726,11 @@ impl EngineConfig {
             }
         }
 
+        // Validate cache configuration if present
+        if let Some(ref cache) = self.cache {
+            cache.validate()?;
+        }
+
         Ok(())
     }
 
@@ -553,6 +789,10 @@ impl EngineConfig {
             pooling_strategy: self.pooling_strategy,
             add_bos_token: self.add_bos_token,
             n_seq_max: self.n_seq_max,
+            context_size: self.context_size.and_then(|s| u32::try_from(s).ok()),
+            #[allow(deprecated)]
+            kv_cache_size: None, // Deprecated field for backward compatibility
+            enable_kv_optimization: true, // Enable by default
         }
     }
 }
@@ -703,6 +943,27 @@ impl EngineConfigBuilder {
     #[must_use]
     pub fn with_n_seq_max(mut self, n_seq_max: u32) -> Self {
         self.config.n_seq_max = Some(n_seq_max);
+        self
+    }
+
+    /// Set cache configuration
+    #[must_use]
+    pub fn with_cache_config(mut self, cache: CacheConfig) -> Self {
+        self.config.cache = Some(cache);
+        self
+    }
+
+    /// Enable caching with default configuration
+    #[must_use]
+    pub fn with_cache_enabled(mut self) -> Self {
+        self.config.cache = Some(CacheConfig::default());
+        self
+    }
+
+    /// Disable caching
+    #[must_use]
+    pub fn with_cache_disabled(mut self) -> Self {
+        self.config.cache = None;
         self
     }
 

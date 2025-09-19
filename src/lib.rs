@@ -78,6 +78,9 @@ mod engine;
 /// Batch processing module
 mod batch;
 
+/// Cache module for token and embedding caching
+pub mod cache;
+
 /// Server module (feature-gated)
 #[cfg(feature = "server")]
 pub mod server;
@@ -86,7 +89,8 @@ pub mod server;
 pub use backend::{BackendInfo, BackendType, detect_best_backend, get_compiled_backend};
 pub use batch::{BatchProcessor, BatchProcessorBuilder};
 pub use config::{
-    EngineConfig, EngineConfigBuilder, ModelConfig, ModelConfigBuilder, PoolingStrategy,
+    CacheConfig, CacheConfigBuilder, EngineConfig, EngineConfigBuilder, ModelConfig,
+    ModelConfigBuilder, PoolingStrategy,
 };
 pub use engine::{EmbeddingEngine, ModelInfo};
 pub use error::{Error, Result};

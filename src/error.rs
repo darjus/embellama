@@ -146,6 +146,13 @@ pub enum Error {
         message: String,
     },
 
+    /// Error when an operation is invalid or not supported
+    #[error("Invalid operation: {message}")]
+    InvalidOperation {
+        /// Description of the invalid operation
+        message: String,
+    },
+
     /// Catch-all for other errors
     #[error(transparent)]
     Other(#[from] anyhow::Error),

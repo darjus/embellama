@@ -19,6 +19,10 @@
 //! providing high-level embedding generation APIs.
 
 use crate::batch::BatchProcessorBuilder;
+use crate::cache::embedding_cache::EmbeddingCache;
+use crate::cache::prefix_cache::PrefixCache;
+use crate::cache::token_cache::TokenCache;
+use crate::cache::{CacheStats, CacheStore};
 use crate::config::EngineConfig;
 use crate::error::{Error, Result};
 use crate::model::EmbeddingModel;
@@ -41,6 +45,11 @@ static BACKEND: OnceLock<Arc<Mutex<LlamaBackend>>> = OnceLock::new();
 // Thread-local storage for models due to !Send constraint of LlamaContext
 thread_local! {
     static THREAD_MODELS: RefCell<HashMap<String, EmbeddingModel>> = RefCell::new(HashMap::new());
+}
+
+// Thread-local reference to the token cache for fast access
+thread_local! {
+    static THREAD_TOKEN_CACHE: RefCell<Option<Arc<TokenCache>>> = RefCell::new(None);
 }
 
 /// The main entry point for the embellama library.
@@ -77,6 +86,12 @@ pub struct EmbeddingEngine {
     model_configs: Arc<RwLock<HashMap<String, EngineConfig>>>,
     /// Default model name if none specified
     default_model: Option<String>,
+    /// Embedding cache for performance optimization
+    embedding_cache: Option<Arc<EmbeddingCache>>,
+    /// Token cache for caching tokenization results
+    token_cache: Option<Arc<TokenCache>>,
+    /// Prefix cache for KV cache optimization
+    prefix_cache: Option<Arc<PrefixCache>>,
 }
 
 impl EmbeddingEngine {
@@ -253,6 +268,57 @@ impl EmbeddingEngine {
         let backend = Self::get_or_create_backend()?;
         info!("Llama backend ready");
 
+        // Initialize caches if enabled
+        let (embedding_cache, token_cache, prefix_cache) = if let Some(cache_config) = &config.cache
+        {
+            if cache_config.enabled {
+                info!(
+                    "Initializing embedding cache with {} max entries",
+                    cache_config.embedding_cache_size
+                );
+                let embedding_cache = Some(Arc::new(EmbeddingCache::new(
+                    cache_config.embedding_cache_size as u64,
+                    cache_config.ttl_seconds,
+                )));
+
+                info!(
+                    "Initializing token cache with {} max entries",
+                    cache_config.token_cache_size
+                );
+                let token_cache = Some(Arc::new(TokenCache::with_ttl(
+                    cache_config.token_cache_size,
+                    Some(cache_config.ttl_seconds),
+                )));
+
+                // Initialize prefix cache if enabled
+                let prefix_cache = if cache_config.prefix_cache_enabled {
+                    info!(
+                        "Initializing prefix cache with {} max sessions",
+                        cache_config.prefix_cache_size
+                    );
+                    Some(Arc::new(
+                        PrefixCache::new(
+                            cache_config.prefix_cache_size,
+                            cache_config.ttl_seconds,
+                            5,    // Frequency threshold for automatic caching
+                            None, // No persistent storage for now
+                        )
+                        .map_err(|e| Error::ConfigurationError {
+                            message: format!("Failed to create prefix cache: {}", e),
+                        })?,
+                    ))
+                } else {
+                    None
+                };
+
+                (embedding_cache, token_cache, prefix_cache)
+            } else {
+                (None, None, None)
+            }
+        } else {
+            (None, None, None)
+        };
+
         // Create the engine with the initial model config
         let mut model_configs = HashMap::new();
         model_configs.insert(model_name.clone(), config);
@@ -261,7 +327,17 @@ impl EmbeddingEngine {
             backend,
             model_configs: Arc::new(RwLock::new(model_configs)),
             default_model: Some(model_name.clone()),
+            embedding_cache,
+            token_cache: token_cache.clone(),
+            prefix_cache,
         };
+
+        // Store token cache reference in thread-local storage
+        if let Some(ref cache) = token_cache {
+            THREAD_TOKEN_CACHE.with(|tc| {
+                *tc.borrow_mut() = Some(Arc::clone(cache));
+            });
+        }
 
         // Load the model in the current thread
         engine.ensure_model_loaded(&model_name)?;
@@ -501,11 +577,39 @@ impl EmbeddingEngine {
                 message: "No model specified and no default model set".to_string(),
             })?;
 
+        // Check cache first if enabled
+        if let Some(cache) = &self.embedding_cache {
+            // Get model config for cache key generation
+            let config = self
+                .model_configs
+                .read()
+                .get(&model_name)
+                .ok_or_else(|| Error::ModelNotFound {
+                    name: model_name.clone(),
+                })?
+                .clone();
+
+            // Compute cache key
+            let key = EmbeddingCache::compute_key(
+                text,
+                &model_name,
+                config.pooling_strategy,
+                config.normalize_embeddings,
+            );
+
+            // Check cache
+            if let Some(embedding) = cache.get(&key) {
+                debug!("Cache hit for text of length {}", text.len());
+                return Ok(embedding);
+            }
+            debug!("Cache miss for text of length {}", text.len());
+        }
+
         // Ensure model is loaded in current thread
         self.ensure_model_loaded(&model_name)?;
 
-        // Generate embedding using thread-local model
-        THREAD_MODELS.with(|models| {
+        // Generate embedding using thread-local model with token cache
+        let embedding = THREAD_MODELS.with(|models| {
             let mut models = models.borrow_mut();
             let model = models
                 .get_mut(&model_name)
@@ -513,8 +617,63 @@ impl EmbeddingEngine {
                     name: model_name.clone(),
                 })?;
 
-            model.generate_embedding(text)
-        })
+            // Check prefix cache if enabled
+            if let Some(ref prefix_cache) = self.prefix_cache {
+                // First tokenize to check for prefix matches
+                let tokens = model.tokenize(text, false)?;
+                let token_ids: Vec<i32> = tokens.iter().map(|t| t.0).collect();
+
+                // Try to find a matching prefix
+                if let Some((_prefix_len, _session_data)) =
+                    prefix_cache.find_prefix_session(text, &token_ids)
+                {
+                    debug!("Prefix cache hit for text of length {}", text.len());
+                    // Use the prefix-aware embedding generation
+                    // Pass the whole prefix_cache - the method will find the session internally
+                    return THREAD_TOKEN_CACHE.with(|tc| {
+                        let cache_ref = tc.borrow();
+                        model.generate_embedding_with_prefix(
+                            text,
+                            Some(prefix_cache.as_ref()),
+                            cache_ref.as_deref(),
+                        )
+                    });
+                }
+
+                // Analyze for future caching opportunities
+                // > TODO: Implement automatic prefix detection and registration
+                // This would require tracking patterns over time
+            }
+
+            // Get thread-local token cache reference
+            THREAD_TOKEN_CACHE.with(|tc| {
+                let cache_ref = tc.borrow();
+                if let Some(ref cache) = *cache_ref {
+                    model.generate_embedding_cached(text, Some(cache.as_ref()))
+                } else {
+                    model.generate_embedding(text)
+                }
+            })
+        })?;
+
+        // Update cache with result if enabled
+        if let Some(cache) = &self.embedding_cache {
+            // Get model config again for cache key (already validated above)
+            let config = self.model_configs.read();
+            let config = config.get(&model_name).unwrap();
+
+            let key = EmbeddingCache::compute_key(
+                text,
+                &model_name,
+                config.pooling_strategy,
+                config.normalize_embeddings,
+            );
+
+            cache.insert(key, embedding.clone());
+            debug!("Cached embedding for text of length {}", text.len());
+        }
+
+        Ok(embedding)
     }
 
     /// Generates embeddings for a batch of texts using the specified model.
@@ -547,10 +706,7 @@ impl EmbeddingEngine {
                 message: "No model specified and no default model set".to_string(),
             })?;
 
-        // Ensure model is loaded in current thread
-        self.ensure_model_loaded(&model_name)?;
-
-        // Get model configuration for batch processing
+        // Get model configuration
         let config = self
             .model_configs
             .read()
@@ -560,6 +716,50 @@ impl EmbeddingEngine {
             })?
             .clone();
 
+        // If cache is enabled, check for cached embeddings
+        let mut results = Vec::with_capacity(texts.len());
+        let mut uncached_indices = Vec::new();
+        let mut uncached_texts = Vec::new();
+
+        if let Some(cache) = &self.embedding_cache {
+            for (i, text) in texts.iter().enumerate() {
+                let key = EmbeddingCache::compute_key(
+                    text,
+                    &model_name,
+                    config.pooling_strategy,
+                    config.normalize_embeddings,
+                );
+
+                if let Some(embedding) = cache.get(&key) {
+                    debug!("Batch cache hit for text {} of length {}", i, text.len());
+                    results.push(Some(embedding));
+                } else {
+                    debug!("Batch cache miss for text {} of length {}", i, text.len());
+                    results.push(None);
+                    uncached_indices.push(i);
+                    uncached_texts.push(*text);
+                }
+            }
+
+            // If all are cached, return early
+            if uncached_texts.is_empty() {
+                debug!("All {} texts found in cache", texts.len());
+                return Ok(results.into_iter().map(|r| r.unwrap()).collect());
+            }
+
+            debug!(
+                "Processing {} uncached texts out of {}",
+                uncached_texts.len(),
+                texts.len()
+            );
+        } else {
+            // No cache, process all texts
+            uncached_texts = texts.to_vec();
+        }
+
+        // Ensure model is loaded in current thread
+        self.ensure_model_loaded(&model_name)?;
+
         // Create batch processor with model configuration
         let batch_processor = BatchProcessorBuilder::default()
             .with_max_batch_size(64) // Default batch size
@@ -567,8 +767,8 @@ impl EmbeddingEngine {
             .with_pooling_strategy(config.pooling_strategy)
             .build();
 
-        // Process batch using the BatchProcessor
-        THREAD_MODELS.with(|models| {
+        // Process uncached texts using the BatchProcessor
+        let new_embeddings = THREAD_MODELS.with(|models| {
             let mut models = models.borrow_mut();
             let model = models
                 .get_mut(&model_name)
@@ -576,8 +776,33 @@ impl EmbeddingEngine {
                     name: model_name.clone(),
                 })?;
 
-            batch_processor.process_batch(model, texts)
-        })
+            batch_processor.process_batch(model, &uncached_texts)
+        })?;
+
+        // Update cache and results
+        if let Some(cache) = &self.embedding_cache {
+            for (idx, embedding) in new_embeddings.into_iter().enumerate() {
+                let text = uncached_texts[idx];
+                let key = EmbeddingCache::compute_key(
+                    text,
+                    &model_name,
+                    config.pooling_strategy,
+                    config.normalize_embeddings,
+                );
+
+                cache.insert(key, embedding.clone());
+
+                // Update results at the correct position
+                let original_idx = uncached_indices[idx];
+                results[original_idx] = Some(embedding);
+            }
+
+            // Convert results to final output
+            Ok(results.into_iter().map(|r| r.unwrap()).collect())
+        } else {
+            // No cache, return new embeddings directly
+            Ok(new_embeddings)
+        }
     }
 
     /// Lists all currently loaded models.
@@ -591,6 +816,66 @@ impl EmbeddingEngine {
     pub fn list_models(&self) -> Vec<String> {
         let configs = self.model_configs.read();
         configs.keys().cloned().collect()
+    }
+
+    /// Gets cache statistics if caching is enabled.
+    ///
+    /// # Returns
+    ///
+    /// Returns cache statistics if caching is enabled, None otherwise.
+    pub fn get_cache_stats(&self) -> Option<CacheStats> {
+        self.embedding_cache.as_ref().map(|cache| cache.stats())
+    }
+
+    /// Clears the embedding cache if enabled.
+    ///
+    /// This removes all cached embeddings and resets statistics.
+    pub fn clear_cache(&self) {
+        if let Some(cache) = &self.embedding_cache {
+            cache.clear();
+            info!("Embedding cache cleared");
+        }
+        if let Some(cache) = &self.token_cache {
+            cache.clear();
+            info!("Token cache cleared");
+        }
+        if let Some(cache) = &self.prefix_cache {
+            cache.clear();
+            info!("Prefix cache cleared");
+        }
+    }
+
+    /// Warms up the cache by pre-computing embeddings for the given texts.
+    ///
+    /// # Arguments
+    ///
+    /// * `model_name` - The model to use (None uses default)
+    /// * `texts` - The texts to pre-compute embeddings for
+    ///
+    /// # Returns
+    ///
+    /// Returns Ok(()) if successful, or an error if pre-computation fails.
+    pub fn warm_cache(&self, model_name: Option<&str>, texts: &[&str]) -> Result<()> {
+        if self.embedding_cache.is_none() {
+            return Ok(()); // No-op if cache is disabled
+        }
+
+        info!("Warming cache with {} texts", texts.len());
+        for text in texts {
+            // This will compute and cache the embedding
+            self.embed(model_name, text)?;
+        }
+        info!("Cache warmed successfully");
+        Ok(())
+    }
+
+    /// Checks if caching is enabled.
+    ///
+    /// # Returns
+    ///
+    /// Returns true if caching is enabled, false otherwise.
+    pub fn is_cache_enabled(&self) -> bool {
+        self.embedding_cache.is_some()
     }
 
     /// Checks if a model is registered in the config registry.
@@ -737,6 +1022,121 @@ impl EmbeddingEngine {
                 info!("Cleared {} thread-local models", count);
             }
         });
+    }
+
+    // Prefix cache management methods
+
+    /// Registers a text prefix for KV cache optimization.
+    ///
+    /// This method allows manual registration of common text prefixes for caching.
+    /// The KV cache state will be saved and reused for texts that share this prefix.
+    ///
+    /// # Arguments
+    ///
+    /// * `model_name` - The model to use (None uses default)
+    /// * `prefix` - The prefix text to cache
+    ///
+    /// # Returns
+    ///
+    /// Returns Ok(()) if successful, or an error if registration fails.
+    ///
+    /// # Performance Notes
+    ///
+    /// - Only beneficial for prefixes >100 tokens due to session loading overhead
+    /// - Best for code embeddings with common imports, template documents
+    /// - Memory usage: ~100MB per cached prefix (typical models)
+    pub fn register_prefix(&self, model_name: Option<&str>, prefix: &str) -> Result<()> {
+        if let Some(cache) = &self.prefix_cache {
+            // Determine which model to use
+            let model_name = model_name
+                .map(std::string::ToString::to_string)
+                .or_else(|| self.default_model.clone())
+                .ok_or_else(|| Error::ConfigurationError {
+                    message: "No model specified and no default model set".to_string(),
+                })?;
+
+            // Ensure model is loaded in current thread
+            self.ensure_model_loaded(&model_name)?;
+
+            // Generate session state for the prefix
+            let (tokens, session_data) = THREAD_MODELS.with(|models| {
+                let mut models = models.borrow_mut();
+                let model = models
+                    .get_mut(&model_name)
+                    .ok_or_else(|| Error::ModelNotFound {
+                        name: model_name.clone(),
+                    })?;
+
+                // Tokenize the prefix
+                let tokens = model.tokenize(prefix, false)?;
+
+                // Generate embedding to populate KV cache
+                model.generate_embedding(prefix)?;
+
+                // Save the session state
+                let session_data = model.save_session_state()?;
+
+                Ok::<_, Error>((tokens, session_data))
+            })?;
+
+            // Register with prefix cache
+            // Convert tokens to u32 for the cache API
+            let token_ids: Vec<i32> = tokens.iter().map(|t| t.0).collect();
+            cache.register_prefix(prefix, &token_ids, session_data)?;
+
+            info!(
+                "Registered prefix of {} tokens for caching",
+                token_ids.len()
+            );
+            Ok(())
+        } else {
+            Err(Error::ConfigurationError {
+                message: "Prefix cache is not enabled".to_string(),
+            })
+        }
+    }
+
+    /// Gets prefix cache statistics.
+    ///
+    /// # Returns
+    ///
+    /// Returns statistics about the prefix cache if enabled, None otherwise.
+    pub fn get_prefix_cache_stats(&self) -> Option<crate::cache::prefix_cache::PrefixCacheStats> {
+        self.prefix_cache.as_ref().map(|cache| cache.stats())
+    }
+
+    /// Clears the prefix cache.
+    ///
+    /// This removes all cached prefix sessions and resets statistics.
+    pub fn clear_prefix_cache(&self) {
+        if let Some(cache) = &self.prefix_cache {
+            cache.clear();
+            info!("Prefix cache cleared");
+        }
+    }
+
+    /// Lists all cached prefixes.
+    ///
+    /// # Returns
+    ///
+    /// Returns a vector of prefix information if cache is enabled, empty vector otherwise.
+    pub fn list_cached_prefixes(&self) -> Vec<String> {
+        if let Some(cache) = &self.prefix_cache {
+            // > TODO: Implement a method in PrefixCache to list cached prefixes
+            // For now, return empty vector
+            vec![]
+        } else {
+            vec![]
+        }
+    }
+
+    /// Checks if prefix caching is enabled.
+    ///
+    /// # Returns
+    ///
+    /// Returns true if prefix caching is enabled, false otherwise.
+    pub fn is_prefix_cache_enabled(&self) -> bool {
+        self.prefix_cache.is_some()
     }
 }
 

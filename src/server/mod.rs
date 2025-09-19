@@ -45,6 +45,7 @@
 //! ```
 
 pub mod api_types;
+pub mod cache_handlers;
 pub mod channel;
 pub mod dispatcher;
 pub mod handlers;
@@ -376,6 +377,33 @@ pub fn create_router(state: AppState) -> Router<()> {
             axum::routing::post(handlers::embeddings_handler),
         )
         .route("/v1/models", get(handlers::list_models_handler))
+        // Cache management endpoints
+        .route("/cache/stats", get(cache_handlers::cache_stats_handler))
+        .route(
+            "/cache/clear",
+            axum::routing::post(cache_handlers::cache_clear_handler),
+        )
+        .route(
+            "/cache/warm",
+            axum::routing::post(cache_handlers::cache_warm_handler),
+        )
+        // Prefix cache endpoints
+        .route(
+            "/v1/embeddings/prefix",
+            axum::routing::post(cache_handlers::prefix_register_handler),
+        )
+        .route(
+            "/v1/embeddings/prefix",
+            get(cache_handlers::prefix_list_handler),
+        )
+        .route(
+            "/v1/embeddings/prefix",
+            axum::routing::delete(cache_handlers::prefix_clear_handler),
+        )
+        .route(
+            "/v1/embeddings/prefix/stats",
+            get(cache_handlers::prefix_stats_handler),
+        )
         .layer(
             tower::ServiceBuilder::new()
                 // Add tracing/logging middleware
