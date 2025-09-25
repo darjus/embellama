@@ -115,7 +115,7 @@ impl EmbeddingEngine {
             } else {
                 Error::ModelInitError {
                     message: "Failed to initialize llama backend".to_string(),
-                    source: Some(anyhow::anyhow!("{}", e)),
+                    source: Some(anyhow::anyhow!("{e}")),
                 }
             }
         })?;

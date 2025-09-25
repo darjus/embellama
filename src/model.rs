@@ -129,7 +129,7 @@ impl EmbeddingModel {
         let model = LlamaModel::load_from_file(backend, &config.model_path, &model_params)
             .map_err(|e| Error::ModelLoadError {
                 path: config.model_path.clone(),
-                source: anyhow::anyhow!("Failed to load model: {}", e),
+                source: anyhow::anyhow!("Failed to load model: {e}"),
             })?;
 
         debug!("Model loaded successfully");
@@ -177,8 +177,8 @@ impl EmbeddingModel {
         // Enable embeddings mode
         ctx_params = ctx_params.with_embeddings(true);
 
-        // Enable flash attention if available
-        ctx_params = ctx_params.with_flash_attention(true);
+        // Enable flash attention -1 == Auto
+        ctx_params = ctx_params.with_flash_attention_policy(-1);
 
         // Get embedding dimensions from the model
         #[allow(clippy::cast_sign_loss)]
@@ -192,7 +192,7 @@ impl EmbeddingModel {
         let cell = ModelCell::try_new(model, |m| {
             m.new_context(backend, ctx_params)
                 .map_err(|e| Error::ContextError {
-                    source: anyhow::anyhow!("Failed to create context: {}", e),
+                    source: anyhow::anyhow!("Failed to create context: {e}"),
                 })
         })?;
 

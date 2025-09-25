@@ -140,7 +140,7 @@ impl FileModelProvider {
         // Read only the beginning of the file (usually metadata is at the start)
         let mut file = File::open(path).map_err(|e| crate::Error::ModelLoadError {
             path: path.clone(),
-            source: anyhow::anyhow!("Failed to open GGUF file: {}", e),
+            source: anyhow::anyhow!("Failed to open GGUF file: {e}"),
         })?;
 
         // Read a reasonable amount for metadata (16MB should be more than enough)
@@ -151,7 +151,7 @@ impl FileModelProvider {
             .read_to_end(&mut buffer)
             .map_err(|e| crate::Error::ModelLoadError {
                 path: path.clone(),
-                source: anyhow::anyhow!("Failed to read GGUF file: {}", e),
+                source: anyhow::anyhow!("Failed to read GGUF file: {e}"),
             })?;
 
         // Parse GGUF file metadata
@@ -166,7 +166,7 @@ impl FileModelProvider {
             Err(e) => {
                 return Err(crate::Error::ModelLoadError {
                     path: path.clone(),
-                    source: anyhow::anyhow!("Failed to parse GGUF file: {}", e),
+                    source: anyhow::anyhow!("Failed to parse GGUF file: {e}"),
                 });
             }
         };
@@ -482,13 +482,13 @@ pub async fn run_server(config: ServerConfig) -> crate::Result<()> {
     // Create TCP listener
     let listener = tokio::net::TcpListener::bind(addr)
         .await
-        .map_err(|e| crate::Error::Other(anyhow::anyhow!("Failed to bind to address: {}", e)))?;
+        .map_err(|e| crate::Error::Other(anyhow::anyhow!("Failed to bind to address: {e}")))?;
 
     // Run server with graceful shutdown
     axum::serve(listener, app)
         .with_graceful_shutdown(shutdown_signal())
         .await
-        .map_err(|e| crate::Error::Other(anyhow::anyhow!("Server error: {}", e)))?;
+        .map_err(|e| crate::Error::Other(anyhow::anyhow!("Server error: {e}")))?;
 
     info!("Server shutdown complete");
     Ok(())
