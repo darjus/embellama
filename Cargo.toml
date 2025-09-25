@@ -11,7 +11,8 @@ categories = ["science", "api-bindings", "text-processing"]
 license = "Apache-2.0"
 
 [dependencies]
-llama-cpp-2 = { version = "=0.1.122" }
+llama-cpp-2 = { version = "=0.1.121" }
+llama-cpp-sys-2 = { version = "=0.1.121" }
 gguf = "0.1"
 thiserror = "1.0"
 anyhow = "1.0"

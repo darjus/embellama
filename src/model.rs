@@ -177,8 +177,8 @@ impl EmbeddingModel {
         // Enable embeddings mode
         ctx_params = ctx_params.with_embeddings(true);
 
-        // Enable flash attention -1 == Auto
-        ctx_params = ctx_params.with_flash_attention_policy(-1);
+        // Flash attention policy true
+        ctx_params = ctx_params.with_flash_attention(true);
 
         // Get embedding dimensions from the model
         #[allow(clippy::cast_sign_loss)]
@@ -363,6 +363,7 @@ impl EmbeddingModel {
         // Check for known encoder model patterns
         let encoder_patterns = [
             "bert",         // BERT and variants (RoBERTa, DistilBERT, etc.)
+            "jina",         // Jina embeddings (BERT-based)
             "e5",           // E5 embeddings
             "bge",          // BGE embeddings
             "gte",          // GTE embeddings
@@ -1202,6 +1203,14 @@ mod tests {
             ("contriever-msmarco", "facebook/contriever-msmarco.gguf"),
             ("simcse-bert", "princeton-nlp/unsup-simcse-bert-base.gguf"),
             ("instructor-base", "hkunlp/instructor-base.gguf"),
+            (
+                "jina-embeddings-v2-base-code",
+                "jinaai/jina-embeddings-v2-base-code.gguf",
+            ),
+            (
+                "jina-embeddings-v2-base-en",
+                "jinaai/jina-embeddings-v2-base-en.gguf",
+            ),
         ];
 
         for (model_name, model_path) in encoder_cases {
