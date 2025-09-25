@@ -5,6 +5,18 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.4.0] - 2025-09-25
+
+### Bug Fixes
+
+- The Llama.cpp API for setting flash attention in 122, set to auto policy == -1 ([1371064](https://github.com/darjus/embellama/commit/1371064cade571cecb94ce10a440a597bdfe6b0c))
+
+### Features
+
+- Add just release command for automated releases ([a03fc91](https://github.com/darjus/embellama/commit/a03fc91ddabc85559edb82a28bd7416e188c30dc))
+- Complete Phase 5 - Advanced KV Cache Optimization ([44e6b5b](https://github.com/darjus/embellama/commit/44e6b5bd79ab22bfb411d4c9842a8acd038d423b))
+- Add context size to model API response and fix test compilation ([3990916](https://github.com/darjus/embellama/commit/39909165618532eef1b755a0f0b021a7662ab9b9))
+
 ## [0.3.0] - 2025-09-16
 
 ### Bug Fixes

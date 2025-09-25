@@ -74,7 +74,7 @@ Add this to your `Cargo.toml`:
 
 ```toml
 [dependencies]
-embellama = "0.1.0"
+embellama = "0.4.0"
 ```
 
 ### Backend Features
@@ -83,22 +83,22 @@ The library supports multiple backends for hardware acceleration. By default, it
 
 ```toml
 # Default - OpenMP CPU parallelization
-embellama = "0.1.0"
+embellama = "0.4.0"
 
 # macOS Metal GPU acceleration
-embellama = { version = "0.1.0", features = ["metal"] }
+embellama = { version = "0.4.0", features = ["metal"] }
 
 # NVIDIA CUDA GPU acceleration
-embellama = { version = "0.1.0", features = ["cuda"] }
+embellama = { version = "0.4.0", features = ["cuda"] }
 
 # Vulkan GPU acceleration (cross-platform)
-embellama = { version = "0.1.0", features = ["vulkan"] }
+embellama = { version = "0.4.0", features = ["vulkan"] }
 
 # Native CPU optimizations
-embellama = { version = "0.1.0", features = ["native"] }
+embellama = { version = "0.4.0", features = ["native"] }
 
 # CPU-optimized build (native + OpenMP)
-embellama = { version = "0.1.0", features = ["cpu-optimized"] }
+embellama = { version = "0.4.0", features = ["cpu-optimized"] }
 ```
 
 **Note**: GPU backends (Metal, CUDA, Vulkan) are mutually exclusive. Use only one at a time for best results.
