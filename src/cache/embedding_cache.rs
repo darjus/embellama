@@ -144,7 +144,7 @@ impl CacheStore<String, Vec<f32>> for EmbeddingCache {
         }
 
         self.metrics.add_memory(memory_bytes as u64);
-        debug!("Inserted into the cache: {key}")
+        debug!("Inserted into the cache: {key}");
     }
 
     fn clear(&self) {

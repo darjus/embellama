@@ -475,7 +475,7 @@ pub async fn run_server(config: ServerConfig) -> crate::Result<()> {
     // Create socket address
     let addr: SocketAddr = format!("{}:{}", config.host, config.port)
         .parse()
-        .map_err(|e| crate::Error::Other(anyhow::anyhow!("Invalid address: {}", e)))?;
+        .map_err(|e| crate::Error::Other(anyhow::anyhow!("Invalid address: {e}")))?;
 
     info!("Server listening on http://{}", addr);
 

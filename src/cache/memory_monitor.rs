@@ -20,6 +20,7 @@
 use crate::cache::{CacheStore, embedding_cache::EmbeddingCache, token_cache::TokenCache};
 use serde::{Deserialize, Serialize};
 use std::sync::Arc;
+#[cfg(feature = "server")]
 use std::time::Duration;
 use sysinfo::System;
 use tracing::{debug, info, warn};
@@ -68,12 +69,14 @@ impl MemoryMonitor {
     }
 
     /// Set the embedding cache to monitor
+    #[must_use]
     pub fn with_embedding_cache(mut self, cache: Arc<EmbeddingCache>) -> Self {
         self.embedding_cache = Some(cache);
         self
     }
 
     /// Set the token cache to monitor
+    #[must_use]
     pub fn with_token_cache(mut self, cache: Arc<TokenCache>) -> Self {
         self.token_cache = Some(cache);
         self
@@ -93,6 +96,7 @@ impl MemoryMonitor {
         let total_bytes = self.system.total_memory();
         let available_bytes = self.system.available_memory();
         let used_bytes = total_bytes.saturating_sub(available_bytes);
+        #[allow(clippy::cast_precision_loss)]
         let usage_percentage = if total_bytes > 0 {
             (used_bytes as f32 / total_bytes as f32) * 100.0
         } else {
@@ -111,6 +115,11 @@ impl MemoryMonitor {
     pub fn evict_entries(&self) {
         let evict_count_embedding = if let Some(cache) = &self.embedding_cache {
             let stats = cache.stats();
+            #[allow(
+                clippy::cast_precision_loss,
+                clippy::cast_possible_truncation,
+                clippy::cast_sign_loss
+            )]
             let to_evict = (stats.entry_count as f32 * self.config.eviction_percentage) as usize;
 
             if to_evict > 0 {
@@ -128,6 +137,11 @@ impl MemoryMonitor {
 
         let evict_count_token = if let Some(cache) = &self.token_cache {
             let stats = cache.stats();
+            #[allow(
+                clippy::cast_precision_loss,
+                clippy::cast_possible_truncation,
+                clippy::cast_sign_loss
+            )]
             let to_evict = (stats.entry_count as f32 * self.config.eviction_percentage) as usize;
 
             if to_evict > 0 {
@@ -152,6 +166,7 @@ impl MemoryMonitor {
     }
 
     /// Start the monitoring loop (spawns a tokio task)
+    #[cfg(feature = "server")]
     pub fn start_monitoring(mut self) -> tokio::task::JoinHandle<()> {
         tokio::spawn(async move {
             if !self.config.enabled {

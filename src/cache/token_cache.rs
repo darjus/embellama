@@ -41,6 +41,7 @@ pub struct TokenCache {
     /// Maximum size for shared cache
     max_size: usize,
     /// TTL for cache entries (optional)
+    #[allow(dead_code)]
     ttl_seconds: Option<u64>,
 }
 
@@ -69,7 +70,7 @@ impl TokenCache {
         let mut hasher = Sha256::new();
         hasher.update(text.as_bytes());
         hasher.update(model_name.as_bytes());
-        hasher.update(&[add_bos as u8]);
+        hasher.update([u8::from(add_bos)]);
         format!("{:x}", hasher.finalize())
     }
 
@@ -306,13 +307,16 @@ mod tests {
         assert_eq!(cache.len(), 0);
         assert!(cache.is_empty());
 
+        // Metrics should be reset after clear
+        assert_eq!(cache.metrics.hits.load(Ordering::Relaxed), 0);
+        assert_eq!(cache.metrics.misses.load(Ordering::Relaxed), 0);
+
         // Should be a miss now
         let result = cache.get(&key);
         assert!(result.is_none());
 
-        // Metrics should be reset
-        assert_eq!(cache.metrics.hits.load(Ordering::Relaxed), 0);
-        assert_eq!(cache.metrics.misses.load(Ordering::Relaxed), 0);
+        // After the get, we should have 1 miss
+        assert_eq!(cache.metrics.misses.load(Ordering::Relaxed), 1);
     }
 
     #[test]

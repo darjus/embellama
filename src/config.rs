@@ -19,6 +19,7 @@ use std::path::{Path, PathBuf};
 
 /// Configuration for a single model
 #[derive(Debug, Clone, Serialize, Deserialize)]
+#[allow(clippy::struct_excessive_bools)]
 pub struct ModelConfig {
     /// Path to the GGUF model file
     pub model_path: PathBuf,
@@ -61,7 +62,7 @@ pub struct ModelConfig {
     /// Default: 1, max: 64 (llama.cpp limit)
     pub n_seq_max: Option<u32>,
 
-    /// Context size override (defaults to n_ctx if not specified)
+    /// Context size override (defaults to `n_ctx` if not specified)
     /// This controls the KV cache/attention cache size for better performance
     /// Note: Previously named `kv_cache_size` - that field is now deprecated
     pub context_size: Option<u32>,
@@ -286,9 +287,8 @@ impl ModelConfigBuilder {
         self
     }
 
-    /// Set the KV cache size
-    #[must_use]
     /// Set the context size (KV cache size)
+    #[must_use]
     pub fn with_context_size(mut self, context_size: u32) -> Self {
         self.config.context_size = Some(context_size);
         #[allow(deprecated)]
@@ -300,6 +300,7 @@ impl ModelConfigBuilder {
 
     /// Deprecated: Use `with_context_size` instead
     #[deprecated(since = "0.3.1", note = "Use `with_context_size` instead")]
+    #[must_use]
     pub fn with_kv_cache_size(mut self, kv_cache_size: u32) -> Self {
         self.config.context_size = Some(kv_cache_size);
         #[allow(deprecated)]
@@ -474,6 +475,13 @@ impl CacheConfig {
     }
 
     /// Validate the cache configuration
+    ///
+    /// # Errors
+    ///
+    /// Returns an error if the configuration is invalid:
+    /// - Token cache size is 0
+    /// - Embedding cache size is 0
+    /// - TTL is 0
     pub fn validate(&self) -> Result<()> {
         if self.token_cache_size == 0 {
             return Err(Error::config("Token cache size must be greater than 0"));
@@ -529,72 +537,87 @@ impl CacheConfigBuilder {
     }
 
     /// Set whether caching is enabled
+    #[must_use]
     pub fn with_enabled(mut self, enabled: bool) -> Self {
         self.config.enabled = enabled;
         self
     }
 
     /// Set token cache size
+    #[must_use]
     pub fn with_token_cache_size(mut self, size: usize) -> Self {
         self.config.token_cache_size = size;
         self
     }
 
     /// Set embedding cache size
+    #[must_use]
     pub fn with_embedding_cache_size(mut self, size: usize) -> Self {
         self.config.embedding_cache_size = size;
         self
     }
 
     /// Set maximum memory usage in MB
+    #[must_use]
     pub fn with_max_memory_mb(mut self, mb: usize) -> Self {
         self.config.max_memory_mb = mb;
         self
     }
 
     /// Set TTL in seconds
+    #[must_use]
     pub fn with_ttl_seconds(mut self, seconds: u64) -> Self {
         self.config.ttl_seconds = seconds;
         self
     }
 
     /// Set metrics collection enabled
+    #[must_use]
     pub fn with_enable_metrics(mut self, enabled: bool) -> Self {
         self.config.enable_metrics = enabled;
         self
     }
 
     /// Enable prefix caching
+    #[must_use]
     pub fn with_prefix_cache_enabled(mut self, enabled: bool) -> Self {
         self.config.prefix_cache_enabled = enabled;
         self
     }
 
     /// Set prefix cache size
+    #[must_use]
     pub fn with_prefix_cache_size(mut self, size: usize) -> Self {
         self.config.prefix_cache_size = size;
         self
     }
 
     /// Set minimum prefix length
+    #[must_use]
     pub fn with_min_prefix_length(mut self, length: usize) -> Self {
         self.config.min_prefix_length = length;
         self
     }
 
     /// Set prefix frequency threshold
+    #[must_use]
     pub fn with_prefix_frequency_threshold(mut self, threshold: usize) -> Self {
         self.config.prefix_frequency_threshold = threshold;
         self
     }
 
     /// Set prefix TTL in seconds
+    #[must_use]
     pub fn with_prefix_ttl_seconds(mut self, seconds: u64) -> Self {
         self.config.prefix_ttl_seconds = seconds;
         self
     }
 
     /// Build the configuration
+    ///
+    /// # Errors
+    ///
+    /// Returns an error if the configuration validation fails
     pub fn build(self) -> Result<CacheConfig> {
         self.config.validate()?;
         Ok(self.config)

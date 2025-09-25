@@ -166,15 +166,30 @@ pub async fn embeddings_handler(
 /// Handler for GET /v1/models
 ///
 /// Lists all available models in OpenAI-compatible format.
+///
+/// # Panics
+///
+/// Panics if the engine mutex is poisoned
 #[allow(clippy::unused_async)] // Required by axum even though we don't await
 pub async fn list_models_handler(State(state): State<AppState>) -> Response {
     debug!("Listing available models");
 
-    // Get model list from engine configuration
-    // For now, we'll return the configured model from server config
-    // > TODO: Get actual model list from engine.model_configs once accessible
+    // Get model list with details from engine
+    let engine = state.engine.lock().unwrap();
+    let model_details = engine.get_model_details();
 
-    let models = vec![ModelData::new(state.model_name().to_string())];
+    // Convert to ModelData with context size information
+    let models: Vec<ModelData> = model_details
+        .into_iter()
+        .map(|(name, context_size)| ModelData::new_with_context(name, context_size))
+        .collect();
+
+    // If no models are loaded, return at least the default configured model
+    let models = if models.is_empty() {
+        vec![ModelData::new(state.model_name().to_string())]
+    } else {
+        models
+    };
 
     let response = ListModelsResponse {
         object: "list".to_string(),

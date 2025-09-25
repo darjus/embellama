@@ -30,11 +30,15 @@ use tracing::{debug, error, info};
 /// Handler for GET /cache/stats
 ///
 /// Returns cache statistics and system memory information
+///
+/// # Panics
+///
+/// Panics if the engine mutex is poisoned
 pub async fn cache_stats_handler(State(state): State<AppState>) -> impl IntoResponse {
     debug!("Processing cache stats request");
 
     // Get cache stats from the engine
-    let stats = {
+    let cache_stats = {
         let engine = state.engine.lock().unwrap();
         engine.get_cache_stats()
     };
@@ -43,8 +47,8 @@ pub async fn cache_stats_handler(State(state): State<AppState>) -> impl IntoResp
     let memory = get_memory_info();
 
     let response = CacheStatsResponse {
-        enabled: stats.is_some(),
-        stats,
+        enabled: cache_stats.is_some(),
+        stats: cache_stats,
         memory,
     };
 
@@ -55,15 +59,19 @@ pub async fn cache_stats_handler(State(state): State<AppState>) -> impl IntoResp
 /// Handler for POST /cache/clear
 ///
 /// Clears all caches and returns previous statistics
+///
+/// # Panics
+///
+/// Panics if the engine mutex is poisoned
 pub async fn cache_clear_handler(State(state): State<AppState>) -> impl IntoResponse {
     debug!("Processing cache clear request");
 
     // Get current stats before clearing
     let previous_stats = {
         let engine = state.engine.lock().unwrap();
-        let stats = engine.get_cache_stats();
+        let cache_stats = engine.get_cache_stats();
         engine.clear_cache();
-        stats
+        cache_stats
     };
 
     let response = CacheClearResponse {
@@ -78,6 +86,10 @@ pub async fn cache_clear_handler(State(state): State<AppState>) -> impl IntoResp
 /// Handler for POST /cache/warm
 ///
 /// Pre-computes embeddings for the provided texts to warm the cache
+///
+/// # Panics
+///
+/// May panic if the engine mutex is poisoned
 pub async fn cache_warm_handler(
     State(state): State<AppState>,
     Json(request): Json<CacheWarmRequest>,
@@ -117,12 +129,16 @@ pub async fn cache_warm_handler(
     // Warm the cache
     let result = {
         let engine = state.engine.lock().unwrap();
-        let texts: Vec<&str> = request.texts.iter().map(|s| s.as_str()).collect();
+        let texts: Vec<&str> = request
+            .texts
+            .iter()
+            .map(std::string::String::as_str)
+            .collect();
         engine.warm_cache(request.model.as_deref(), &texts)
     };
 
     match result {
-        Ok(_) => {
+        Ok(()) => {
             // Get stats after warming
             let final_stats = {
                 let engine = state.engine.lock().unwrap();
@@ -134,7 +150,9 @@ pub async fn cache_warm_handler(
             {
                 // If the cache entry count didn't increase by the full amount,
                 // some were already cached
-                let new_entries = final_.entry_count.saturating_sub(initial.entry_count) as usize;
+                let new_entries =
+                    usize::try_from(final_.entry_count.saturating_sub(initial.entry_count))
+                        .unwrap_or(0);
                 request.texts.len().saturating_sub(new_entries)
             } else {
                 0
@@ -158,8 +176,7 @@ pub async fn cache_warm_handler(
             (
                 StatusCode::INTERNAL_SERVER_ERROR,
                 Json(ErrorResponse::internal_error(format!(
-                    "Failed to warm cache: {}",
-                    e
+                    "Failed to warm cache: {e}"
                 ))),
             )
                 .into_response()
@@ -177,6 +194,7 @@ fn get_memory_info() -> MemoryInfo {
     let total_bytes = system.total_memory();
     let available_bytes = system.available_memory();
     let used_bytes = total_bytes.saturating_sub(available_bytes);
+    #[allow(clippy::cast_precision_loss)]
     let usage_percentage = if total_bytes > 0 {
         (used_bytes as f32 / total_bytes as f32) * 100.0
     } else {
@@ -195,6 +213,11 @@ fn get_memory_info() -> MemoryInfo {
 /// Handler for POST /v1/embeddings/prefix
 ///
 /// Registers a new prefix for KV cache optimization
+///
+/// # Panics
+///
+/// This function may panic if:
+/// - The engine mutex is poisoned
 pub async fn prefix_register_handler(
     State(state): State<AppState>,
     Json(request): Json<PrefixRegisterRequest>,
@@ -227,7 +250,7 @@ pub async fn prefix_register_handler(
     };
 
     match result {
-        Ok(_) => {
+        Ok(()) => {
             // Estimate memory usage (rough approximation)
             let token_count = request.prefix.len() / 4; // Rough estimate
             let memory_usage = (token_count * 1024) as u64; // ~1KB per token estimate
@@ -246,8 +269,7 @@ pub async fn prefix_register_handler(
             (
                 StatusCode::INTERNAL_SERVER_ERROR,
                 Json(ErrorResponse::internal_error(format!(
-                    "Failed to register prefix: {}",
-                    e
+                    "Failed to register prefix: {e}"
                 ))),
             )
                 .into_response()
@@ -258,6 +280,10 @@ pub async fn prefix_register_handler(
 /// Handler for GET /v1/embeddings/prefix
 ///
 /// Lists all cached prefixes
+///
+/// # Panics
+///
+/// Panics if the engine mutex is poisoned
 pub async fn prefix_list_handler(State(state): State<AppState>) -> impl IntoResponse {
     debug!("Processing prefix list request");
 
@@ -295,6 +321,10 @@ pub async fn prefix_list_handler(State(state): State<AppState>) -> impl IntoResp
 /// Handler for DELETE /v1/embeddings/prefix
 ///
 /// Clears all cached prefixes
+///
+/// # Panics
+///
+/// Panics if the engine mutex is poisoned
 pub async fn prefix_clear_handler(State(state): State<AppState>) -> impl IntoResponse {
     debug!("Processing prefix clear request");
 
@@ -315,6 +345,10 @@ pub async fn prefix_clear_handler(State(state): State<AppState>) -> impl IntoRes
 /// Handler for GET /v1/embeddings/prefix/stats
 ///
 /// Returns prefix cache statistics
+///
+/// # Panics
+///
+/// Panics if the engine mutex is poisoned
 pub async fn prefix_stats_handler(State(state): State<AppState>) -> impl IntoResponse {
     debug!("Processing prefix stats request");
 
@@ -322,6 +356,7 @@ pub async fn prefix_stats_handler(State(state): State<AppState>) -> impl IntoRes
     let is_enabled = engine.is_prefix_cache_enabled();
 
     if let Some(stats) = engine.get_prefix_cache_stats() {
+        #[allow(clippy::cast_precision_loss)]
         let hit_rate = if stats.total_hits + stats.total_misses > 0 {
             stats.total_hits as f64 / (stats.total_hits + stats.total_misses) as f64
         } else {

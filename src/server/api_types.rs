@@ -242,6 +242,9 @@ pub struct ModelData {
     pub created: i64,
     /// Owner of the model
     pub owned_by: String,
+    /// Context size (max tokens) supported by the model
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub context_size: Option<u32>,
 }
 
 impl ModelData {
@@ -252,6 +255,18 @@ impl ModelData {
             object: "model".to_string(),
             created: 1_700_000_000, // Fixed timestamp for consistency
             owned_by: "embellama".to_string(),
+            context_size: None,
+        }
+    }
+
+    /// Create new model data with context size
+    pub fn new_with_context(id: String, context_size: Option<u32>) -> Self {
+        Self {
+            id,
+            object: "model".to_string(),
+            created: 1_700_000_000, // Fixed timestamp for consistency
+            owned_by: "embellama".to_string(),
+            context_size,
         }
     }
 }
@@ -260,7 +275,7 @@ impl ModelData {
 use base64::{Engine as _, engine::general_purpose::STANDARD};
 
 /// Request to warm the cache with specific texts
-#[derive(Debug, Clone, Deserialize)]
+#[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct CacheWarmRequest {
     /// Texts to pre-compute embeddings for
     pub texts: Vec<String>,
@@ -280,7 +295,7 @@ pub struct CacheWarmResponse {
 }
 
 /// Cache statistics response
-#[derive(Debug, Clone, Serialize)]
+#[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct CacheStatsResponse {
     /// Cache enabled status
     pub enabled: bool,
@@ -291,7 +306,7 @@ pub struct CacheStatsResponse {
 }
 
 /// System memory information
-#[derive(Debug, Clone, Serialize)]
+#[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct MemoryInfo {
     /// Total system memory in bytes
     pub total_bytes: u64,
@@ -302,7 +317,7 @@ pub struct MemoryInfo {
 }
 
 /// Cache clear response
-#[derive(Debug, Clone, Serialize)]
+#[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct CacheClearResponse {
     /// Status message
     pub status: String,

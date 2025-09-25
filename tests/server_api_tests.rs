@@ -70,6 +70,11 @@ async fn test_models_endpoint() {
     assert_eq!(first_model["object"], "model");
     assert_eq!(first_model["id"], "test-model");
     assert_eq!(first_model["owned_by"], "embellama");
+    // Verify context_size field is present (can be null or a number)
+    assert!(
+        first_model.get("context_size").is_some(),
+        "context_size field should be present"
+    );
 }
 
 #[tokio::test]

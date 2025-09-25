@@ -14,7 +14,9 @@
 
 //! Integration tests for cache management features
 
-use embellama::cache::{CacheStats, embedding_cache::EmbeddingCache, token_cache::TokenCache};
+use embellama::cache::{
+    CacheStats, CacheStore, embedding_cache::EmbeddingCache, token_cache::TokenCache,
+};
 use embellama::{CacheConfig, EmbeddingEngine, EngineConfig, PoolingStrategy};
 use serial_test::serial;
 use std::sync::Arc;
@@ -32,7 +34,10 @@ fn test_cache_eviction() {
         ..Default::default()
     };
 
-    let cache = Arc::new(EmbeddingCache::new(&config));
+    let cache = Arc::new(EmbeddingCache::new(
+        config.embedding_cache_size as u64,
+        config.ttl_seconds,
+    ));
 
     // Fill the cache
     for i in 0..10 {
@@ -56,13 +61,16 @@ fn test_cache_eviction() {
 #[test]
 #[serial]
 fn test_token_cache_eviction() {
+    use llama_cpp_2::token::LlamaToken;
+
     let cache = Arc::new(TokenCache::new(10));
 
     // Fill the cache
     for i in 0..10 {
         let key = format!("token_key_{}", i);
-        let tokens = vec![i; 5];
-        cache.insert(key, tokens.clone(), None);
+        // Create LlamaToken instances (they're just i32 wrappers)
+        let tokens: Vec<LlamaToken> = (0..5).map(|j| LlamaToken::new(i + j)).collect();
+        cache.insert(key, tokens);
     }
 
     let stats = cache.stats();
@@ -120,6 +128,7 @@ fn test_cache_warmup() {
         .expect("Failed to create engine config");
 
     let engine = EmbeddingEngine::get_or_init(config).expect("Failed to create engine");
+    let engine = engine.lock().unwrap();
 
     // Warm the cache with some texts
     let texts = vec!["test text 1", "test text 2", "test text 3"];
@@ -150,7 +159,10 @@ fn test_cache_stats_aggregation() {
         ..Default::default()
     };
 
-    let cache = Arc::new(EmbeddingCache::new(&config));
+    let cache = Arc::new(EmbeddingCache::new(
+        config.embedding_cache_size as u64,
+        config.ttl_seconds,
+    ));
 
     // Insert some entries
     for i in 0..5 {
@@ -199,7 +211,7 @@ mod server_tests {
         let state = AppState::new(config).expect("Failed to create app state");
         let app = create_router(state);
 
-        TestServer::new(app).expect("Failed to create test server")
+        TestServer::new(app.into_make_service()).expect("Failed to create test server")
     }
 
     #[tokio::test]

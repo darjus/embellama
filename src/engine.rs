@@ -49,7 +49,7 @@ thread_local! {
 
 // Thread-local reference to the token cache for fast access
 thread_local! {
-    static THREAD_TOKEN_CACHE: RefCell<Option<Arc<TokenCache>>> = RefCell::new(None);
+    static THREAD_TOKEN_CACHE: RefCell<Option<Arc<TokenCache>>> = const { RefCell::new(None) };
 }
 
 /// The main entry point for the embellama library.
@@ -304,7 +304,7 @@ impl EmbeddingEngine {
                             None, // No persistent storage for now
                         )
                         .map_err(|e| Error::ConfigurationError {
-                            message: format!("Failed to create prefix cache: {}", e),
+                            message: format!("Failed to create prefix cache: {e}"),
                         })?,
                     ))
                 } else {
@@ -567,6 +567,11 @@ impl EmbeddingEngine {
     /// This function will return an error if:
     /// - The model is not found
     /// - Embedding generation fails
+    ///
+    /// # Panics
+    ///
+    /// This function may panic if:
+    /// - The model configuration is not found after validation (internal inconsistency)
     #[instrument(skip(self, text), fields(text_len = text.len()))]
     pub fn embed(&self, model_name: Option<&str>, text: &str) -> Result<Vec<f32>> {
         // Determine which model to use
@@ -696,6 +701,11 @@ impl EmbeddingEngine {
     /// This function will return an error if:
     /// - The model is not found
     /// - Any embedding generation fails
+    ///
+    /// # Panics
+    ///
+    /// This function may panic if:
+    /// - A cached result is unexpectedly None after successful cache population
     #[instrument(skip(self, texts), fields(batch_size = texts.len()))]
     pub fn embed_batch(&self, model_name: Option<&str>, texts: &[&str]) -> Result<Vec<Vec<f32>>> {
         // Determine which model to use
@@ -818,6 +828,25 @@ impl EmbeddingEngine {
         configs.keys().cloned().collect()
     }
 
+    /// Get model configurations with their metadata.
+    ///
+    /// Returns a vector of tuples containing (`model_name`, `context_size`).
+    pub fn get_model_details(&self) -> Vec<(String, Option<u32>)> {
+        let configs = self.model_configs.read();
+        configs
+            .iter()
+            .map(|(name, config)| {
+                // Get context_size from either the EngineConfig's context_size field
+                // or n_ctx from the converted ModelConfig
+                let context_size = config
+                    .context_size
+                    .and_then(|s| u32::try_from(s).ok())
+                    .or_else(|| config.to_model_config().n_ctx);
+                (name.clone(), context_size)
+            })
+            .collect()
+    }
+
     /// Gets cache statistics if caching is enabled.
     ///
     /// # Returns
@@ -855,6 +884,10 @@ impl EmbeddingEngine {
     /// # Returns
     ///
     /// Returns Ok(()) if successful, or an error if pre-computation fails.
+    ///
+    /// # Errors
+    ///
+    /// Returns an error if embedding generation fails for any text.
     pub fn warm_cache(&self, model_name: Option<&str>, texts: &[&str]) -> Result<()> {
         if self.embedding_cache.is_none() {
             return Ok(()); // No-op if cache is disabled
@@ -1040,6 +1073,13 @@ impl EmbeddingEngine {
     ///
     /// Returns Ok(()) if successful, or an error if registration fails.
     ///
+    /// # Errors
+    ///
+    /// Returns an error if:
+    /// - No model is specified and no default model is set
+    /// - The model is not found
+    /// - Embedding generation for the prefix fails
+    ///
     /// # Performance Notes
     ///
     /// - Only beneficial for prefixes >100 tokens due to session loading overhead
@@ -1121,7 +1161,7 @@ impl EmbeddingEngine {
     ///
     /// Returns a vector of prefix information if cache is enabled, empty vector otherwise.
     pub fn list_cached_prefixes(&self) -> Vec<String> {
-        if let Some(cache) = &self.prefix_cache {
+        if let Some(_cache) = &self.prefix_cache {
             // > TODO: Implement a method in PrefixCache to list cached prefixes
             // For now, return empty vector
             vec![]

@@ -12,12 +12,15 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
+/// Embedding cache module
 pub mod embedding_cache;
 pub mod memory_monitor;
+/// Metrics module
 pub mod metrics;
 pub mod prefix_cache;
 #[cfg(feature = "redis-cache")]
 pub mod redis_backend;
+/// Token cache module
 pub mod token_cache;
 
 use serde::{Deserialize, Serialize};

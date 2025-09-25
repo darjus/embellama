@@ -953,9 +953,15 @@ impl EmbeddingModel {
     ///
     /// > NOTE: This is for advanced prefix caching optimization
     /// > PERFORMANCE ISSUE: Only beneficial for prefixes > 100 tokens
+    ///
+    /// # Errors
+    ///
+    /// Returns an error if:
+    /// - The context is empty (no state to save)
+    /// - State copy operation fails
     pub fn save_session_state(&self) -> Result<Vec<u8>> {
         // Get the state size first
-        let state_size = unsafe { self.cell.borrow_dependent().get_state_size() };
+        let state_size = self.cell.borrow_dependent().get_state_size();
 
         if state_size == 0 {
             return Err(Error::InvalidOperation {
@@ -975,10 +981,7 @@ impl EmbeddingModel {
 
         if copied_size != state_size {
             return Err(Error::InvalidOperation {
-                message: format!(
-                    "State size mismatch: expected {}, got {}",
-                    state_size, copied_size
-                ),
+                message: format!("State size mismatch: expected {state_size}, got {copied_size}"),
             });
         }
 
@@ -990,6 +993,12 @@ impl EmbeddingModel {
     ///
     /// > NOTE: Session must be from the same model version
     /// > BUG: Session format may change between llama.cpp versions
+    ///
+    /// # Errors
+    ///
+    /// Returns an error if:
+    /// - State data is empty
+    /// - State size check fails
     pub fn load_session_state(&mut self, state_data: &[u8]) -> Result<()> {
         if state_data.is_empty() {
             return Err(Error::InvalidInput {
@@ -998,12 +1007,12 @@ impl EmbeddingModel {
         }
 
         // Set the state data
-        let mut loaded_size = AtomicUsize::new(0);
+        let loaded_size = AtomicUsize::new(0);
         self.cell.with_dependent_mut(|_, context| {
             loaded_size.store(
-                unsafe { context.set_state_data(state_data.clone()) },
+                unsafe { context.set_state_data(state_data) },
                 Ordering::Relaxed,
-            )
+            );
         });
         let loaded_size = loaded_size.load(Ordering::Relaxed);
 
@@ -1036,6 +1045,10 @@ impl EmbeddingModel {
     /// # Returns
     ///
     /// Returns the embedding vector and optionally the number of prefix tokens used
+    ///
+    /// # Errors
+    ///
+    /// Returns an error if embedding generation fails
     pub fn generate_embedding_with_prefix(
         &mut self,
         text: &str,
@@ -1107,7 +1120,6 @@ impl EmbeddingModel {
 
     /// Extract embeddings from the current context state
     fn extract_embeddings(&self, tokens: &[LlamaToken]) -> Result<Vec<Vec<f32>>> {
-        let _n_embd = self.embedding_dimensions;
         let mut embeddings = Vec::with_capacity(tokens.len());
 
         // Extract embeddings using the context's embeddings API
