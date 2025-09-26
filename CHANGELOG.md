@@ -5,6 +5,12 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.4.1] - 2025-09-26
+
+### Bug Fixes
+
+- Pin llama-cpp-2 to 0.1.121 as 0.1.122 crashes. Add Jina support as a BERT model ([03db071](https://github.com/darjus/embellama/commit/03db071bb1e2a65bd5f960c86fb7c0e1d8c5e95b))
+
 ## [0.4.0] - 2025-09-25
 
 ### Bug Fixes
