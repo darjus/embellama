@@ -193,13 +193,18 @@ impl TokenCache {
             // > NOTE: This is a simplified implementation. In production,
             // > you might want an LRU-based approach
 
-            let mut removed = 0;
-            for entry in self.shared.iter() {
-                if removed >= count {
-                    break;
-                }
-                self.shared.remove(entry.key());
-                removed += 1;
+            // Collect keys to remove (don't remove while iterating to avoid deadlock)
+            let keys_to_remove: Vec<_> = self
+                .shared
+                .iter()
+                .take(count)
+                .map(|entry| entry.key().clone())
+                .collect();
+
+            // Now remove the collected keys
+            let removed = keys_to_remove.len();
+            for key in keys_to_remove {
+                self.shared.remove(&key);
             }
 
             // Record evictions
