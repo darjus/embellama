@@ -332,9 +332,9 @@ impl EmbeddingModel {
             // > NOTE: These optimizations are enabled through llama-cpp parameters
         }
 
-        // Set micro-batch size (default to 512 if not specified)
+        // Set micro-batch size (default to context size if not specified)
         // This must be >= the number of tokens in any single input
-        let n_ubatch = config.n_ubatch.unwrap_or(512);
+        let n_ubatch = config.n_ubatch.unwrap_or(ctx_size);
         ctx_params = ctx_params.with_n_ubatch(n_ubatch);
 
         // Set thread counts
@@ -705,7 +705,7 @@ impl EmbeddingModel {
         if tokens.len() > self.max_context_size {
             return Err(Error::InvalidInput {
                 message: format!(
-                    "Text exceeds maximum token limit: {} > {}",
+                    "Input exceeds maximum context size: {} tokens > {} max. Please truncate your input.",
                     tokens.len(),
                     self.max_context_size
                 ),
@@ -811,7 +811,7 @@ impl EmbeddingModel {
         if total_tokens > self.max_context_size {
             return Err(Error::InvalidInput {
                 message: format!(
-                    "Total tokens {} exceeds maximum context size {}",
+                    "Batch total exceeds maximum context size: {} tokens > {} max. Please reduce batch size or truncate inputs.",
                     total_tokens, self.max_context_size
                 ),
             });
@@ -961,6 +961,17 @@ impl EmbeddingModel {
         if tokens.is_empty() {
             return Err(Error::InvalidInput {
                 message: "Cannot process empty token list".to_string(),
+            });
+        }
+
+        // Check if input exceeds context size
+        if tokens.len() > self.max_context_size {
+            return Err(Error::InvalidInput {
+                message: format!(
+                    "Input exceeds maximum context size: {} tokens > {} max. Please truncate your input.",
+                    tokens.len(),
+                    self.max_context_size
+                ),
             });
         }
 
