@@ -119,8 +119,8 @@ jobs:
       - name: Run security audit
         run: cargo audit
 
-  coverage:
-    name: Code Coverage
+  coverage-unit:
+    name: Code Coverage (Unit Tests)
     runs-on: ubuntu-latest
     steps:
       - name: Checkout repository
@@ -134,13 +134,8 @@ jobs:
       - name: Install tarpaulin
         run: cargo install cargo-tarpaulin
 
-      - name: Download test models
-        run: just download-test-model
-
-      - name: Generate coverage
-        run: |
-          export EMBELLAMA_TEST_MODEL=$(pwd)/models/test/all-minilm-l6-v2-q4_k_m.gguf
-          cargo tarpaulin --verbose --features openmp --workspace --timeout 500 --out xml
+      - name: Generate unit test coverage
+        run: cargo tarpaulin --lib --features openmp
 
       - name: Upload coverage to Codecov
         uses: codecov/codecov-action@v3
@@ -149,6 +144,27 @@ jobs:
           flags: unittests
           name: codecov-umbrella
           fail_ci_if_error: false
+
+  coverage-integration:
+    name: Integration Tests (Release Mode)
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Setup build environment
+        uses: ./.github/actions/setup-build
+        with:
+          cache-key-prefix: cargo-integration
+
+      - name: Download test models
+        run: just download-test-model
+
+      - name: Run integration tests in release mode
+        run: |
+          export EMBELLAMA_TEST_MODEL=$(pwd)/models/test/all-minilm-l6-v2-q4_k_m.gguf
+          cargo test --release --features openmp --tests --workspace
+        timeout-minutes: 20
 
   msrv:
     name: Minimum Supported Rust Version
