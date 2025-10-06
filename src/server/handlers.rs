@@ -17,6 +17,7 @@
 //! This module implements the handler functions for the embeddings
 //! and models endpoints.
 
+use crate::extract_gguf_metadata;
 use crate::server::api_types::{
     EmbeddingsRequest, EmbeddingsResponse, ErrorResponse, ListModelsResponse, ModelData,
 };
@@ -28,6 +29,7 @@ use axum::{
     http::StatusCode,
     response::{IntoResponse, Response},
 };
+use std::path::Path;
 use std::time::Duration;
 use tokio::sync::oneshot;
 use tokio::time::timeout;
@@ -186,7 +188,14 @@ pub async fn list_models_handler(State(state): State<AppState>) -> Response {
 
     // If no models are loaded, return at least the default configured model
     let models = if models.is_empty() {
-        vec![ModelData::new(state.model_name().to_string())]
+        // Extract context size for fallback model
+        let context_size = extract_gguf_metadata(Path::new(&state.config.model_path))
+            .ok()
+            .and_then(|(_, ctx)| u32::try_from(ctx).ok());
+        vec![ModelData::new_with_context(
+            state.model_name().to_string(),
+            context_size,
+        )]
     } else {
         models
     };

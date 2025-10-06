@@ -243,7 +243,6 @@ pub struct ModelData {
     /// Owner of the model
     pub owned_by: String,
     /// Context size (max tokens) supported by the model
-    #[serde(skip_serializing_if = "Option::is_none")]
     pub context_size: Option<u32>,
 }
 

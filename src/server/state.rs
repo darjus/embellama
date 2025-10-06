@@ -18,8 +18,10 @@
 //! The state must be Send + Sync + Clone for use with Axum.
 
 use crate::server::dispatcher::Dispatcher;
-use crate::{EmbeddingEngine, EngineConfig};
+use crate::{EmbeddingEngine, EngineConfig, extract_gguf_metadata};
+use std::path::Path;
 use std::sync::{Arc, Mutex};
+use tracing::{info, warn};
 
 /// Server configuration
 #[derive(Debug, Clone)]
@@ -201,14 +203,31 @@ impl AppState {
     /// - Engine configuration validation fails
     /// - Engine initialization fails
     pub fn new(config: ServerConfig) -> crate::Result<Self> {
+        // Extract context_size from GGUF metadata before engine initialization
+        let context_size = match extract_gguf_metadata(Path::new(&config.model_path)) {
+            Ok((_dimensions, ctx_size)) => {
+                info!("Auto-detected context size from GGUF: {}", ctx_size);
+                // Convert usize to u32, with fallback
+                u32::try_from(ctx_size).ok()
+            }
+            Err(e) => {
+                warn!("Could not extract GGUF metadata: {}", e);
+                None
+            }
+        };
+
         // Initialize the embedding engine singleton
-        let engine_config = EngineConfig::builder()
+        let mut engine_config_builder = EngineConfig::builder()
             .with_model_path(&config.model_path)
             .with_model_name(&config.model_name)
-            .with_normalize_embeddings(true)
-            .build()?;
+            .with_normalize_embeddings(true);
 
-        let engine = EmbeddingEngine::get_or_init(engine_config)?;
+        // Add context_size if we extracted it
+        if let Some(size) = context_size {
+            engine_config_builder = engine_config_builder.with_context_size(size as usize);
+        }
+
+        let engine = EmbeddingEngine::get_or_init(engine_config_builder.build()?)?;
 
         // Create the dispatcher with worker pool
         let dispatcher = Dispatcher::new(config.worker_count, config.queue_size);
