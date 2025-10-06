@@ -523,6 +523,11 @@ release VERSION:
     sed -i.bak 's/^version = ".*"/version = "{{VERSION}}"/' Cargo.toml
     rm Cargo.toml.bak
 
+    # Update version in README.md
+    sed -i.bak 's/embellama = "[0-9]\+\.[0-9]\+\.[0-9]\+"/embellama = "{{VERSION}}"/g' README.md
+    sed -i.bak 's/version = "[0-9]\+\.[0-9]\+\.[0-9]\+"/version = "{{VERSION}}"/g' README.md
+    rm README.md.bak
+
     # Update Cargo.lock
     cargo update -p embellama
 
@@ -532,7 +537,7 @@ release VERSION:
 
     # Commit release changes
     echo "💾 Committing release changes..."
-    git add Cargo.toml Cargo.lock CHANGELOG.md
+    git add Cargo.toml Cargo.lock CHANGELOG.md README.md
     git commit -m "chore(release): prepare for v{{VERSION}}"
 
     # Create git tag
