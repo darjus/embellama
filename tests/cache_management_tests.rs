@@ -91,7 +91,7 @@ fn test_memory_monitor() {
 
     let config = MemoryMonitorConfig {
         enabled: true,
-        threshold_mb: 1024 * 1024, // Set very high threshold so it doesn't trigger
+        threshold_mb: 1, // Set very low threshold so it doesn't trigger
         eviction_percentage: 0.2,
         check_interval_secs: 1,
     };
