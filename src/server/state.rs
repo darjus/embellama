@@ -38,6 +38,10 @@ pub struct ServerConfig {
     pub host: String,
     /// Server port
     pub port: u16,
+    /// Request timeout duration
+    pub request_timeout: std::time::Duration,
+    /// Maximum number of sequences to process in parallel (`n_seq_max`)
+    pub n_seq_max: u32,
 }
 
 impl Default for ServerConfig {
@@ -49,6 +53,8 @@ impl Default for ServerConfig {
             queue_size: 100,
             host: "127.0.0.1".to_string(),
             port: 8080,
+            request_timeout: std::time::Duration::from_secs(60),
+            n_seq_max: 8,
         }
     }
 }
@@ -69,6 +75,8 @@ pub struct ServerConfigBuilder {
     queue_size: Option<usize>,
     host: Option<String>,
     port: Option<u16>,
+    request_timeout: Option<std::time::Duration>,
+    n_seq_max: Option<u32>,
 }
 
 impl ServerConfigBuilder {
@@ -111,6 +119,20 @@ impl ServerConfigBuilder {
     #[must_use]
     pub fn port(mut self, port: u16) -> Self {
         self.port = Some(port);
+        self
+    }
+
+    /// Set the request timeout duration
+    #[must_use]
+    pub fn request_timeout(mut self, timeout: std::time::Duration) -> Self {
+        self.request_timeout = Some(timeout);
+        self
+    }
+
+    /// Set the maximum number of sequences to process in parallel (`n_seq_max`)
+    #[must_use]
+    pub fn n_seq_max(mut self, n_seq_max: u32) -> Self {
+        self.n_seq_max = Some(n_seq_max);
         self
     }
 
@@ -173,6 +195,8 @@ impl ServerConfigBuilder {
             queue_size,
             host: self.host.unwrap_or(default.host),
             port: self.port.unwrap_or(default.port),
+            request_timeout: self.request_timeout.unwrap_or(default.request_timeout),
+            n_seq_max: self.n_seq_max.unwrap_or(default.n_seq_max),
         })
     }
 }
@@ -220,7 +244,8 @@ impl AppState {
         let mut engine_config_builder = EngineConfig::builder()
             .with_model_path(&config.model_path)
             .with_model_name(&config.model_name)
-            .with_normalize_embeddings(true);
+            .with_normalize_embeddings(true)
+            .with_n_seq_max(config.n_seq_max);
 
         // Add context_size if we extracted it
         if let Some(size) = context_size {

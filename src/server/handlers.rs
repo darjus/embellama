@@ -30,14 +30,10 @@ use axum::{
     response::{IntoResponse, Response},
 };
 use std::path::Path;
-use std::time::Duration;
 use tokio::sync::oneshot;
 use tokio::time::timeout;
 use tracing::{debug, error, info, warn};
 use uuid::Uuid;
-
-/// Timeout for embedding generation requests
-const REQUEST_TIMEOUT: Duration = Duration::from_secs(30);
 
 /// Handler for POST /v1/embeddings
 ///
@@ -104,7 +100,7 @@ pub async fn embeddings_handler(
     }
 
     // Wait for response with timeout
-    match timeout(REQUEST_TIMEOUT, rx).await {
+    match timeout(state.config.request_timeout, rx).await {
         Ok(Ok(response)) => {
             // Check if embeddings are empty (indicates error in current implementation)
             if response.embeddings.is_empty() {
@@ -154,7 +150,7 @@ pub async fn embeddings_handler(
         Err(_) => {
             error!(
                 "Request {} timed out after {:?}",
-                request_id, REQUEST_TIMEOUT
+                request_id, state.config.request_timeout
             );
             (
                 StatusCode::REQUEST_TIMEOUT,

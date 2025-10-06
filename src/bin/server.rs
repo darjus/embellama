@@ -45,6 +45,14 @@ struct Args {
     #[arg(long, env = "EMBELLAMA_QUEUE_SIZE", default_value_t = 100)]
     queue_size: usize,
 
+    /// Request timeout in seconds
+    #[arg(long, env = "EMBELLAMA_REQUEST_TIMEOUT", default_value_t = 60)]
+    request_timeout: u64,
+
+    /// Maximum number of sequences to process in parallel (`n_seq_max`)
+    #[arg(long, env = "EMBELLAMA_N_SEQ_MAX", default_value_t = 8)]
+    n_seq_max: u32,
+
     /// Log level (trace, debug, info, warn, error)
     #[arg(long, env = "EMBELLAMA_LOG_LEVEL", default_value = "info")]
     log_level: String,
@@ -61,6 +69,10 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     info!("Starting Embellama server v{}", env!("CARGO_PKG_VERSION"));
     info!("Model: {:?} ({})", args.model_path, args.model_name);
     info!("Workers: {}, Queue size: {}", args.workers, args.queue_size);
+    info!(
+        "Request timeout: {}s, n_seq_max: {}",
+        args.request_timeout, args.n_seq_max
+    );
 
     // Create server configuration using the library API
     let config = ServerConfig::builder()
@@ -70,6 +82,8 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
         .queue_size(args.queue_size)
         .host(args.host)
         .port(args.port)
+        .request_timeout(std::time::Duration::from_secs(args.request_timeout))
+        .n_seq_max(args.n_seq_max)
         .build()?;
 
     // Use the library's run_server function
