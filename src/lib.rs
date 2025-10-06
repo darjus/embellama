@@ -94,7 +94,7 @@ pub use config::{
 };
 pub use engine::{EmbeddingEngine, ModelInfo};
 pub use error::{Error, Result};
-pub use model::EmbeddingModel;
+pub use model::{EmbeddingModel, extract_gguf_metadata};
 
 use llama_cpp_2::LogOptions;
 

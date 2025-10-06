@@ -139,6 +139,31 @@ pub fn assert_normalized(embedding: &[f32], tolerance: f32) {
     );
 }
 
+/// Generate text that tokenizes to approximately N tokens
+///
+/// Uses repetitive pattern to be predictable. This is useful for testing
+/// context size limits.
+///
+/// # Arguments
+///
+/// * `target_tokens` - Approximate number of tokens desired
+///
+/// # Returns
+///
+/// A string that should tokenize to roughly `target_tokens` tokens
+///
+/// # Note
+///
+/// This uses a rough estimate of ~1.3 characters per token for English text.
+/// Actual token count may vary depending on the tokenizer.
+#[must_use]
+pub fn generate_text_with_approx_tokens(target_tokens: usize) -> String {
+    // Rough estimate: ~1.3 chars per token for English
+    let chars_needed = target_tokens * 13 / 10;
+    "The quick brown fox jumps over the lazy dog. This is a test sentence for context size testing. "
+        .repeat(chars_needed / 95)
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -174,5 +199,14 @@ mod tests {
         let emb1 = vec![0.1, 0.2, 0.3];
         let emb2 = vec![0.1001, 0.2001, 0.3001];
         assert_embeddings_equal(&emb1, &emb2, 0.001);
+    }
+
+    #[test]
+    fn test_generate_text_with_approx_tokens() {
+        let text = generate_text_with_approx_tokens(1000);
+        // Should generate roughly 1000 tokens worth of text
+        // At ~1.3 chars per token, that's ~1300 chars
+        assert!(text.len() > 1000, "Text should be at least 1000 chars");
+        assert!(text.len() < 2000, "Text should be less than 2000 chars");
     }
 }

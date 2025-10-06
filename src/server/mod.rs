@@ -75,14 +75,13 @@ use axum::{
     response::{IntoResponse, Json},
     routing::get,
 };
-use gguf::{GGUFFile, GGUFMetadataValue};
 use serde_json::json;
 use std::net::SocketAddr;
 use std::path::PathBuf;
 use tokio::signal;
 use tower_http::cors::CorsLayer;
 use tower_http::trace::TraceLayer;
-use tracing::{debug, info, warn};
+use tracing::{info, warn};
 use uuid::Uuid;
 
 /// Model provider trait for custom model loading strategies
@@ -125,136 +124,6 @@ impl FileModelProvider {
             model_name: model_name.into(),
         }
     }
-
-    /// Extract model metadata from a GGUF file
-    ///
-    /// This function reads only the header and metadata from the GGUF file
-    /// without loading the entire model, making it efficient for listing models.
-    ///
-    /// # Returns
-    /// A tuple of (dimensions, `max_tokens`) extracted from the metadata
-    fn extract_gguf_metadata(path: &PathBuf) -> crate::Result<(usize, usize)> {
-        use std::fs::File;
-        use std::io::Read;
-
-        // Read only the beginning of the file (usually metadata is at the start)
-        let mut file = File::open(path).map_err(|e| crate::Error::ModelLoadError {
-            path: path.clone(),
-            source: anyhow::anyhow!("Failed to open GGUF file: {e}"),
-        })?;
-
-        // Read a reasonable amount for metadata (16MB should be more than enough)
-        let mut buffer = Vec::new();
-        let _ = file
-            .by_ref()
-            .take(16 * 1024 * 1024)
-            .read_to_end(&mut buffer)
-            .map_err(|e| crate::Error::ModelLoadError {
-                path: path.clone(),
-                source: anyhow::anyhow!("Failed to read GGUF file: {e}"),
-            })?;
-
-        // Parse GGUF file metadata
-        let gguf_file = match GGUFFile::read(&buffer) {
-            Ok(Some(file)) => file,
-            Ok(None) => {
-                return Err(crate::Error::ModelLoadError {
-                    path: path.clone(),
-                    source: anyhow::anyhow!("Incomplete GGUF file data"),
-                });
-            }
-            Err(e) => {
-                return Err(crate::Error::ModelLoadError {
-                    path: path.clone(),
-                    source: anyhow::anyhow!("Failed to parse GGUF file: {e}"),
-                });
-            }
-        };
-
-        let mut dimensions = 0usize;
-        let mut max_tokens = 512usize; // Default fallback
-
-        // Look for embedding dimensions and context length in metadata
-        debug!("GGUF metadata count: {}", gguf_file.header.metadata.len());
-
-        for metadata in &gguf_file.header.metadata {
-            // Log all keys for debugging
-            debug!(
-                "GGUF metadata key: '{}' = {:?}",
-                metadata.key, metadata.value
-            );
-
-            match metadata.key.as_str() {
-                // Common keys for embedding dimensions
-                "llama.embedding_length"
-                | "embedding_length"
-                | "n_embd"
-                | "bert.embedding_length" => {
-                    if let Some(value) = extract_usize_from_metadata(&metadata.value) {
-                        dimensions = value;
-                        debug!(
-                            "Found embedding dimensions: {} from key: {}",
-                            dimensions, metadata.key
-                        );
-                    }
-                }
-                // Common keys for context length
-                "llama.context_length"
-                | "context_length"
-                | "n_ctx"
-                | "max_position_embeddings"
-                | "bert.context_length" => {
-                    if let Some(value) = extract_usize_from_metadata(&metadata.value) {
-                        max_tokens = value;
-                        debug!(
-                            "Found max tokens: {} from key: {}",
-                            max_tokens, metadata.key
-                        );
-                    }
-                }
-                _ => {}
-            }
-        }
-
-        // If dimensions not found in metadata, try to infer from tensor shapes
-        if dimensions == 0 {
-            // Look for embedding tensor dimensions
-            for tensor in &gguf_file.tensors {
-                if tensor.name.contains("embed") || tensor.name.contains("wte") {
-                    // Usually the last dimension is the embedding size
-                    if let Some(&dim) = tensor.dimensions.last() {
-                        dimensions = dim.try_into().unwrap_or(0);
-                        debug!(
-                            "Inferred embedding dimensions from tensor {}: {}",
-                            tensor.name, dimensions
-                        );
-                        break;
-                    }
-                }
-            }
-        }
-
-        if dimensions == 0 {
-            warn!("Could not determine embedding dimensions from GGUF metadata");
-        }
-
-        Ok((dimensions, max_tokens))
-    }
-}
-
-/// Helper function to extract usize value from GGUF metadata
-fn extract_usize_from_metadata(value: &GGUFMetadataValue) -> Option<usize> {
-    match value {
-        GGUFMetadataValue::Uint8(v) => Some((*v).into()),
-        GGUFMetadataValue::Uint16(v) => Some((*v).into()),
-        GGUFMetadataValue::Uint32(v) => Some((*v).try_into().unwrap_or(usize::MAX)),
-        GGUFMetadataValue::Uint64(v) => Some((*v).try_into().unwrap_or(usize::MAX)),
-        GGUFMetadataValue::Int8(v) if *v >= 0 => Some((*v).try_into().unwrap_or(0)),
-        GGUFMetadataValue::Int16(v) if *v >= 0 => Some((*v).try_into().unwrap_or(0)),
-        GGUFMetadataValue::Int32(v) if *v >= 0 => Some((*v).try_into().unwrap_or(0)),
-        GGUFMetadataValue::Int64(v) if *v >= 0 => Some((*v).try_into().unwrap_or(0)),
-        _ => None,
-    }
 }
 
 #[async_trait::async_trait]
@@ -283,10 +152,10 @@ impl ModelProvider for FileModelProvider {
             }
         };
 
-        // Extract model metadata from GGUF file
-        let (dimensions, max_tokens) = match Self::extract_gguf_metadata(&self.model_path) {
+        // Extract model metadata from GGUF file using shared function
+        let (dimensions, max_tokens) = match crate::model::extract_gguf_metadata(&self.model_path) {
             Ok((dims, tokens)) => {
-                debug!(
+                info!(
                     "Successfully extracted metadata: dimensions={}, max_tokens={}",
                     dims, tokens
                 );

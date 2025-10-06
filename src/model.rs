@@ -21,6 +21,7 @@ use crate::cache::CacheStore;
 use crate::cache::token_cache::TokenCache;
 use crate::config::{ModelConfig, PoolingStrategy};
 use crate::error::{Error, Result};
+use gguf::{GGUFFile, GGUFMetadataValue};
 use llama_cpp_2::context::LlamaContext;
 use llama_cpp_2::{
     context::params::LlamaContextParams,
@@ -34,6 +35,152 @@ use std::num::NonZeroU32;
 use std::path::{Path, PathBuf};
 use std::sync::atomic::{AtomicUsize, Ordering};
 use tracing::{debug, info, instrument, warn};
+
+/// Extract model metadata from a GGUF file
+///
+/// This function reads only the header and metadata from the GGUF file
+/// without loading the entire model, making it efficient for listing models.
+///
+/// # Arguments
+///
+/// * `path` - Path to the GGUF model file
+///
+/// # Returns
+///
+/// A tuple of (`dimensions`, `context_size`) extracted from the metadata
+///
+/// # Errors
+///
+/// Returns an error if the file cannot be read or parsed
+pub fn extract_gguf_metadata(path: &Path) -> Result<(usize, usize)> {
+    use std::fs::File;
+    use std::io::Read;
+
+    // Read only the beginning of the file (metadata is at the start)
+    let mut file = File::open(path).map_err(|e| Error::ModelLoadError {
+        path: path.to_path_buf(),
+        source: anyhow::anyhow!("Failed to open GGUF file: {e}"),
+    })?;
+
+    // Read a reasonable amount for metadata (16MB should be more than enough)
+    let mut buffer = Vec::new();
+    let _ = file
+        .by_ref()
+        .take(16 * 1024 * 1024)
+        .read_to_end(&mut buffer)
+        .map_err(|e| Error::ModelLoadError {
+            path: path.to_path_buf(),
+            source: anyhow::anyhow!("Failed to read GGUF file: {e}"),
+        })?;
+
+    // Parse GGUF file metadata
+    let gguf_file = match GGUFFile::read(&buffer) {
+        Ok(Some(file)) => file,
+        Ok(None) => {
+            return Err(Error::ModelLoadError {
+                path: path.to_path_buf(),
+                source: anyhow::anyhow!("Incomplete GGUF file data"),
+            });
+        }
+        Err(e) => {
+            return Err(Error::ModelLoadError {
+                path: path.to_path_buf(),
+                source: anyhow::anyhow!("Failed to parse GGUF file: {e}"),
+            });
+        }
+    };
+
+    let mut dimensions = 0usize;
+    let mut context_size = 512usize; // Default fallback
+
+    // Look for embedding dimensions and context length in metadata
+    debug!(
+        "GGUF file has {} metadata entries",
+        gguf_file.header.metadata.len()
+    );
+    for metadata in &gguf_file.header.metadata {
+        // Log all keys for debugging
+        debug!("GGUF key: '{}' = {:?}", metadata.key, metadata.value);
+
+        // Check for embedding dimensions - match exact keys or ends with pattern
+        if dimensions == 0
+            && (
+                metadata.key == "llama.embedding_length"
+                    || metadata.key == "embedding_length"
+                    || metadata.key == "n_embd"
+                    || metadata.key == "bert.embedding_length"
+                    || metadata.key.ends_with(".embedding_length")
+                // Catch architecture-specific like jina-bert-v2.embedding_length
+            )
+            && let Some(value) = extract_usize_from_metadata(&metadata.value)
+        {
+            dimensions = value;
+            debug!(
+                "Found embedding dimensions: {} from key: {}",
+                dimensions, metadata.key
+            );
+        }
+
+        // Check for context length - match exact keys or ends with pattern
+        if context_size == 512
+            && (
+                // Only update if still at default
+                metadata.key == "llama.context_length"
+                    || metadata.key == "context_length"
+                    || metadata.key == "n_ctx"
+                    || metadata.key == "max_position_embeddings"
+                    || metadata.key == "bert.context_length"
+                    || metadata.key.ends_with(".context_length")
+                // Catch architecture-specific like jina-bert-v2.context_length
+            )
+            && let Some(value) = extract_usize_from_metadata(&metadata.value)
+        {
+            context_size = value;
+            debug!(
+                "Found context size: {} from key: {}",
+                context_size, metadata.key
+            );
+        }
+    }
+
+    // If dimensions not found in metadata, try to infer from tensor shapes
+    if dimensions == 0 {
+        for tensor in &gguf_file.tensors {
+            if tensor.name.contains("embed") || tensor.name.contains("wte") {
+                // Usually the last dimension is the embedding size
+                if let Some(&dim) = tensor.dimensions.last() {
+                    dimensions = dim.try_into().unwrap_or(0);
+                    debug!(
+                        "Inferred embedding dimensions from tensor {}: {}",
+                        tensor.name, dimensions
+                    );
+                    break;
+                }
+            }
+        }
+    }
+
+    if dimensions == 0 {
+        warn!("Could not determine embedding dimensions from GGUF metadata");
+    }
+
+    Ok((dimensions, context_size))
+}
+
+/// Helper function to extract usize value from GGUF metadata
+fn extract_usize_from_metadata(value: &GGUFMetadataValue) -> Option<usize> {
+    match value {
+        GGUFMetadataValue::Uint8(v) => Some((*v).into()),
+        GGUFMetadataValue::Uint16(v) => Some((*v).into()),
+        GGUFMetadataValue::Uint32(v) => Some((*v).try_into().unwrap_or(usize::MAX)),
+        GGUFMetadataValue::Uint64(v) => Some((*v).try_into().unwrap_or(usize::MAX)),
+        GGUFMetadataValue::Int8(v) if *v >= 0 => Some((*v).try_into().unwrap_or(0)),
+        GGUFMetadataValue::Int16(v) if *v >= 0 => Some((*v).try_into().unwrap_or(0)),
+        GGUFMetadataValue::Int32(v) if *v >= 0 => Some((*v).try_into().unwrap_or(0)),
+        GGUFMetadataValue::Int64(v) if *v >= 0 => Some((*v).try_into().unwrap_or(0)),
+        _ => None,
+    }
+}
 
 self_cell! {
     struct ModelCell {
@@ -135,7 +282,27 @@ impl EmbeddingModel {
         debug!("Model loaded successfully");
 
         // Set up context parameters
-        let ctx_size = config.n_ctx.unwrap_or(2048);
+        // Priority: 1) Explicit config, 2) GGUF metadata, 3) Fallback to 2048
+        let ctx_size = if let Some(n_ctx) = config.n_ctx {
+            debug!("Using configured context size: {}", n_ctx);
+            n_ctx
+        } else {
+            // Try to auto-detect from GGUF metadata
+            match Self::extract_context_size_from_gguf(&config.model_path) {
+                Ok(size) => {
+                    info!("Auto-detected context size from GGUF metadata: {}", size);
+                    size
+                }
+                Err(e) => {
+                    debug!(
+                        "Could not read context size from GGUF metadata: {}, using default 2048",
+                        e
+                    );
+                    2048
+                }
+            }
+        };
+
         let n_threads = i32::try_from(config.n_threads.unwrap_or_else(|| {
             let threads = num_cpus::get();
             debug!("Using {} CPU threads", threads);
@@ -186,7 +353,7 @@ impl EmbeddingModel {
 
         info!(
             "Model initialized: dimensions={}, context_size={}, threads={}",
-            embedding_dimensions, ctx_size, n_threads
+            embedding_dimensions, context_size, n_threads
         );
 
         let cell = ModelCell::try_new(model, |m| {
@@ -1150,6 +1317,22 @@ impl EmbeddingModel {
         })?;
 
         Ok(embeddings)
+    }
+
+    /// Extract context size from GGUF file metadata
+    ///
+    /// Uses the public `extract_gguf_metadata` function to get model metadata.
+    ///
+    /// # Arguments
+    ///
+    /// * `path` - Path to the GGUF model file
+    ///
+    /// # Returns
+    ///
+    /// Returns the context size from metadata, or an error if not found
+    fn extract_context_size_from_gguf(path: &Path) -> Result<u32> {
+        let (_dimensions, context_size) = extract_gguf_metadata(path)?;
+        Ok(context_size.try_into().unwrap_or(2048))
     }
 }
 
