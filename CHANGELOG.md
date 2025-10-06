@@ -5,6 +5,18 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.5.0] - 2025-10-06
+
+### Bug Fixes
+
+- Prevent n_ubatch assertion failures for large inputs ([aace7b9](https://github.com/darjus/embellama/commit/aace7b96c9a51059f0832ddde1c5df142d9971f6))
+- Split coverage CI to prevent tarpaulin timeouts ([b4b74e6](https://github.com/darjus/embellama/commit/b4b74e6ca1a6e02669398c557a162bac889bb6a9))
+- Ensure context_size field always present in /v1/models API ([1780cb6](https://github.com/darjus/embellama/commit/1780cb67fe96903f955468f1702bd2907c3b7d97))
+
+### Features
+
+- Automate README.md version updates in release script ([a7cd18c](https://github.com/darjus/embellama/commit/a7cd18c94f5677609af18525f7b27e00cabfd4c1))
+
 ## [0.4.2] - 2025-10-06
 
 ### Features
