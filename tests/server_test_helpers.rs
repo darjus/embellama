@@ -49,6 +49,27 @@ impl TestServer {
     ///
     /// Panics if the model path cannot be converted to a string
     pub async fn spawn(model_path: PathBuf, workers: usize) -> Result<Self, String> {
+        Self::spawn_with_config(model_path, workers, None).await
+    }
+
+    /// Spawn a test server with the given configuration and optional n_seq_max
+    ///
+    /// # Errors
+    ///
+    /// Returns an error if:
+    /// - No available port can be found
+    /// - Server binary cannot be built
+    /// - Server process cannot be started
+    /// - Server fails to become ready within timeout
+    ///
+    /// # Panics
+    ///
+    /// Panics if the model path cannot be converted to a string
+    pub async fn spawn_with_config(
+        model_path: PathBuf,
+        workers: usize,
+        n_seq_max: Option<u32>,
+    ) -> Result<Self, String> {
         // Find an available port
         let port = find_available_port()?;
         let base_url = format!("http://127.0.0.1:{port}");
@@ -66,28 +87,41 @@ impl TestServer {
             ));
         }
 
+        // Build args - create owned strings first to avoid lifetime issues
+        let port_str = port.to_string();
+        let workers_str = workers.to_string();
+        let n_seq_max_str = n_seq_max.map(|v| v.to_string());
+
+        let mut args = vec![
+            "run",
+            "--features",
+            "server",
+            "--bin",
+            "embellama-server",
+            "--",
+            "--model-path",
+            model_path.to_str().unwrap(),
+            "--model-name",
+            "test-model",
+            "--host",
+            "127.0.0.1",
+            "--port",
+            port_str.as_str(),
+            "--workers",
+            workers_str.as_str(),
+            "--log-level",
+            "info",
+        ];
+
+        // Add n_seq_max if specified
+        if let Some(ref n_seq_max_value) = n_seq_max_str {
+            args.push("--n-seq-max");
+            args.push(n_seq_max_value.as_str());
+        }
+
         // Start the server process
         let child = Command::new("cargo")
-            .args([
-                "run",
-                "--features",
-                "server",
-                "--bin",
-                "embellama-server",
-                "--",
-                "--model-path",
-                model_path.to_str().unwrap(),
-                "--model-name",
-                "test-model",
-                "--host",
-                "127.0.0.1",
-                "--port",
-                &port.to_string(),
-                "--workers",
-                &workers.to_string(),
-                "--log-level",
-                "info",
-            ])
+            .args(&args)
             .spawn()
             .map_err(|e| format!("Failed to spawn server: {e}"))?;
 

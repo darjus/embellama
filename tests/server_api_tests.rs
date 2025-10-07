@@ -342,7 +342,8 @@ async fn test_batch_embeddings_mixed_lengths() {
 #[serial]
 async fn test_batch_embeddings_duplicate_texts() {
     let model_path = get_test_model_path().expect("Test model not found");
-    let server = TestServer::spawn(model_path, 2)
+    // Use n_seq_max=1 to ensure duplicate texts produce identical embeddings
+    let server = TestServer::spawn_with_config(model_path, 2, Some(1))
         .await
         .expect("Failed to spawn server");
     let client = TestClient::new();
@@ -380,6 +381,8 @@ async fn test_batch_embeddings_duplicate_texts() {
             assert!((emb1[i] - emb2[i]).abs() < 1e-6);
             assert!((emb1[i] - emb3[i]).abs() < 1e-6);
         }
+    } else {
+        panic!("Expected embeddings in Float format");
     }
 }
 
