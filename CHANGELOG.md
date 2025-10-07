@@ -5,6 +5,19 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.6.0] - 2025-10-07
+
+### Bug Fixes
+
+- Prevent deadlock in TokenCache::evict_oldest ([8706589](https://github.com/darjus/embellama/commit/870658933ea602bd76e1eaa07e3b963174b58ce2))
+- Correct memory threshold in test_memory_monitor test ([08e46b8](https://github.com/darjus/embellama/commit/08e46b87b32fbf84d8fa89bf4eea7a8c9519a2a6))
+- Adjust test_batch_embeddings_duplicate_texts for n_seq_max=8 ([e45287e](https://github.com/darjus/embellama/commit/e45287e7106b6a6f813f4e7b5368f120e91a1210))
+- Use minimum 101 tokens in prefix cache tests ([6a65220](https://github.com/darjus/embellama/commit/6a6522083aeda01384113b95537bfb0e1d9b5c78))
+
+### Features
+
+- Add configurable request timeout and n_seq_max for server ([7d5465e](https://github.com/darjus/embellama/commit/7d5465e31c46f089858fbbce12760d932b1dc61d))
+
 ## [0.5.0] - 2025-10-06
 
 ### Bug Fixes
