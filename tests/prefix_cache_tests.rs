@@ -35,7 +35,7 @@ mod tests {
         let cache = PrefixCache::new(10, 3600, 5, None).expect("Failed to create cache");
 
         let text = "import numpy as np\nimport pandas as pd\nclass DataProcessor:";
-        let tokens: Vec<i32> = vec![1234, 5678, 9012, 3456]; // Mock tokens
+        let tokens: Vec<i32> = vec![1; 101]; // Mock tokens (101 to exceed MIN_PREFIX_LENGTH)
         let session_data = vec![1, 2, 3, 4, 5]; // Mock session data
 
         // Register prefix
@@ -85,7 +85,7 @@ mod tests {
         // Register multiple prefixes
         for i in 0..5 {
             let text = format!("prefix_{}", i).repeat(20);
-            let tokens: Vec<i32> = vec![i as i32; 4];
+            let tokens: Vec<i32> = vec![i as i32; 101]; // 101 tokens to exceed MIN_PREFIX_LENGTH
             let session = vec![i as u8; 10];
             cache.register_prefix(&text, &tokens, session).unwrap();
         }
@@ -132,7 +132,7 @@ mod tests {
         let cache = PrefixCache::new(10, 3600, 5, None).expect("Failed to create cache");
 
         let text = "test_prefix".repeat(20);
-        let tokens: Vec<i32> = vec![1, 2, 3, 4];
+        let tokens: Vec<i32> = vec![1; 101]; // 101 tokens to exceed MIN_PREFIX_LENGTH
         let session = vec![1, 2, 3, 4, 5];
 
         // Register prefix
@@ -159,7 +159,7 @@ mod tests {
             let cache_clone = Arc::clone(&cache);
             let handle = thread::spawn(move || {
                 let text = format!("thread_{}_prefix", i).repeat(20);
-                let tokens: Vec<i32> = vec![i as i32; 4];
+                let tokens: Vec<i32> = vec![i as i32; 101]; // 101 tokens to exceed MIN_PREFIX_LENGTH
                 let session = vec![i as u8; 10];
 
                 cache_clone
