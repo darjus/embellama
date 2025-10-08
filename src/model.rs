@@ -378,7 +378,7 @@ impl EmbeddingModel {
             detected
         };
 
-        Ok(Self {
+        let model = Self {
             cell,
             config: config.clone(),
             model_path: config.model_path.clone(),
@@ -388,7 +388,18 @@ impl EmbeddingModel {
             max_context_size: ctx_size as usize,
             add_bos_token,
             n_seq_max,
-        })
+        };
+
+        // Log effective max tokens for debugging batch size issues
+        let effective_max = model.effective_max_tokens();
+        info!(
+            "Effective max tokens: {} (context: {}, overhead: {})",
+            effective_max,
+            model.max_context_size,
+            model.max_context_size - effective_max
+        );
+
+        Ok(model)
     }
 
     /// Loads a model from disk.
@@ -506,6 +517,38 @@ impl EmbeddingModel {
     /// Returns the maximum number of sequences for batch processing.
     pub fn n_seq_max(&self) -> u32 {
         self.n_seq_max
+    }
+
+    /// Calculate the effective maximum tokens available for input.
+    ///
+    /// For encoder models (like BERT/Jina), the context size must accommodate both
+    /// input tokens AND output embeddings. This method calculates the actual usable
+    /// input token limit by subtracting the embedding output space overhead.
+    ///
+    /// # Returns
+    ///
+    /// The maximum number of input tokens that can be safely processed in a single batch.
+    ///
+    /// # Formula
+    ///
+    /// - If embedding dimensions are known: `ctx_size - (dimensions + 100)`
+    /// - If dimensions unknown: `ctx_size - 1024` (conservative fallback)
+    ///
+    /// # Example
+    ///
+    /// For Jina model with 768 dimensions and 8192 context:
+    /// - Overhead: 768 + 100 = 868
+    /// - Effective max: 8192 - 868 = 7324 tokens
+    pub fn effective_max_tokens(&self) -> usize {
+        let overhead = if self.embedding_dimensions > 0 {
+            // Use actual embedding dimensions + padding for overhead
+            self.embedding_dimensions + 100
+        } else {
+            // Conservative fallback when dimensions are unknown
+            1024
+        };
+
+        self.max_context_size.saturating_sub(overhead)
     }
 
     /// Detects whether to add BOS token based on model type.
@@ -701,13 +744,16 @@ impl EmbeddingModel {
         // Tokenize the text with caching support
         let tokens = self.tokenize_cached(text, self.add_bos_token, token_cache)?;
 
-        // Check token limit
-        if tokens.len() > self.max_context_size {
+        // Check token limit using effective max (accounts for embedding output space)
+        let effective_max = self.effective_max_tokens();
+        if tokens.len() > effective_max {
             return Err(Error::InvalidInput {
                 message: format!(
-                    "Input exceeds maximum context size: {} tokens > {} max. Please truncate your input.",
+                    "Input exceeds effective maximum tokens: {} tokens > {} effective max (context: {}, overhead: {}). Please truncate your input.",
                     tokens.len(),
-                    self.max_context_size
+                    effective_max,
+                    self.max_context_size,
+                    self.max_context_size - effective_max
                 ),
             });
         }
@@ -807,12 +853,16 @@ impl EmbeddingModel {
         // Calculate total tokens needed for batch
         let total_tokens: usize = token_sequences.iter().map(std::vec::Vec::len).sum();
 
-        // Check if total tokens exceed context size
-        if total_tokens > self.max_context_size {
+        // Check if total tokens exceed effective max (accounts for embedding output space)
+        let effective_max = self.effective_max_tokens();
+        if total_tokens > effective_max {
             return Err(Error::InvalidInput {
                 message: format!(
-                    "Batch total exceeds maximum context size: {} tokens > {} max. Please reduce batch size or truncate inputs.",
-                    total_tokens, self.max_context_size
+                    "Batch total exceeds effective maximum tokens: {} tokens > {} effective max (context: {}, overhead: {}). Please reduce batch size or truncate inputs.",
+                    total_tokens,
+                    effective_max,
+                    self.max_context_size,
+                    self.max_context_size - effective_max
                 ),
             });
         }
@@ -964,13 +1014,16 @@ impl EmbeddingModel {
             });
         }
 
-        // Check if input exceeds context size
-        if tokens.len() > self.max_context_size {
+        // Check if input exceeds effective max (accounts for embedding output space)
+        let effective_max = self.effective_max_tokens();
+        if tokens.len() > effective_max {
             return Err(Error::InvalidInput {
                 message: format!(
-                    "Input exceeds maximum context size: {} tokens > {} max. Please truncate your input.",
+                    "Input exceeds effective maximum tokens: {} tokens > {} effective max (context: {}, overhead: {}). Please truncate your input.",
                     tokens.len(),
-                    self.max_context_size
+                    effective_max,
+                    self.max_context_size,
+                    self.max_context_size - effective_max
                 ),
             });
         }

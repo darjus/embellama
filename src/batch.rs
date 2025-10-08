@@ -113,10 +113,17 @@ impl BatchProcessor {
 
         // Step 3: Check if we need to chunk the batch based on total token count and n_seq_max
         let total_tokens: usize = token_sequences.iter().map(std::vec::Vec::len).sum();
-        let max_context = model.max_sequence_length();
+        let effective_max = model.effective_max_tokens();
         let n_seq_max = model.n_seq_max() as usize;
 
-        let embeddings = if total_tokens <= max_context && token_sequences.len() <= n_seq_max {
+        debug!(
+            "Batch validation: {} sequences, {} tokens, effective_max: {}",
+            token_sequences.len(),
+            total_tokens,
+            effective_max
+        );
+
+        let embeddings = if total_tokens <= effective_max && token_sequences.len() <= n_seq_max {
             // Process all sequences in a single batch
             debug!(
                 "Processing {} sequences with {} total tokens in single batch",
@@ -136,9 +143,9 @@ impl BatchProcessor {
         } else {
             // Need to chunk into smaller batches
             debug!(
-                "Chunking batch: {} total tokens (max {}), {} sequences (max {})",
+                "Chunking batch: {} total tokens (effective_max {}), {} sequences (n_seq_max {})",
                 total_tokens,
-                max_context,
+                effective_max,
                 token_sequences.len(),
                 n_seq_max
             );
@@ -152,7 +159,8 @@ impl BatchProcessor {
 
                 // Check if adding this sequence would exceed either limit
                 if !current_batch.is_empty()
-                    && (current_tokens + seq_len > max_context || current_batch.len() >= n_seq_max)
+                    && (current_tokens + seq_len > effective_max
+                        || current_batch.len() >= n_seq_max)
                 {
                     // Process current batch
                     let batch_embeddings = model.process_batch_tokens(&current_batch)?;

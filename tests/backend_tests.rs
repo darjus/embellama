@@ -160,7 +160,7 @@ fn test_engine_with_backend_detection() {
     let config = EngineConfig::with_backend_detection()
         .with_model_path(&model_path)
         .with_model_name("test-backend")
-        .with_context_size(512)
+        .with_context_size(2048) // Increased from 512 to accommodate embedding overhead
         .build()
         .expect("Failed to build config");
 

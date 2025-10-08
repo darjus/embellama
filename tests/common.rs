@@ -47,7 +47,7 @@ pub fn create_test_config(model_path: PathBuf) -> EngineConfig {
     EngineConfig::builder()
         .with_model_path(model_path)
         .with_model_name("test-model")
-        .with_context_size(512)
+        .with_context_size(2048) // Increased from 512 to accommodate embedding overhead
         .with_n_threads(2)
         .with_normalize_embeddings(true)
         .with_pooling_strategy(PoolingStrategy::Mean)

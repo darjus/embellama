@@ -159,11 +159,11 @@ fn test_model_explicit_config_overrides_gguf() {
 
     println!("Testing that explicit config overrides GGUF metadata");
 
-    // Explicitly set context size to 512 (even though Jina GGUF says 8192)
+    // Explicitly set context size to 2048 (even though Jina GGUF says 8192)
     let config = EngineConfig::builder()
         .with_model_path(model_path)
         .with_model_name("jina-test")
-        .with_context_size(512) // Explicit override
+        .with_context_size(2048) // Explicit override (increased from 512 to accommodate embedding overhead)
         .build()
         .unwrap();
 
