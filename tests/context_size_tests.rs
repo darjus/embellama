@@ -71,20 +71,23 @@ fn test_extract_gguf_metadata_jina_model() {
         result.err()
     );
 
-    let (dimensions, context_size) = result.unwrap();
+    let metadata = result.unwrap();
 
     // PRIMARY TEST: Jina model should have 8192 context size
     assert_eq!(
-        context_size, 8192,
+        metadata.context_size, 8192,
         "Expected Jina model to have 8192 context size from GGUF metadata"
     );
-    println!("✓ Successfully extracted context size: {}", context_size);
+    println!(
+        "✓ Successfully extracted context size: {}",
+        metadata.context_size
+    );
 
     // SECONDARY: Dimensions (optional - model.n_embd() is the source of truth)
     println!(
         "  Dimensions from GGUF: {} ({})",
-        dimensions,
-        if dimensions > 0 {
+        metadata.embedding_dimensions,
+        if metadata.embedding_dimensions > 0 {
             "found"
         } else {
             "not found - will use model.n_embd()"

@@ -18,7 +18,7 @@
 //! The state must be Send + Sync + Clone for use with Axum.
 
 use crate::server::dispatcher::Dispatcher;
-use crate::{EmbeddingEngine, EngineConfig, extract_gguf_metadata};
+use crate::{EmbeddingEngine, EngineConfig, PoolingStrategy, extract_gguf_metadata};
 use std::path::Path;
 use std::sync::{Arc, Mutex};
 use tracing::{info, warn};
@@ -42,6 +42,8 @@ pub struct ServerConfig {
     pub request_timeout: std::time::Duration,
     /// Maximum number of sequences to process in parallel (`n_seq_max`)
     pub n_seq_max: u32,
+    /// Pooling strategy for embeddings (None = use default)
+    pub pooling_strategy: Option<PoolingStrategy>,
 }
 
 impl Default for ServerConfig {
@@ -55,6 +57,7 @@ impl Default for ServerConfig {
             port: 8080,
             request_timeout: std::time::Duration::from_secs(60),
             n_seq_max: 8,
+            pooling_strategy: None,
         }
     }
 }
@@ -77,6 +80,7 @@ pub struct ServerConfigBuilder {
     port: Option<u16>,
     request_timeout: Option<std::time::Duration>,
     n_seq_max: Option<u32>,
+    pooling_strategy: Option<PoolingStrategy>,
 }
 
 impl ServerConfigBuilder {
@@ -133,6 +137,13 @@ impl ServerConfigBuilder {
     #[must_use]
     pub fn n_seq_max(mut self, n_seq_max: u32) -> Self {
         self.n_seq_max = Some(n_seq_max);
+        self
+    }
+
+    /// Set the pooling strategy for embeddings
+    #[must_use]
+    pub fn pooling_strategy(mut self, strategy: PoolingStrategy) -> Self {
+        self.pooling_strategy = Some(strategy);
         self
     }
 
@@ -197,6 +208,7 @@ impl ServerConfigBuilder {
             port: self.port.unwrap_or(default.port),
             request_timeout: self.request_timeout.unwrap_or(default.request_timeout),
             n_seq_max: self.n_seq_max.unwrap_or(default.n_seq_max),
+            pooling_strategy: self.pooling_strategy,
         })
     }
 }
@@ -229,10 +241,13 @@ impl AppState {
     pub fn new(config: ServerConfig) -> crate::Result<Self> {
         // Extract context_size from GGUF metadata before engine initialization
         let context_size = match extract_gguf_metadata(Path::new(&config.model_path)) {
-            Ok((_dimensions, ctx_size)) => {
-                info!("Auto-detected context size from GGUF: {}", ctx_size);
+            Ok(metadata) => {
+                info!(
+                    "Auto-detected context size from GGUF: {}",
+                    metadata.context_size
+                );
                 // Convert usize to u32, with fallback
-                u32::try_from(ctx_size).ok()
+                u32::try_from(metadata.context_size).ok()
             }
             Err(e) => {
                 warn!("Could not extract GGUF metadata: {}", e);
@@ -250,6 +265,11 @@ impl AppState {
         // Add context_size if we extracted it
         if let Some(size) = context_size {
             engine_config_builder = engine_config_builder.with_context_size(size as usize);
+        }
+
+        // Add pooling_strategy if specified
+        if let Some(strategy) = config.pooling_strategy {
+            engine_config_builder = engine_config_builder.with_pooling_strategy(strategy);
         }
 
         let engine = EmbeddingEngine::get_or_init(engine_config_builder.build()?)?;

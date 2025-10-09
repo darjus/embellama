@@ -182,7 +182,7 @@ impl Default for ModelConfig {
             context_size: None,
             #[allow(deprecated)]
             kv_cache_size: None,
-            enable_kv_optimization: true,
+            enable_kv_optimization: false,
         }
     }
 }
@@ -415,6 +415,8 @@ pub enum PoolingStrategy {
     Max,
     /// Mean pooling with sqrt(length) normalization
     MeanSqrt,
+    /// Use only the last token embedding (EOS token) - required for decoder models like Qwen
+    Last,
 }
 
 impl Default for PoolingStrategy {
@@ -1240,6 +1242,7 @@ mod tests {
             PoolingStrategy::Cls,
             PoolingStrategy::Max,
             PoolingStrategy::MeanSqrt,
+            PoolingStrategy::Last,
         ];
 
         for strategy in strategies {

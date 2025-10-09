@@ -187,7 +187,7 @@ pub async fn list_models_handler(State(state): State<AppState>) -> Response {
         // Extract context size for fallback model
         let context_size = extract_gguf_metadata(Path::new(&state.config.model_path))
             .ok()
-            .and_then(|(_, ctx)| u32::try_from(ctx).ok());
+            .and_then(|metadata| u32::try_from(metadata.context_size).ok());
         vec![ModelData::new_with_context(
             state.model_name().to_string(),
             context_size,

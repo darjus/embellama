@@ -69,6 +69,9 @@ mod error;
 /// Configuration module
 mod config;
 
+/// GGUF metadata extraction utilities
+mod gguf;
+
 /// Model management module
 mod model;
 
@@ -94,7 +97,11 @@ pub use config::{
 };
 pub use engine::{EmbeddingEngine, ModelInfo};
 pub use error::{Error, Result};
-pub use model::{EmbeddingModel, extract_gguf_metadata};
+pub use gguf::{
+    GGUFMetadata, clear_metadata_cache, extract_metadata as extract_gguf_metadata,
+    metadata_cache_size,
+};
+pub use model::EmbeddingModel;
 
 use llama_cpp_2::LogOptions;
 

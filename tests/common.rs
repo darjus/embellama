@@ -139,6 +139,75 @@ pub fn assert_normalized(embedding: &[f32], tolerance: f32) {
     );
 }
 
+/// Calculate cosine similarity between two vectors
+///
+/// For normalized vectors, this is equivalent to the dot product.
+///
+/// # Panics
+///
+/// Panics if vectors have different dimensions
+#[must_use]
+pub fn cosine_similarity(a: &[f32], b: &[f32]) -> f32 {
+    assert_eq!(a.len(), b.len(), "Vectors must have same dimension");
+
+    let dot: f32 = a.iter().zip(b).map(|(x, y)| x * y).sum();
+    let norm_a: f32 = a.iter().map(|x| x * x).sum::<f32>().sqrt();
+    let norm_b: f32 = b.iter().map(|x| x * x).sum::<f32>().sqrt();
+
+    if norm_a == 0.0 || norm_b == 0.0 {
+        return 0.0;
+    }
+
+    dot / (norm_a * norm_b)
+}
+
+/// Calculate dot product between two vectors
+///
+/// For normalized vectors, this equals cosine similarity.
+///
+/// # Panics
+///
+/// Panics if vectors have different dimensions
+#[must_use]
+pub fn dot_product(a: &[f32], b: &[f32]) -> f32 {
+    assert_eq!(a.len(), b.len(), "Vectors must have same dimension");
+    a.iter().zip(b).map(|(x, y)| x * y).sum()
+}
+
+/// Assert embeddings are identical (bit-for-bit equality)
+///
+/// This is stricter than assert_embeddings_equal as it requires exact float equality.
+/// Use this to test determinism and cache consistency.
+///
+/// # Panics
+///
+/// Panics if embeddings differ in any way
+pub fn assert_embeddings_identical(a: &[f32], b: &[f32]) {
+    assert_eq!(a.len(), b.len(), "Embeddings have different dimensions");
+    for (i, (x, y)) in a.iter().zip(b).enumerate() {
+        assert_eq!(x, y, "Embeddings differ at index {}: {} != {}", i, x, y);
+    }
+}
+
+/// Assert embedding is normalized with strict tolerance (1e-6)
+///
+/// Use this for validating that embeddings are properly normalized.
+/// Stricter than assert_normalized which takes a tolerance parameter.
+///
+/// # Panics
+///
+/// Panics if L2 norm is not within 1e-6 of 1.0
+pub fn assert_normalized_strict(embedding: &[f32]) {
+    let norm = calculate_l2_norm(embedding);
+    const STRICT_TOLERANCE: f32 = 1e-6;
+    assert!(
+        (norm - 1.0).abs() < STRICT_TOLERANCE,
+        "Embedding not normalized: L2 norm = {} (expected 1.0 ± {})",
+        norm,
+        STRICT_TOLERANCE
+    );
+}
+
 /// Generate text that tokenizes to approximately N tokens
 ///
 /// Uses repetitive pattern to be predictable. This is useful for testing
@@ -208,5 +277,71 @@ mod tests {
         // At ~1.3 chars per token, that's ~1300 chars
         assert!(text.len() > 1000, "Text should be at least 1000 chars");
         assert!(text.len() < 2000, "Text should be less than 2000 chars");
+    }
+
+    #[test]
+    fn test_cosine_similarity() {
+        // Test with normalized vectors
+        let a = vec![0.6, 0.8];
+        let b = vec![0.8, 0.6];
+        let sim = cosine_similarity(&a, &b);
+        assert!((sim - 0.96).abs() < 0.01); // 0.6*0.8 + 0.8*0.6 = 0.96
+
+        // Test identical vectors
+        let c = vec![1.0, 0.0, 0.0];
+        assert!((cosine_similarity(&c, &c) - 1.0).abs() < 0.001);
+
+        // Test orthogonal vectors
+        let d = vec![1.0, 0.0];
+        let e = vec![0.0, 1.0];
+        assert!(cosine_similarity(&d, &e).abs() < 0.001);
+    }
+
+    #[test]
+    fn test_dot_product() {
+        let a = vec![1.0, 2.0, 3.0];
+        let b = vec![4.0, 5.0, 6.0];
+        let result = dot_product(&a, &b);
+        assert!((result - 32.0).abs() < 0.001); // 1*4 + 2*5 + 3*6 = 32
+    }
+
+    #[test]
+    fn test_dot_product_equals_cosine_for_normalized() {
+        // For normalized vectors, dot product == cosine similarity
+        let a = vec![0.6, 0.8]; // Already normalized
+        let b = vec![0.8, 0.6]; // Already normalized
+
+        let dot = dot_product(&a, &b);
+        let cos = cosine_similarity(&a, &b);
+
+        assert!((dot - cos).abs() < 0.001);
+    }
+
+    #[test]
+    fn test_assert_embeddings_identical_passes() {
+        let a = vec![0.1, 0.2, 0.3];
+        let b = vec![0.1, 0.2, 0.3];
+        assert_embeddings_identical(&a, &b); // Should not panic
+    }
+
+    #[test]
+    #[should_panic(expected = "Embeddings differ")]
+    fn test_assert_embeddings_identical_fails() {
+        let a = vec![0.1, 0.2, 0.3];
+        let b = vec![0.1, 0.2, 0.30001];
+        assert_embeddings_identical(&a, &b); // Should panic
+    }
+
+    #[test]
+    fn test_assert_normalized_strict_passes() {
+        let embedding = vec![0.6, 0.8]; // sqrt(0.36 + 0.64) = 1.0
+        assert_normalized_strict(&embedding); // Should not panic
+    }
+
+    #[test]
+    #[should_panic(expected = "not normalized")]
+    fn test_assert_normalized_strict_fails() {
+        let embedding = vec![1.0, 1.0]; // sqrt(2) ≠ 1.0
+        assert_normalized_strict(&embedding); // Should panic
     }
 }

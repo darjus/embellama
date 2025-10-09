@@ -21,10 +21,10 @@ use crate::cache::CacheStore;
 use crate::cache::token_cache::TokenCache;
 use crate::config::{ModelConfig, PoolingStrategy};
 use crate::error::{Error, Result};
-use gguf::{GGUFFile, GGUFMetadataValue};
+use crate::gguf;
 use llama_cpp_2::context::LlamaContext;
 use llama_cpp_2::{
-    context::params::LlamaContextParams,
+    context::params::{LlamaContextParams, LlamaPoolingType},
     llama_backend::LlamaBackend,
     llama_batch::LlamaBatch,
     model::{AddBos, LlamaModel, params::LlamaModelParams},
@@ -36,149 +36,20 @@ use std::path::{Path, PathBuf};
 use std::sync::atomic::{AtomicUsize, Ordering};
 use tracing::{debug, info, instrument, warn};
 
-/// Extract model metadata from a GGUF file
+/// Maps our `PoolingStrategy` enum to llama.cpp's `LlamaPoolingType`
 ///
-/// This function reads only the header and metadata from the GGUF file
-/// without loading the entire model, making it efficient for listing models.
-///
-/// # Arguments
-///
-/// * `path` - Path to the GGUF model file
-///
-/// # Returns
-///
-/// A tuple of (`dimensions`, `context_size`) extracted from the metadata
-///
-/// # Errors
-///
-/// Returns an error if the file cannot be read or parsed
-pub fn extract_gguf_metadata(path: &Path) -> Result<(usize, usize)> {
-    use std::fs::File;
-    use std::io::Read;
-
-    // Read only the beginning of the file (metadata is at the start)
-    let mut file = File::open(path).map_err(|e| Error::ModelLoadError {
-        path: path.to_path_buf(),
-        source: anyhow::anyhow!("Failed to open GGUF file: {e}"),
-    })?;
-
-    // Read a reasonable amount for metadata (16MB should be more than enough)
-    let mut buffer = Vec::new();
-    let _ = file
-        .by_ref()
-        .take(16 * 1024 * 1024)
-        .read_to_end(&mut buffer)
-        .map_err(|e| Error::ModelLoadError {
-            path: path.to_path_buf(),
-            source: anyhow::anyhow!("Failed to read GGUF file: {e}"),
-        })?;
-
-    // Parse GGUF file metadata
-    let gguf_file = match GGUFFile::read(&buffer) {
-        Ok(Some(file)) => file,
-        Ok(None) => {
-            return Err(Error::ModelLoadError {
-                path: path.to_path_buf(),
-                source: anyhow::anyhow!("Incomplete GGUF file data"),
-            });
-        }
-        Err(e) => {
-            return Err(Error::ModelLoadError {
-                path: path.to_path_buf(),
-                source: anyhow::anyhow!("Failed to parse GGUF file: {e}"),
-            });
-        }
-    };
-
-    let mut dimensions = 0usize;
-    let mut context_size = 512usize; // Default fallback
-
-    // Look for embedding dimensions and context length in metadata
-    debug!(
-        "GGUF file has {} metadata entries",
-        gguf_file.header.metadata.len()
-    );
-    for metadata in &gguf_file.header.metadata {
-        // Log all keys for debugging
-        debug!("GGUF key: '{}' = {:?}", metadata.key, metadata.value);
-
-        // Check for embedding dimensions - match exact keys or ends with pattern
-        if dimensions == 0
-            && (
-                metadata.key == "llama.embedding_length"
-                    || metadata.key == "embedding_length"
-                    || metadata.key == "n_embd"
-                    || metadata.key == "bert.embedding_length"
-                    || metadata.key.ends_with(".embedding_length")
-                // Catch architecture-specific like jina-bert-v2.embedding_length
-            )
-            && let Some(value) = extract_usize_from_metadata(&metadata.value)
-        {
-            dimensions = value;
-            debug!(
-                "Found embedding dimensions: {} from key: {}",
-                dimensions, metadata.key
-            );
-        }
-
-        // Check for context length - match exact keys or ends with pattern
-        if context_size == 512
-            && (
-                // Only update if still at default
-                metadata.key == "llama.context_length"
-                    || metadata.key == "context_length"
-                    || metadata.key == "n_ctx"
-                    || metadata.key == "max_position_embeddings"
-                    || metadata.key == "bert.context_length"
-                    || metadata.key.ends_with(".context_length")
-                // Catch architecture-specific like jina-bert-v2.context_length
-            )
-            && let Some(value) = extract_usize_from_metadata(&metadata.value)
-        {
-            context_size = value;
-            debug!(
-                "Found context size: {} from key: {}",
-                context_size, metadata.key
-            );
-        }
-    }
-
-    // If dimensions not found in metadata, try to infer from tensor shapes
-    if dimensions == 0 {
-        for tensor in &gguf_file.tensors {
-            if tensor.name.contains("embed") || tensor.name.contains("wte") {
-                // Usually the last dimension is the embedding size
-                if let Some(&dim) = tensor.dimensions.last() {
-                    dimensions = dim.try_into().unwrap_or(0);
-                    debug!(
-                        "Inferred embedding dimensions from tensor {}: {}",
-                        tensor.name, dimensions
-                    );
-                    break;
-                }
-            }
-        }
-    }
-
-    if dimensions == 0 {
-        warn!("Could not determine embedding dimensions from GGUF metadata");
-    }
-
-    Ok((dimensions, context_size))
-}
-
-/// Helper function to extract usize value from GGUF metadata
-fn extract_usize_from_metadata(value: &GGUFMetadataValue) -> Option<usize> {
-    match value {
-        GGUFMetadataValue::Uint8(v) => Some((*v).into()),
-        GGUFMetadataValue::Uint16(v) => Some((*v).into()),
-        GGUFMetadataValue::Uint32(v) => Some((*v).try_into().unwrap_or(usize::MAX)),
-        GGUFMetadataValue::Uint64(v) => Some((*v).try_into().unwrap_or(usize::MAX)),
-        GGUFMetadataValue::Int8(v) if *v >= 0 => Some((*v).try_into().unwrap_or(0)),
-        GGUFMetadataValue::Int16(v) if *v >= 0 => Some((*v).try_into().unwrap_or(0)),
-        GGUFMetadataValue::Int32(v) if *v >= 0 => Some((*v).try_into().unwrap_or(0)),
-        GGUFMetadataValue::Int64(v) if *v >= 0 => Some((*v).try_into().unwrap_or(0)),
-        _ => None,
+/// For strategies that llama.cpp doesn't natively support (Max, `MeanSqrt`),
+/// we set pooling to None and handle it ourselves in `apply_pooling()`.
+/// For Last pooling (required for decoder models), we must set it at the
+/// llama.cpp level to ensure proper KV cache initialization.
+fn pooling_strategy_to_llama_type(strategy: PoolingStrategy) -> LlamaPoolingType {
+    match strategy {
+        PoolingStrategy::Mean => LlamaPoolingType::Mean,
+        PoolingStrategy::Cls => LlamaPoolingType::Cls,
+        PoolingStrategy::Last => LlamaPoolingType::Last,
+        // Max and MeanSqrt are not natively supported by llama.cpp
+        // We'll apply these strategies ourselves after extraction
+        PoolingStrategy::Max | PoolingStrategy::MeanSqrt => LlamaPoolingType::None,
     }
 }
 
@@ -236,6 +107,8 @@ pub struct EmbeddingModel {
     add_bos_token: bool,
     /// Maximum number of sequences for batch processing
     n_seq_max: u32,
+    /// GGUF metadata containing architecture info, dimensions, context size
+    metadata: crate::gguf::GGUFMetadata,
 }
 
 impl EmbeddingModel {
@@ -257,6 +130,7 @@ impl EmbeddingModel {
     /// - The context creation fails
     /// - Invalid configuration parameters are provided
     #[instrument(skip(backend, config), fields(model_path = %config.model_path.display()))]
+    #[allow(clippy::too_many_lines)]
     pub fn new(backend: &LlamaBackend, config: &ModelConfig) -> Result<Self> {
         info!("Loading model from {:?}", config.model_path);
 
@@ -310,8 +184,40 @@ impl EmbeddingModel {
         }))
         .unwrap_or(1);
 
-        // Get n_seq_max from config (default to 1)
-        let n_seq_max = config.n_seq_max.unwrap_or(1);
+        // Extract GGUF metadata for architecture detection and model info
+        let metadata = gguf::extract_metadata(&config.model_path).unwrap_or_else(|e| {
+            warn!(
+                "Failed to read GGUF metadata: {}, assuming decoder model with defaults",
+                e
+            );
+            // Create a fallback metadata that defaults to decoder (safer)
+            crate::gguf::GGUFMetadata {
+                architecture: Some("unknown".to_string()),
+                embedding_dimensions: 0,
+                context_size: ctx_size as usize,
+            }
+        });
+        let is_decoder = metadata.is_decoder();
+        debug!(
+            "Detected model architecture: {} for model: {}",
+            if is_decoder { "decoder" } else { "encoder" },
+            config.model_name
+        );
+
+        // Determine n_seq_max based on model architecture
+        // IMPORTANT: Decoder models (Qwen, LLaMA, Mistral, etc.) crash with n_seq_max > 1
+        // due to how they handle sequence batching in llama.cpp. Encoder models (BERT, etc.)
+        // can safely use higher values for better batch processing performance.
+        let n_seq_max = if is_decoder {
+            // Force decoder models to n_seq_max=1 to prevent crashes
+            debug!("Setting n_seq_max=1 for decoder model (required to prevent crashes)");
+            1
+        } else {
+            // Encoder models can use configured value (default to 8 for better batching)
+            let value = config.n_seq_max.unwrap_or(8);
+            debug!("Setting n_seq_max={} for encoder model", value);
+            value
+        };
 
         let mut ctx_params = LlamaContextParams::default();
         ctx_params = ctx_params.with_n_seq_max(n_seq_max);
@@ -332,9 +238,28 @@ impl EmbeddingModel {
             // > NOTE: These optimizations are enabled through llama-cpp parameters
         }
 
-        // Set micro-batch size (default to context size if not specified)
-        // This must be >= the number of tokens in any single input
-        let n_ubatch = config.n_ubatch.unwrap_or(ctx_size);
+        // Set micro-batch size with architecture-aware defaults
+        // Decoder models (Qwen, LLaMA, etc.) need smaller n_ubatch to prevent memory issues and crashes
+        // Encoder models (BERT, etc.) can use larger values for better batch processing
+        let n_ubatch = if let Some(ubatch) = config.n_ubatch {
+            // Use explicitly configured value
+            debug!("Using configured n_ubatch: {}", ubatch);
+            ubatch
+        } else if is_decoder {
+            // Decoder models: use conservative 512 to prevent crashes
+            // llama-server uses 2048, but 512 is safer for large contexts
+            let ubatch = 512_u32;
+            debug!(
+                "Setting n_ubatch={} for decoder model (conservative default)",
+                ubatch
+            );
+            ubatch
+        } else {
+            // Encoder models: can use larger values for better performance
+            let ubatch = 2048_u32;
+            debug!("Setting n_ubatch={} for encoder model", ubatch);
+            ubatch
+        };
         ctx_params = ctx_params.with_n_ubatch(n_ubatch);
 
         // Set thread counts
@@ -344,8 +269,21 @@ impl EmbeddingModel {
         // Enable embeddings mode
         ctx_params = ctx_params.with_embeddings(true);
 
-        // Flash attention policy true
-        ctx_params = ctx_params.with_flash_attention(true);
+        // Set pooling type based on our pooling strategy
+        // This is critical for decoder models (e.g., Qwen) which require Last pooling
+        let llama_pooling_type = pooling_strategy_to_llama_type(config.pooling_strategy);
+        ctx_params = ctx_params.with_pooling_type(llama_pooling_type);
+        debug!(
+            "Set llama.cpp pooling type to {:?} for strategy {:?}",
+            llama_pooling_type, config.pooling_strategy
+        );
+
+        // Enable flash attention for better performance
+        // Decoder models benefit significantly from flash attention
+        if is_decoder {
+            debug!("Enabling flash attention for decoder model");
+            ctx_params = ctx_params.with_flash_attention(true);
+        }
 
         // Get embedding dimensions from the model
         #[allow(clippy::cast_sign_loss)]
@@ -363,19 +301,19 @@ impl EmbeddingModel {
                 })
         })?;
 
-        // Determine whether to add BOS token
+        // Determine whether to add BOS token (using architecture detection from earlier)
         let add_bos_token = if let Some(add_bos) = config.add_bos_token {
             // Use explicitly configured value
             debug!("Using configured add_bos_token: {}", add_bos);
             add_bos
         } else {
-            // Auto-detect based on model type
-            let detected = Self::detect_add_bos_token(&config.model_path, &config.model_name);
+            // Auto-detect: decoder models need BOS, encoder models don't
             debug!(
-                "Auto-detected add_bos_token: {} for model: {}",
-                detected, config.model_name
+                "Auto-detected add_bos_token: {} for {} model",
+                is_decoder,
+                if is_decoder { "decoder" } else { "encoder" }
             );
-            detected
+            is_decoder
         };
 
         let model = Self {
@@ -388,6 +326,7 @@ impl EmbeddingModel {
             max_context_size: ctx_size as usize,
             add_bos_token,
             n_seq_max,
+            metadata,
         };
 
         // Log effective max tokens for debugging batch size issues
@@ -545,77 +484,6 @@ impl EmbeddingModel {
         let overhead = if self.add_bos_token { 3 } else { 2 };
 
         self.max_context_size.saturating_sub(overhead)
-    }
-
-    /// Detects whether to add BOS token based on model type.
-    ///
-    /// Encoder-only models (BERT, E5, BGE, GTE, etc.) typically don't use BOS tokens
-    /// as they have their own special token handling (CLS/SEP tokens).
-    /// Decoder models (LLaMA-style) typically do use BOS tokens.
-    ///
-    /// # Arguments
-    ///
-    /// * `model_path` - Path to the model file (for potential metadata inspection)
-    /// * `model_name` - Name of the model (used for pattern matching)
-    ///
-    /// # Returns
-    ///
-    /// Returns false for known encoder models, true otherwise (default to decoder behavior)
-    fn detect_add_bos_token(model_path: &Path, model_name: &str) -> bool {
-        // Convert model name to lowercase for case-insensitive matching
-        let name_lower = model_name.to_lowercase();
-        let path_str = model_path.to_string_lossy().to_lowercase();
-
-        // Check for known encoder model patterns
-        let encoder_patterns = [
-            "bert",         // BERT and variants (RoBERTa, DistilBERT, etc.)
-            "jina",         // Jina embeddings (BERT-based)
-            "e5",           // E5 embeddings
-            "bge",          // BGE embeddings
-            "gte",          // GTE embeddings
-            "minilm",       // MiniLM models
-            "mpnet",        // MPNet models
-            "sentence",     // Sentence transformers
-            "all-minilm",   // All-MiniLM variants
-            "all-mpnet",    // All-MPNet variants
-            "paraphrase",   // Paraphrase models (usually BERT-based)
-            "msmarco",      // MS MARCO models (usually BERT-based)
-            "contriever",   // Contriever models
-            "simcse",       // SimCSE models
-            "instructor",   // Instructor models
-            "unsup-simcse", // Unsupervised SimCSE
-            "sup-simcse",   // Supervised SimCSE
-        ];
-
-        // Check if model name or path contains encoder patterns
-        for pattern in &encoder_patterns {
-            if name_lower.contains(pattern) || path_str.contains(pattern) {
-                return false; // Encoder model - don't add BOS
-            }
-        }
-
-        // Check for known decoder model patterns (add BOS)
-        let decoder_patterns = [
-            "llama",
-            "mistral",
-            "mixtral",
-            "vicuna",
-            "alpaca",
-            "wizardlm",
-            "openhermes",
-            "zephyr",
-            "phi",
-        ];
-
-        for pattern in &decoder_patterns {
-            if name_lower.contains(pattern) || path_str.contains(pattern) {
-                return true; // Decoder model - add BOS
-            }
-        }
-
-        // Default to true (decoder behavior) for unknown models
-        // This maintains backward compatibility
-        true
     }
 
     /// Tokenizes the input text.
@@ -842,6 +710,7 @@ impl EmbeddingModel {
     }
 
     /// Internal method to process a batch of token sequences that fits within `n_seq_max`.
+    #[allow(clippy::too_many_lines)]
     fn process_batch_tokens_internal(
         &mut self,
         token_sequences: &[Vec<LlamaToken>],
@@ -869,12 +738,12 @@ impl EmbeddingModel {
         let total_tokens: usize = token_sequences.iter().map(std::vec::Vec::len).sum();
 
         // Create a batch with all sequences (using actual n_seq_max)
-        let n_seq_max_i32 =
+        let _n_seq_max_i32 =
             i32::try_from(self.n_seq_max).map_err(|_| Error::EmbeddingGenerationError {
                 message: "n_seq_max too large for i32".to_string(),
                 source: None,
             })?;
-        let mut batch = LlamaBatch::new(total_tokens, n_seq_max_i32);
+        let mut batch = LlamaBatch::new(total_tokens, 1);
 
         // Add each sequence with unique ID
         for (seq_id, tokens) in token_sequences.iter().enumerate() {
@@ -894,12 +763,22 @@ impl EmbeddingModel {
         }
 
         // Process the entire batch in one model pass
+        // Decoder models need to use decode() instead of encode()
+        // encode() tries to access unified KV cache which is null for decoder models
         self.cell.with_dependent_mut(|_, ctx| {
-            ctx.encode(&mut batch)
-                .map_err(|e| Error::EmbeddingGenerationError {
-                    message: format!("Failed to encode batch: {e}"),
-                    source: Some(anyhow::anyhow!(e)),
-                })
+            if self.metadata.is_decoder() {
+                ctx.decode(&mut batch)
+                    .map_err(|e| Error::EmbeddingGenerationError {
+                        message: format!("Failed to decode batch: {e}"),
+                        source: Some(anyhow::anyhow!(e)),
+                    })
+            } else {
+                ctx.encode(&mut batch)
+                    .map_err(|e| Error::EmbeddingGenerationError {
+                        message: format!("Failed to encode batch: {e}"),
+                        source: Some(anyhow::anyhow!(e)),
+                    })
+            }
         })?;
 
         // Extract embeddings for each sequence
@@ -909,11 +788,12 @@ impl EmbeddingModel {
             let embeddings = self
                 .cell
                 .with_dependent(|_, ctx| -> Result<Vec<Vec<f32>>> {
-                    // Try to get sequence embeddings first (for BERT models)
+                    // llama.cpp handles pooling internally based on our configured strategy
+                    // Try to get the pre-pooled sequence embedding first
                     if let Ok(seq_id_i32) = i32::try_from(seq_id)
                         && let Ok(seq_embeddings) = ctx.embeddings_seq_ith(seq_id_i32)
                     {
-                        // For BERT models with pooling, we get one embedding for the whole sequence
+                        // Got pooled embedding from llama.cpp
                         return Ok(vec![seq_embeddings.to_vec()]);
                     }
 
@@ -1040,42 +920,65 @@ impl EmbeddingModel {
             })?;
 
         // Process the batch through the model
+        // Decoder models need to use decode() instead of encode()
+        // encode() tries to access unified KV cache which is null for decoder models
         self.cell.with_dependent_mut(|_, ctx| {
-            ctx.encode(&mut batch)
-                .map_err(|e| Error::EmbeddingGenerationError {
-                    message: format!("Failed to encode batch: {e}"),
-                    source: Some(anyhow::anyhow!(e)),
-                })
+            if self.metadata.is_decoder() {
+                ctx.decode(&mut batch)
+                    .map_err(|e| Error::EmbeddingGenerationError {
+                        message: format!("Failed to decode batch: {e}"),
+                        source: Some(anyhow::anyhow!(e)),
+                    })
+            } else {
+                ctx.encode(&mut batch)
+                    .map_err(|e| Error::EmbeddingGenerationError {
+                        message: format!("Failed to encode batch: {e}"),
+                        source: Some(anyhow::anyhow!(e)),
+                    })
+            }
         })?;
 
-        // Extract embeddings - try sequence embeddings first for BERT models
-        // If that fails, fall back to token-wise embeddings
+        // Extract embeddings based on pooling configuration
+        // When llama.cpp pooling is enabled (Last, Mean, etc.), the model computes and stores
+        // the pooled embedding, which we retrieve as a sequence embedding.
+        // When pooling is NONE, we get individual token embeddings and pool ourselves.
         let all_embeddings = self
             .cell
             .with_dependent(|_, ctx| -> Result<Vec<Vec<f32>>> {
-                // Try to get sequence embeddings (for BERT models)
+                // llama.cpp handles pooling internally based on our configured strategy
+                // After decode() (decoders) or encode() (encoders), try to get the pooled embedding
+                // Note: For decoders, this accesses per-sequence KV cache (not unified)
                 if let Ok(seq_embeddings) = ctx.embeddings_seq_ith(0) {
-                    // For BERT models with pooling, we get one embedding for the whole sequence
-                    Ok(vec![seq_embeddings.to_vec()])
-                } else {
-                    // Fall back to token-wise embeddings (for LLaMA-style models)
-                    let mut token_embeddings = Vec::with_capacity(n_tokens);
-                    for i in 0..n_tokens {
-                        let i_i32 =
-                            i32::try_from(i).map_err(|_| Error::EmbeddingGenerationError {
-                                message: format!("Index {i} too large for i32"),
-                                source: None,
-                            })?;
-                        let embeddings = ctx.embeddings_ith(i_i32).map_err(|e| {
-                            Error::EmbeddingGenerationError {
+                    debug!(
+                        "Retrieved pooled embedding from llama.cpp (strategy: {:?})",
+                        self.config.pooling_strategy
+                    );
+                    // Return as single embedding (already pooled by llama.cpp)
+                    return Ok(vec![seq_embeddings.to_vec()]);
+                }
+                warn!("Failed to get sequence embedding, falling back to token-wise");
+
+                // Pooling is NONE or sequence embedding failed: get individual token embeddings
+                // We'll apply our own pooling later
+                debug!(
+                    "Extracting token-wise embeddings (pooling strategy: {:?})",
+                    self.config.pooling_strategy
+                );
+                let mut token_embeddings = Vec::with_capacity(n_tokens);
+                for i in 0..n_tokens {
+                    let i_i32 = i32::try_from(i).map_err(|_| Error::EmbeddingGenerationError {
+                        message: format!("Index {i} too large for i32"),
+                        source: None,
+                    })?;
+                    let embeddings =
+                        ctx.embeddings_ith(i_i32)
+                            .map_err(|e| Error::EmbeddingGenerationError {
                                 message: format!("Failed to get embeddings for token {i}"),
                                 source: Some(anyhow::anyhow!(e)),
-                            }
-                        })?;
-                        token_embeddings.push(embeddings.to_vec());
-                    }
-                    Ok(token_embeddings)
+                            })?;
+                    token_embeddings.push(embeddings.to_vec());
                 }
+                Ok(token_embeddings)
             })?;
 
         Ok(all_embeddings)
@@ -1150,6 +1053,11 @@ impl EmbeddingModel {
                 }
 
                 Ok(pooled)
+            }
+            PoolingStrategy::Last => {
+                // Use only the last token (EOS token)
+                // This is required for decoder models like Qwen
+                Ok(embeddings.last().unwrap().clone())
             }
         }
     }
@@ -1357,9 +1265,9 @@ impl EmbeddingModel {
 
         // Extract embeddings using the context's embeddings API
         self.cell.with_dependent(|_, ctx| -> Result<()> {
-            // Try to get sequence embeddings first (for BERT models)
+            // llama.cpp handles pooling internally, try to get the pre-pooled sequence embedding
             if let Ok(seq_embeddings) = ctx.embeddings_seq_ith(0) {
-                // For BERT models with pooling, we get one embedding for the whole sequence
+                // Got pooled embedding from llama.cpp
                 embeddings.push(seq_embeddings.to_vec());
                 return Ok(());
             }
@@ -1386,7 +1294,7 @@ impl EmbeddingModel {
 
     /// Extract context size from GGUF file metadata
     ///
-    /// Uses the public `extract_gguf_metadata` function to get model metadata.
+    /// Uses the `gguf::extract_metadata` function to get model metadata.
     ///
     /// # Arguments
     ///
@@ -1396,8 +1304,8 @@ impl EmbeddingModel {
     ///
     /// Returns the context size from metadata, or an error if not found
     fn extract_context_size_from_gguf(path: &Path) -> Result<u32> {
-        let (_dimensions, context_size) = extract_gguf_metadata(path)?;
-        Ok(context_size.try_into().unwrap_or(2048))
+        let metadata = gguf::extract_metadata(path)?;
+        Ok(metadata.context_size.try_into().unwrap_or(2048))
     }
 }
 
@@ -1427,122 +1335,6 @@ mod tests {
         // We can't load a real model in tests without a GGUF file,
         // but we can test the structure compiles correctly
         // Real integration tests would use actual model files
-    }
-
-    #[test]
-    fn test_detect_add_bos_token_encoder_models() {
-        use std::path::PathBuf;
-
-        // Test various encoder model patterns
-        let encoder_cases = vec![
-            ("bert-base", "models/bert-base.gguf"),
-            (
-                "all-MiniLM-L6-v2",
-                "sentence-transformers/all-MiniLM-L6-v2.gguf",
-            ),
-            ("bge-large-en", "BAAI/bge-large-en-v1.5.gguf"),
-            ("e5-base", "intfloat/e5-base-v2.gguf"),
-            ("gte-base", "thenlper/gte-base.gguf"),
-            (
-                "all-mpnet-base-v2",
-                "sentence-transformers/all-mpnet-base-v2.gguf",
-            ),
-            ("msmarco-bert", "cross-encoder/ms-marco-MiniLM-L-6-v2.gguf"),
-            ("contriever-msmarco", "facebook/contriever-msmarco.gguf"),
-            ("simcse-bert", "princeton-nlp/unsup-simcse-bert-base.gguf"),
-            ("instructor-base", "hkunlp/instructor-base.gguf"),
-            (
-                "jina-embeddings-v2-base-code",
-                "jinaai/jina-embeddings-v2-base-code.gguf",
-            ),
-            (
-                "jina-embeddings-v2-base-en",
-                "jinaai/jina-embeddings-v2-base-en.gguf",
-            ),
-        ];
-
-        for (model_name, model_path) in encoder_cases {
-            let path = PathBuf::from(model_path);
-            let result = EmbeddingModel::detect_add_bos_token(&path, model_name);
-            assert!(
-                !result,
-                "Expected false (no BOS) for encoder model: {model_name}"
-            );
-        }
-    }
-
-    #[test]
-    fn test_detect_add_bos_token_decoder_models() {
-        use std::path::PathBuf;
-
-        // Test various decoder model patterns
-        let decoder_cases = vec![
-            ("llama-2-7b", "meta-llama/Llama-2-7b.gguf"),
-            ("mistral-7b", "mistralai/Mistral-7B-v0.1.gguf"),
-            ("mixtral-8x7b", "mistralai/Mixtral-8x7B-v0.1.gguf"),
-            ("vicuna-7b", "lmsys/vicuna-7b-v1.5.gguf"),
-            ("alpaca-7b", "tatsu-lab/alpaca-7b.gguf"),
-            ("wizardlm-13b", "WizardLM/WizardLM-13B-V1.2.gguf"),
-            ("openhermes-2.5", "teknium/OpenHermes-2.5-Mistral-7B.gguf"),
-            ("zephyr-7b", "HuggingFaceH4/zephyr-7b-beta.gguf"),
-            ("phi-2", "microsoft/phi-2.gguf"),
-        ];
-
-        for (model_name, model_path) in decoder_cases {
-            let path = PathBuf::from(model_path);
-            let result = EmbeddingModel::detect_add_bos_token(&path, model_name);
-            assert!(
-                result,
-                "Expected true (add BOS) for decoder model: {model_name}"
-            );
-        }
-    }
-
-    #[test]
-    fn test_detect_add_bos_token_unknown_models() {
-        use std::path::PathBuf;
-
-        // Test unknown model patterns (should default to true for backward compatibility)
-        let unknown_cases = vec![
-            ("custom-model", "custom/custom-model.gguf"),
-            ("my-embeddings", "embeddings/my-embeddings.gguf"),
-            ("unknown-arch", "models/unknown-arch.gguf"),
-        ];
-
-        for (model_name, model_path) in unknown_cases {
-            let path = PathBuf::from(model_path);
-            let result = EmbeddingModel::detect_add_bos_token(&path, model_name);
-            assert!(
-                result,
-                "Expected true (default) for unknown model: {model_name}"
-            );
-        }
-    }
-
-    #[test]
-    fn test_detect_add_bos_token_case_insensitive() {
-        use std::path::PathBuf;
-
-        // Test case-insensitive matching
-        let cases = vec![
-            ("BERT-Base", "models/BERT.GGUF", false),
-            (
-                "ALL-MINILM-L6",
-                "SENTENCE-TRANSFORMERS/ALL-MINILM.gguf",
-                false,
-            ),
-            ("LLAMA-2-7B", "META-LLAMA/LLAMA-2.GGUF", true),
-            ("MISTRAL-7B", "MISTRALAI/MISTRAL.gguf", true),
-        ];
-
-        for (model_name, model_path, expected) in cases {
-            let path = PathBuf::from(model_path);
-            let result = EmbeddingModel::detect_add_bos_token(&path, model_name);
-            assert_eq!(
-                result, expected,
-                "Case-insensitive test failed for: {model_name}"
-            );
-        }
     }
 
     #[test]

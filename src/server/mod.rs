@@ -153,13 +153,13 @@ impl ModelProvider for FileModelProvider {
         };
 
         // Extract model metadata from GGUF file using shared function
-        let (dimensions, max_tokens) = match crate::model::extract_gguf_metadata(&self.model_path) {
-            Ok((dims, tokens)) => {
+        let (dimensions, max_tokens) = match crate::extract_gguf_metadata(&self.model_path) {
+            Ok(metadata) => {
                 info!(
                     "Successfully extracted metadata: dimensions={}, max_tokens={}",
-                    dims, tokens
+                    metadata.embedding_dimensions, metadata.context_size
                 );
-                (dims, tokens)
+                (metadata.embedding_dimensions, metadata.context_size)
             }
             Err(e) => {
                 warn!(
