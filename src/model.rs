@@ -1320,10 +1320,8 @@ impl EmbeddingModel {
 impl Drop for EmbeddingModel {
     /// Ensures proper cleanup of model resources.
     fn drop(&mut self) {
-        // With global tracing subscriber, we can safely log during cleanup
-        debug!("Dropping model: {}", self.model_name);
-
         // The self_cell will handle dropping both the model and context in the correct order
+        // Note: Cannot safely log here as tracing TLS may already be destroyed during shutdown
     }
 }
 
