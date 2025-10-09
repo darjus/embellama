@@ -61,7 +61,7 @@ fn default_encoding_format() -> String {
 }
 
 /// OpenAI-compatible embeddings response
-#[derive(Debug, Clone, Serialize)]
+#[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct EmbeddingsResponse {
     /// Object type (always "list")
     pub object: String,
@@ -127,7 +127,7 @@ impl EmbeddingsResponse {
 }
 
 /// Individual embedding data
-#[derive(Debug, Clone, Serialize)]
+#[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct EmbeddingData {
     /// Index of this embedding in the batch
     pub index: usize,
@@ -138,7 +138,7 @@ pub struct EmbeddingData {
 }
 
 /// Embedding value - either float array or base64 string
-#[derive(Debug, Clone, Serialize)]
+#[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(untagged)]
 pub enum EmbeddingValue {
     /// Float array representation
@@ -148,7 +148,7 @@ pub enum EmbeddingValue {
 }
 
 /// Token usage statistics
-#[derive(Debug, Clone, Serialize)]
+#[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct Usage {
     /// Number of tokens in the prompt
     pub prompt_tokens: usize,

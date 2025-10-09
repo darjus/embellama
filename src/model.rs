@@ -521,32 +521,28 @@ impl EmbeddingModel {
 
     /// Calculate the effective maximum tokens available for input.
     ///
-    /// For encoder models (like BERT/Jina), the context size must accommodate both
-    /// input tokens AND output embeddings. This method calculates the actual usable
-    /// input token limit by subtracting the embedding output space overhead.
+    /// For BERT-style embedding models, the `max_position_embeddings` parameter
+    /// defines the maximum sequence length the model can handle. The only overhead
+    /// is from special tokens like [CLS] and [SEP] that the tokenizer adds.
     ///
     /// # Returns
     ///
-    /// The maximum number of input tokens that can be safely processed in a single batch.
+    /// The maximum number of input tokens that can be safely processed.
     ///
-    /// # Formula
+    /// # Implementation Note
     ///
-    /// - If embedding dimensions are known: `ctx_size - (dimensions + 100)`
-    /// - If dimensions unknown: `ctx_size - 1024` (conservative fallback)
+    /// The overhead is minimal (2-3 tokens) for special tokens. The embedding
+    /// output vectors are computed from hidden states and don't consume context space.
     ///
     /// # Example
     ///
-    /// For Jina model with 768 dimensions and 8192 context:
-    /// - Overhead: 768 + 100 = 868
-    /// - Effective max: 8192 - 868 = 7324 tokens
+    /// For a model with `max_position_embeddings` = 512:
+    /// - Overhead: 2 tokens ([CLS] and [SEP])
+    /// - Effective max: 512 - 2 = 510 tokens
     pub fn effective_max_tokens(&self) -> usize {
-        let overhead = if self.embedding_dimensions > 0 {
-            // Use actual embedding dimensions + padding for overhead
-            self.embedding_dimensions + 100
-        } else {
-            // Conservative fallback when dimensions are unknown
-            1024
-        };
+        // For embedding models, only special tokens ([CLS], [SEP]) consume overhead
+        // The output embeddings don't use KV cache space
+        let overhead = if self.add_bos_token { 3 } else { 2 };
 
         self.max_context_size.saturating_sub(overhead)
     }
@@ -850,22 +846,27 @@ impl EmbeddingModel {
         &mut self,
         token_sequences: &[Vec<LlamaToken>],
     ) -> Result<Vec<Vec<f32>>> {
-        // Calculate total tokens needed for batch
-        let total_tokens: usize = token_sequences.iter().map(std::vec::Vec::len).sum();
-
-        // Check if total tokens exceed effective max (accounts for embedding output space)
+        // Validate each sequence individually against effective max
+        // For BERT-style batching, each sequence is processed independently
+        // and must fit within the model's max_position_embeddings
         let effective_max = self.effective_max_tokens();
-        if total_tokens > effective_max {
-            return Err(Error::InvalidInput {
-                message: format!(
-                    "Batch total exceeds effective maximum tokens: {} tokens > {} effective max (context: {}, overhead: {}). Please reduce batch size or truncate inputs.",
-                    total_tokens,
-                    effective_max,
-                    self.max_context_size,
-                    self.max_context_size - effective_max
-                ),
-            });
+        for (i, tokens) in token_sequences.iter().enumerate() {
+            if tokens.len() > effective_max {
+                return Err(Error::InvalidInput {
+                    message: format!(
+                        "Sequence {} exceeds effective maximum tokens: {} tokens > {} effective max (context: {}, overhead: {}). Please truncate this input.",
+                        i,
+                        tokens.len(),
+                        effective_max,
+                        self.max_context_size,
+                        self.max_context_size - effective_max
+                    ),
+                });
+            }
         }
+
+        // Calculate total tokens needed for batch allocation
+        let total_tokens: usize = token_sequences.iter().map(std::vec::Vec::len).sum();
 
         // Create a batch with all sequences (using actual n_seq_max)
         let n_seq_max_i32 =

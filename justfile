@@ -32,9 +32,11 @@ backend_features := if os() == "macos" {
 # Model URLs
 test_model_url := "https://huggingface.co/Jarbas/all-MiniLM-L6-v2-Q4_K_M-GGUF/resolve/main/all-minilm-l6-v2-q4_k_m.gguf"
 bench_model_url := "https://huggingface.co/gaianet/jina-embeddings-v2-base-code-GGUF/resolve/main/jina-embeddings-v2-base-code-Q4_K_M.gguf"
+decoder_test_model_url := "https://huggingface.co/jinaai/jina-code-embeddings-0.5b-GGUF/resolve/main/jina-code-embeddings-0.5b-IQ4_NL.gguf"
 
 # Model filenames
 test_model_file := test_model_dir + "/all-minilm-l6-v2-q4_k_m.gguf"
+decoder_test_model_file := test_model_dir + "/jina-code-embeddings-0.5b-IQ4_NL.gguf"
 bench_model_file := bench_model_dir + "/jina-embeddings-v2-base-code-Q4_K_M.gguf"
 
 # Download small test model (MiniLM ~15MB) for integration tests
@@ -47,6 +49,18 @@ download-test-model:
         echo "✓ Test model (MiniLM) downloaded successfully"; \
     else \
         echo "✓ Test model (MiniLM) already cached"; \
+    fi
+
+# Download decoder test model (Jina Code ~353MB) based on Qwen2.5 Coder for integration tests
+download-decoder-model:
+    @echo "Setting up decoder test model..."
+    @mkdir -p {{test_model_dir}}
+    @if [ ! -f {{decoder_test_model_file}} ]; then \
+        echo "Downloading Jina Code decoder model (~353MB)..."; \
+        curl -L --progress-bar -o {{decoder_test_model_file}} {{decoder_test_model_url}}; \
+        echo "✓ Decoder test model (Jina Code) downloaded successfully"; \
+    else \
+        echo "✓ Decoder test model (Jina Code) already cached"; \
     fi
 
 # Download benchmark model (Jina ~110MB) for performance testing
@@ -62,7 +76,7 @@ download-bench-model:
     fi
 
 # Download all models
-download-all: download-test-model download-bench-model
+download-all: download-test-model download-decoder-model download-bench-model
     @echo "✓ All models ready"
 
 # Run unit tests (no models required)
@@ -70,30 +84,71 @@ test-unit:
     @echo "Running unit tests with backend features ({{backend_features}})..."
     cargo test --lib --features "{{backend_features}}"
 
-# Run integration tests with real model
-test-integration: download-test-model
-    @echo "Running integration tests with backend features ({{backend_features}})..."
-    RUST_BACKTRACE=1 EMBELLAMA_TEST_MODEL={{test_model_file}} \
+# Run integration tests with encoder model (MiniLM)
+test-integration-encoder: download-test-model
+    @echo "Running integration tests with encoder model ({{backend_features}})..."
+    RUST_BACKTRACE=1 RUST_LOG=DEBUG EMBELLAMA_TEST_MODEL={{test_model_file}} \
     cargo test --test integration_tests --features "{{backend_features}}" -- --nocapture
 
-# Run concurrency tests
-test-concurrency: download-test-model
-    @echo "Running concurrency tests with backend features ({{backend_features}})..."
+# Run integration tests with decoder model (Jina Code)
+test-integration-decoder: download-decoder-model
+    @echo "Running integration tests with decoder model ({{backend_features}})..."
+    RUST_BACKTRACE=1 RUST_LOG=DEBUG EMBELLAMA_TEST_MODEL={{decoder_test_model_file}} \
+    cargo test --test integration_tests --features "{{backend_features}}" -- --nocapture
+
+# Run integration tests with both encoder and decoder models
+test-integration: test-integration-encoder test-integration-decoder
+    @echo "✓ Integration tests completed with both models"
+
+# Run concurrency tests with encoder model (MiniLM)
+test-concurrency-encoder: download-test-model
+    @echo "Running concurrency tests with encoder model ({{backend_features}})..."
     EMBELLAMA_TEST_MODEL={{test_model_file}} \
     cargo test --test concurrency_tests --features "{{backend_features}}" -- --nocapture
 
-# Run property-based tests
-test-property: download-test-model
-    @echo "Running property-based tests with backend features ({{backend_features}})..."
+# Run concurrency tests with decoder model (Jina Code)
+test-concurrency-decoder: download-decoder-model
+    @echo "Running concurrency tests with decoder model ({{backend_features}})..."
+    EMBELLAMA_TEST_MODEL={{decoder_test_model_file}} \
+    cargo test --test concurrency_tests --features "{{backend_features}}" -- --nocapture
+
+# Run concurrency tests with both encoder and decoder models
+test-concurrency: test-concurrency-encoder test-concurrency-decoder
+    @echo "✓ Concurrency tests completed with both models"
+
+# Run property-based tests with encoder model (MiniLM)
+test-property-encoder: download-test-model
+    @echo "Running property-based tests with encoder model ({{backend_features}})..."
     EMBELLAMA_TEST_MODEL={{test_model_file}} \
     cargo test --test property_tests --features "{{backend_features}}" -- --nocapture
 
-# Run property-based tests with fewer cases (faster)
-test-property-quick: download-test-model
-    @echo "Running property-based tests (quick mode) with backend features ({{backend_features}})..."
+# Run property-based tests with decoder model (Jina Code)
+test-property-decoder: download-decoder-model
+    @echo "Running property-based tests with decoder model ({{backend_features}})..."
+    EMBELLAMA_TEST_MODEL={{decoder_test_model_file}} \
+    cargo test --test property_tests --features "{{backend_features}}" -- --nocapture
+
+# Run property-based tests with both encoder and decoder models
+test-property: test-property-encoder test-property-decoder
+    @echo "✓ Property tests completed with both models"
+
+# Run property-based tests with fewer cases (faster) - encoder model
+test-property-quick-encoder: download-test-model
+    @echo "Running property-based tests (quick mode) with encoder model ({{backend_features}})..."
     EMBELLAMA_TEST_MODEL={{test_model_file}} \
     PROPTEST_CASES=10 \
     cargo test --test property_tests --features "{{backend_features}}" -- --nocapture
+
+# Run property-based tests with fewer cases (faster) - decoder model
+test-property-quick-decoder: download-decoder-model
+    @echo "Running property-based tests (quick mode) with decoder model ({{backend_features}})..."
+    EMBELLAMA_TEST_MODEL={{decoder_test_model_file}} \
+    PROPTEST_CASES=10 \
+    cargo test --test property_tests --features "{{backend_features}}" -- --nocapture
+
+# Run property-based tests (quick mode) with both encoder and decoder models
+test-property-quick: test-property-quick-encoder test-property-quick-decoder
+    @echo "✓ Property tests (quick mode) completed with both models"
 
 # Run all tests
 test: test-unit test-integration test-concurrency test-property
@@ -228,9 +283,15 @@ models-status:
     @echo "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
     @if [ -f {{test_model_file}} ]; then \
         size=`du -h {{test_model_file}} | cut -f1`; \
-        echo "✓ Test model: {{test_model_file}} ($$size)"; \
+        echo "✓ Encoder test model: {{test_model_file}} ($$size)"; \
     else \
-        echo "✗ Test model: Not downloaded"; \
+        echo "✗ Encoder test model: Not downloaded"; \
+    fi
+    @if [ -f {{decoder_test_model_file}} ]; then \
+        size=`du -h {{decoder_test_model_file}} | cut -f1`; \
+        echo "✓ Decoder test model: {{decoder_test_model_file}} ($$size)"; \
+    else \
+        echo "✗ Decoder test model: Not downloaded"; \
     fi
     @if [ -f {{bench_model_file}} ]; then \
         size=`du -h {{bench_model_file}} | cut -f1`; \
