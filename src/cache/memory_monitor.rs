@@ -23,7 +23,9 @@ use std::sync::Arc;
 #[cfg(feature = "server")]
 use std::time::Duration;
 use sysinfo::System;
-use tracing::{debug, info, warn};
+use tracing::info;
+#[cfg(feature = "server")]
+use tracing::{debug, warn};
 
 /// Memory monitor configuration
 #[derive(Debug, Clone, Serialize, Deserialize)]

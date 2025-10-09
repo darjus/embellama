@@ -766,6 +766,10 @@ impl EmbeddingModel {
         // Decoder models need to use decode() instead of encode()
         // encode() tries to access unified KV cache which is null for decoder models
         self.cell.with_dependent_mut(|_, ctx| {
+            // Clear KV cache to ensure clean state for batch processing
+            // This prevents cache contamination between batch and sequential calls
+            ctx.clear_kv_cache();
+
             if self.metadata.is_decoder() {
                 ctx.decode(&mut batch)
                     .map_err(|e| Error::EmbeddingGenerationError {
@@ -923,6 +927,10 @@ impl EmbeddingModel {
         // Decoder models need to use decode() instead of encode()
         // encode() tries to access unified KV cache which is null for decoder models
         self.cell.with_dependent_mut(|_, ctx| {
+            // Clear KV cache to ensure clean state for each embedding generation
+            // This prevents cache contamination between sequential calls
+            ctx.clear_kv_cache();
+
             if self.metadata.is_decoder() {
                 ctx.decode(&mut batch)
                     .map_err(|e| Error::EmbeddingGenerationError {
