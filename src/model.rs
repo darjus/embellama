@@ -608,43 +608,16 @@ impl EmbeddingModel {
         // Tokenize the text with caching support
         let tokens = self.tokenize_cached(text, self.add_bos_token, token_cache)?;
 
-        // Check token limit using effective max (accounts for embedding output space)
-        let effective_max = self.effective_max_tokens();
-        if tokens.len() > effective_max {
-            return Err(Error::InvalidInput {
-                message: format!(
-                    "Input exceeds effective maximum tokens: {} tokens > {} effective max (context: {}, overhead: {}). Please truncate your input.",
-                    tokens.len(),
-                    effective_max,
-                    self.max_context_size,
-                    self.max_context_size - effective_max
-                ),
-            });
-        }
+        // Validate token limit
+        self.validate_token_limit(tokens.len(), Some("Input"))?;
 
         debug!("Tokenized text into {} tokens", tokens.len());
 
         // Process tokens to get embeddings
         let embeddings = self.process_tokens_internal(&tokens)?;
 
-        // Check if we got a single pre-pooled embedding (BERT models with pooling)
-        let pooled = if embeddings.len() == 1 && tokens.len() > 1 {
-            // This is already pooled by the model (BERT with pooling_type)
-            debug!("Using pre-pooled embedding from BERT model");
-            embeddings[0].clone()
-        } else {
-            // Apply our pooling strategy for multi-token outputs
-            Self::apply_pooling(&embeddings, self.config.pooling_strategy)?
-        };
-
-        // Normalize if configured
-        let final_embedding = if self.config.normalize_embeddings {
-            Self::normalize_embedding(pooled)?
-        } else {
-            pooled
-        };
-
-        Ok(final_embedding)
+        // Apply pooling and normalization
+        self.finalize_embedding(&embeddings, tokens.len())
     }
 
     /// Processes multiple token sequences as a batch through the model.
@@ -718,20 +691,8 @@ impl EmbeddingModel {
         // Validate each sequence individually against effective max
         // For BERT-style batching, each sequence is processed independently
         // and must fit within the model's max_position_embeddings
-        let effective_max = self.effective_max_tokens();
         for (i, tokens) in token_sequences.iter().enumerate() {
-            if tokens.len() > effective_max {
-                return Err(Error::InvalidInput {
-                    message: format!(
-                        "Sequence {} exceeds effective maximum tokens: {} tokens > {} effective max (context: {}, overhead: {}). Please truncate this input.",
-                        i,
-                        tokens.len(),
-                        effective_max,
-                        self.max_context_size,
-                        self.max_context_size - effective_max
-                    ),
-                });
-            }
+            self.validate_token_limit(tokens.len(), Some(&format!("Sequence {i}")))?;
         }
 
         // Calculate total tokens needed for batch allocation
@@ -765,89 +726,27 @@ impl EmbeddingModel {
         // Process the entire batch in one model pass
         // Decoder models need to use decode() instead of encode()
         // encode() tries to access unified KV cache which is null for decoder models
-        self.cell.with_dependent_mut(|_, ctx| {
-            // Clear KV cache to ensure clean state for batch processing
-            // This prevents cache contamination between batch and sequential calls
-            ctx.clear_kv_cache();
-
-            if self.metadata.is_decoder() {
-                ctx.decode(&mut batch)
-                    .map_err(|e| Error::EmbeddingGenerationError {
-                        message: format!("Failed to decode batch: {e}"),
-                        source: Some(anyhow::anyhow!(e)),
-                    })
-            } else {
-                ctx.encode(&mut batch)
-                    .map_err(|e| Error::EmbeddingGenerationError {
-                        message: format!("Failed to encode batch: {e}"),
-                        source: Some(anyhow::anyhow!(e)),
-                    })
-            }
-        })?;
+        self.process_batch(&mut batch)?;
 
         // Extract embeddings for each sequence
         let mut all_embeddings = Vec::with_capacity(token_sequences.len());
 
         for seq_id in 0..token_sequences.len() {
-            let embeddings = self
-                .cell
-                .with_dependent(|_, ctx| -> Result<Vec<Vec<f32>>> {
-                    // llama.cpp handles pooling internally based on our configured strategy
-                    // Try to get the pre-pooled sequence embedding first
-                    if let Ok(seq_id_i32) = i32::try_from(seq_id)
-                        && let Ok(seq_embeddings) = ctx.embeddings_seq_ith(seq_id_i32)
-                    {
-                        // Got pooled embedding from llama.cpp
-                        return Ok(vec![seq_embeddings.to_vec()]);
-                    }
+            // Calculate token offset for this sequence
+            let token_offset: usize = token_sequences[..seq_id]
+                .iter()
+                .map(std::vec::Vec::len)
+                .sum();
 
-                    // Fall back to token-wise embeddings (for LLaMA-style models)
-                    // Need to extract tokens for this specific sequence
-                    let seq_tokens = &token_sequences[seq_id];
-                    let mut token_embeddings = Vec::with_capacity(seq_tokens.len());
-
-                    // Calculate token offset for this sequence
-                    let token_offset: usize = token_sequences[..seq_id]
-                        .iter()
-                        .map(std::vec::Vec::len)
-                        .sum();
-
-                    for i in 0..seq_tokens.len() {
-                        let global_idx = token_offset + i;
-                        let global_idx_i32 = i32::try_from(global_idx).map_err(|_| {
-                            Error::EmbeddingGenerationError {
-                                message: format!("Global index {global_idx} too large for i32"),
-                                source: None,
-                            }
-                        })?;
-                        let embeddings = ctx.embeddings_ith(global_idx_i32).map_err(|e| {
-                            Error::EmbeddingGenerationError {
-                                message: format!(
-                                    "Failed to get embeddings for token {i} in sequence {seq_id}"
-                                ),
-                                source: Some(anyhow::anyhow!(e)),
-                            }
-                        })?;
-                        token_embeddings.push(embeddings.to_vec());
-                    }
-                    Ok(token_embeddings)
-                })?;
+            let embeddings = self.extract_sequence_embeddings(
+                seq_id,
+                token_sequences[seq_id].len(),
+                Some(token_offset),
+            )?;
 
             // Apply pooling and normalization
-            let pooled = if embeddings.len() == 1 && token_sequences[seq_id].len() > 1 {
-                // Pre-pooled by model
-                embeddings[0].clone()
-            } else {
-                // Apply our pooling strategy
-                Self::apply_pooling(&embeddings, self.config.pooling_strategy)?
-            };
-
-            let final_embedding = if self.config.normalize_embeddings {
-                Self::normalize_embedding(pooled)?
-            } else {
-                pooled
-            };
-
+            let final_embedding =
+                self.finalize_embedding(&embeddings, token_sequences[seq_id].len())?;
             all_embeddings.push(final_embedding);
         }
 
@@ -878,17 +777,210 @@ impl EmbeddingModel {
         let llama_tokens: Vec<LlamaToken> = tokens.iter().map(|&t| LlamaToken(t)).collect();
         let embeddings = self.process_tokens_internal(&llama_tokens)?;
 
-        // Apply pooling strategy
-        let pooled = Self::apply_pooling(&embeddings, self.config.pooling_strategy)?;
+        // Apply pooling and normalization
+        self.finalize_embedding(&embeddings, llama_tokens.len())
+    }
 
-        // Normalize if configured
-        let final_embedding = if self.config.normalize_embeddings {
-            Self::normalize_embedding(pooled)?
+    /// Helper to convert usize index to i32 with consistent error handling.
+    ///
+    /// # Arguments
+    ///
+    /// * `index` - The index to convert
+    /// * `context` - Description of what the index represents (for error messages)
+    ///
+    /// # Returns
+    ///
+    /// Returns the i32 representation of the index.
+    ///
+    /// # Errors
+    ///
+    /// Returns an error if the index is too large for i32.
+    #[inline]
+    fn to_i32(index: usize, context: &str) -> Result<i32> {
+        i32::try_from(index).map_err(|_| Error::EmbeddingGenerationError {
+            message: format!("{context} {index} too large for i32"),
+            source: None,
+        })
+    }
+
+    /// Validate that a token count is within the effective maximum limit.
+    ///
+    /// This method consolidates token limit validation that was previously
+    /// duplicated in three different locations.
+    ///
+    /// # Arguments
+    ///
+    /// * `token_count` - Number of tokens to validate
+    /// * `context_hint` - Optional context string for error messages (e.g., "Sequence 0")
+    ///
+    /// # Returns
+    ///
+    /// Returns `Ok(())` if the token count is within limits.
+    ///
+    /// # Errors
+    ///
+    /// Returns an error if the token count exceeds the effective maximum.
+    fn validate_token_limit(&self, token_count: usize, context_hint: Option<&str>) -> Result<()> {
+        let effective_max = self.effective_max_tokens();
+        if token_count > effective_max {
+            let context_prefix = context_hint.map_or_else(String::new, |h| format!("{h} "));
+            return Err(Error::InvalidInput {
+                message: format!(
+                    "{}exceeds effective maximum tokens: {} tokens > {} effective max (context: {}, overhead: {}). Please truncate your input.",
+                    context_prefix,
+                    token_count,
+                    effective_max,
+                    self.max_context_size,
+                    self.max_context_size - effective_max
+                ),
+            });
+        }
+        Ok(())
+    }
+
+    /// Finalize an embedding by applying pooling and normalization.
+    ///
+    /// This method consolidates the pooling + normalization logic that was
+    /// previously duplicated in four different locations.
+    ///
+    /// # Arguments
+    ///
+    /// * `embeddings` - The raw embeddings from the model
+    /// * `expected_tokens` - The number of tokens we expected (for pre-pooled detection)
+    ///
+    /// # Returns
+    ///
+    /// Returns the final pooled and optionally normalized embedding vector.
+    ///
+    /// # Errors
+    ///
+    /// Returns an error if pooling or normalization fails.
+    fn finalize_embedding(
+        &self,
+        embeddings: &[Vec<f32>],
+        expected_tokens: usize,
+    ) -> Result<Vec<f32>> {
+        // Check if we got a single pre-pooled embedding
+        let pooled = if embeddings.len() == 1 && expected_tokens > 1 {
+            // This is already pooled by the model (BERT with pooling_type)
+            debug!("Using pre-pooled embedding from model");
+            embeddings[0].clone()
         } else {
-            pooled
+            // Apply our pooling strategy for multi-token outputs
+            Self::apply_pooling(embeddings, self.config.pooling_strategy)?
         };
 
-        Ok(final_embedding)
+        // Normalize if configured
+        if self.config.normalize_embeddings {
+            Self::normalize_embedding(pooled)
+        } else {
+            Ok(pooled)
+        }
+    }
+
+    /// Extract embeddings for a sequence from the context.
+    ///
+    /// This method handles both pre-pooled embeddings (from `embeddings_seq_ith`)
+    /// and token-wise embeddings (from `embeddings_ith`). This logic was previously
+    /// duplicated in three different locations.
+    ///
+    /// # Arguments
+    ///
+    /// * `seq_id` - The sequence ID to extract embeddings for
+    /// * `n_tokens` - Number of tokens in the sequence
+    /// * `token_offset` - Optional offset for token-wise extraction (used in batch processing)
+    ///
+    /// # Returns
+    ///
+    /// Returns a vector of embedding vectors (one per token, or single pre-pooled).
+    ///
+    /// # Errors
+    ///
+    /// Returns an error if embedding extraction fails.
+    fn extract_sequence_embeddings(
+        &self,
+        seq_id: usize,
+        n_tokens: usize,
+        token_offset: Option<usize>,
+    ) -> Result<Vec<Vec<f32>>> {
+        self.cell.with_dependent(|_, ctx| -> Result<Vec<Vec<f32>>> {
+            // llama.cpp handles pooling internally based on our configured strategy
+            // Try to get the pre-pooled sequence embedding first
+            let seq_id_i32 = Self::to_i32(seq_id, "Sequence ID")?;
+            if let Ok(seq_embeddings) = ctx.embeddings_seq_ith(seq_id_i32) {
+                // Got pooled embedding from llama.cpp
+                debug!(
+                    "Retrieved pooled embedding for sequence {} (strategy: {:?})",
+                    seq_id, self.config.pooling_strategy
+                );
+                return Ok(vec![seq_embeddings.to_vec()]);
+            }
+
+            if seq_id == 0 {
+                debug!(
+                    "Failed to get sequence embedding, falling back to token-wise (strategy: {:?})",
+                    self.config.pooling_strategy
+                );
+            }
+
+            // Fall back to token-wise embeddings (for LLaMA-style models)
+            // Need to extract tokens for this specific sequence
+            let mut token_embeddings = Vec::with_capacity(n_tokens);
+            let offset = token_offset.unwrap_or(0);
+
+            for i in 0..n_tokens {
+                let global_idx = offset + i;
+                let global_idx_i32 = Self::to_i32(global_idx, "Token index")?;
+                let embeddings = ctx.embeddings_ith(global_idx_i32).map_err(|e| {
+                    Error::EmbeddingGenerationError {
+                        message: format!(
+                            "Failed to get embeddings for token {i} in sequence {seq_id}"
+                        ),
+                        source: Some(anyhow::anyhow!(e)),
+                    }
+                })?;
+                token_embeddings.push(embeddings.to_vec());
+            }
+            Ok(token_embeddings)
+        })
+    }
+
+    /// Process a batch through the model using decode (decoders) or encode (encoders).
+    ///
+    /// This method handles the KV cache clearing and model-specific processing logic
+    /// that was previously duplicated across multiple methods.
+    ///
+    /// # Arguments
+    ///
+    /// * `batch` - The batch to process through the model
+    ///
+    /// # Returns
+    ///
+    /// Returns `Ok(())` if processing succeeds.
+    ///
+    /// # Errors
+    ///
+    /// Returns an error if batch processing fails.
+    fn process_batch(&mut self, batch: &mut LlamaBatch) -> Result<()> {
+        self.cell.with_dependent_mut(|_, ctx| {
+            // Clear KV cache to ensure clean state for each embedding generation
+            // This prevents cache contamination between sequential calls
+            ctx.clear_kv_cache();
+
+            if self.metadata.is_decoder() {
+                ctx.decode(batch)
+                    .map_err(|e| Error::EmbeddingGenerationError {
+                        message: format!("Failed to decode batch: {e}"),
+                        source: Some(anyhow::anyhow!(e)),
+                    })
+            } else {
+                ctx.encode(batch)
+                    .map_err(|e| Error::EmbeddingGenerationError {
+                        message: format!("Failed to encode batch: {e}"),
+                        source: Some(anyhow::anyhow!(e)),
+                    })
+            }
+        })
     }
 
     /// Internal method to process `LlamaToken` vectors.
@@ -899,19 +991,8 @@ impl EmbeddingModel {
             });
         }
 
-        // Check if input exceeds effective max (accounts for embedding output space)
-        let effective_max = self.effective_max_tokens();
-        if tokens.len() > effective_max {
-            return Err(Error::InvalidInput {
-                message: format!(
-                    "Input exceeds effective maximum tokens: {} tokens > {} effective max (context: {}, overhead: {}). Please truncate your input.",
-                    tokens.len(),
-                    effective_max,
-                    self.max_context_size,
-                    self.max_context_size - effective_max
-                ),
-            });
-        }
+        // Validate token limit
+        self.validate_token_limit(tokens.len(), Some("Input"))?;
 
         // Create a batch for processing
         let n_tokens = tokens.len();
@@ -926,68 +1007,13 @@ impl EmbeddingModel {
         // Process the batch through the model
         // Decoder models need to use decode() instead of encode()
         // encode() tries to access unified KV cache which is null for decoder models
-        self.cell.with_dependent_mut(|_, ctx| {
-            // Clear KV cache to ensure clean state for each embedding generation
-            // This prevents cache contamination between sequential calls
-            ctx.clear_kv_cache();
-
-            if self.metadata.is_decoder() {
-                ctx.decode(&mut batch)
-                    .map_err(|e| Error::EmbeddingGenerationError {
-                        message: format!("Failed to decode batch: {e}"),
-                        source: Some(anyhow::anyhow!(e)),
-                    })
-            } else {
-                ctx.encode(&mut batch)
-                    .map_err(|e| Error::EmbeddingGenerationError {
-                        message: format!("Failed to encode batch: {e}"),
-                        source: Some(anyhow::anyhow!(e)),
-                    })
-            }
-        })?;
+        self.process_batch(&mut batch)?;
 
         // Extract embeddings based on pooling configuration
         // When llama.cpp pooling is enabled (Last, Mean, etc.), the model computes and stores
         // the pooled embedding, which we retrieve as a sequence embedding.
         // When pooling is NONE, we get individual token embeddings and pool ourselves.
-        let all_embeddings = self
-            .cell
-            .with_dependent(|_, ctx| -> Result<Vec<Vec<f32>>> {
-                // llama.cpp handles pooling internally based on our configured strategy
-                // After decode() (decoders) or encode() (encoders), try to get the pooled embedding
-                // Note: For decoders, this accesses per-sequence KV cache (not unified)
-                if let Ok(seq_embeddings) = ctx.embeddings_seq_ith(0) {
-                    debug!(
-                        "Retrieved pooled embedding from llama.cpp (strategy: {:?})",
-                        self.config.pooling_strategy
-                    );
-                    // Return as single embedding (already pooled by llama.cpp)
-                    return Ok(vec![seq_embeddings.to_vec()]);
-                }
-                warn!("Failed to get sequence embedding, falling back to token-wise");
-
-                // Pooling is NONE or sequence embedding failed: get individual token embeddings
-                // We'll apply our own pooling later
-                debug!(
-                    "Extracting token-wise embeddings (pooling strategy: {:?})",
-                    self.config.pooling_strategy
-                );
-                let mut token_embeddings = Vec::with_capacity(n_tokens);
-                for i in 0..n_tokens {
-                    let i_i32 = i32::try_from(i).map_err(|_| Error::EmbeddingGenerationError {
-                        message: format!("Index {i} too large for i32"),
-                        source: None,
-                    })?;
-                    let embeddings =
-                        ctx.embeddings_ith(i_i32)
-                            .map_err(|e| Error::EmbeddingGenerationError {
-                                message: format!("Failed to get embeddings for token {i}"),
-                                source: Some(anyhow::anyhow!(e)),
-                            })?;
-                    token_embeddings.push(embeddings.to_vec());
-                }
-                Ok(token_embeddings)
-            })?;
+        let all_embeddings = self.extract_sequence_embeddings(0, n_tokens, None)?;
 
         Ok(all_embeddings)
     }
@@ -1257,47 +1283,13 @@ impl EmbeddingModel {
         };
 
         // Apply pooling and normalization
-        let pooled = Self::apply_pooling(&embedding, self.config.pooling_strategy)?;
-        let final_embedding = if self.config.normalize_embeddings {
-            Self::normalize_embedding(pooled)?
-        } else {
-            pooled
-        };
-
-        Ok(final_embedding)
+        self.finalize_embedding(&embedding, tokens.len())
     }
 
     /// Extract embeddings from the current context state
     fn extract_embeddings(&self, tokens: &[LlamaToken]) -> Result<Vec<Vec<f32>>> {
-        let mut embeddings = Vec::with_capacity(tokens.len());
-
-        // Extract embeddings using the context's embeddings API
-        self.cell.with_dependent(|_, ctx| -> Result<()> {
-            // llama.cpp handles pooling internally, try to get the pre-pooled sequence embedding
-            if let Ok(seq_embeddings) = ctx.embeddings_seq_ith(0) {
-                // Got pooled embedding from llama.cpp
-                embeddings.push(seq_embeddings.to_vec());
-                return Ok(());
-            }
-
-            // Fall back to token-wise embeddings (for LLaMA-style models)
-            for i in 0..tokens.len() {
-                let i_i32 = i32::try_from(i).map_err(|_| Error::EmbeddingGenerationError {
-                    message: format!("Index {i} too large for i32"),
-                    source: None,
-                })?;
-                let embedding =
-                    ctx.embeddings_ith(i_i32)
-                        .map_err(|e| Error::EmbeddingGenerationError {
-                            message: format!("Failed to get embeddings for token {i}"),
-                            source: Some(anyhow::anyhow!(e)),
-                        })?;
-                embeddings.push(embedding.to_vec());
-            }
-            Ok(())
-        })?;
-
-        Ok(embeddings)
+        // Delegate to the unified extraction method
+        self.extract_sequence_embeddings(0, tokens.len(), None)
     }
 
     /// Extract context size from GGUF file metadata
