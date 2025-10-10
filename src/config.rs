@@ -64,13 +64,7 @@ pub struct ModelConfig {
 
     /// Context size override (defaults to `n_ctx` if not specified)
     /// This controls the KV cache/attention cache size for better performance
-    /// Note: Previously named `kv_cache_size` - that field is now deprecated
     pub context_size: Option<u32>,
-
-    /// Deprecated: Use `context_size` instead
-    /// This field is maintained for backward compatibility and will be removed in v0.4.0
-    #[deprecated(since = "0.3.1", note = "Use `context_size` instead")]
-    pub kv_cache_size: Option<u32>,
 
     /// Enable KV cache optimization for batch processing
     /// This includes batch reordering and similar-length grouping
@@ -137,6 +131,12 @@ impl ModelConfig {
             return Err(Error::config("Context size must be greater than 0"));
         }
 
+        if let Some(context_size) = self.context_size
+            && context_size == 0
+        {
+            return Err(Error::config("Context size must be greater than 0"));
+        }
+
         if let Some(n_ubatch) = self.n_ubatch
             && n_ubatch == 0
         {
@@ -180,8 +180,6 @@ impl Default for ModelConfig {
             add_bos_token: None,
             n_seq_max: None,
             context_size: None,
-            #[allow(deprecated)]
-            kv_cache_size: None,
             enable_kv_optimization: false,
         }
     }
@@ -264,18 +262,6 @@ impl ModelConfigBuilder {
         self
     }
 
-    /// Set whether to normalize embeddings (deprecated - use `with_normalization_mode`)
-    #[must_use]
-    #[deprecated(since = "0.4.0", note = "Use with_normalization_mode instead")]
-    pub fn with_normalize_embeddings(mut self, normalize: bool) -> Self {
-        self.config.normalization_mode = if normalize {
-            NormalizationMode::L2
-        } else {
-            NormalizationMode::None
-        };
-        self
-    }
-
     /// Set the pooling strategy
     #[must_use]
     pub fn with_pooling_strategy(mut self, strategy: PoolingStrategy) -> Self {
@@ -303,22 +289,6 @@ impl ModelConfigBuilder {
     #[must_use]
     pub fn with_context_size(mut self, context_size: u32) -> Self {
         self.config.context_size = Some(context_size);
-        #[allow(deprecated)]
-        {
-            self.config.kv_cache_size = Some(context_size); // Maintain backward compat
-        }
-        self
-    }
-
-    /// Deprecated: Use `with_context_size` instead
-    #[deprecated(since = "0.3.1", note = "Use `with_context_size` instead")]
-    #[must_use]
-    pub fn with_kv_cache_size(mut self, kv_cache_size: u32) -> Self {
-        self.config.context_size = Some(kv_cache_size);
-        #[allow(deprecated)]
-        {
-            self.config.kv_cache_size = Some(kv_cache_size);
-        }
         self
     }
 
@@ -347,39 +317,16 @@ impl Default for ModelConfigBuilder {
 }
 
 /// Configuration for the embedding engine
-#[derive(Debug, Clone, Serialize, Deserialize)]
-#[allow(clippy::struct_excessive_bools)]
+#[derive(Debug, Clone, Serialize, Deserialize, Default)]
 pub struct EngineConfig {
-    /// Path to the GGUF model file
-    pub model_path: PathBuf,
-
-    /// Name identifier for the model
-    pub model_name: String,
-
-    /// Context size for the model (defaults to model's default if None)
-    pub context_size: Option<usize>,
-
-    /// Micro-batch size for prompt processing
-    /// This must be >= the number of tokens in any single input
-    pub n_ubatch: Option<u32>,
-
-    /// Number of threads to use for CPU inference (defaults to number of CPU cores)
-    pub n_threads: Option<usize>,
+    /// Model configuration (contains path, name, and all model-specific settings)
+    pub model_config: ModelConfig,
 
     /// Whether to use GPU acceleration if available
     pub use_gpu: bool,
 
-    /// Number of GPU layers to offload (0 = CPU only)
-    pub n_gpu_layers: Option<u32>,
-
     /// Batch size for processing
     pub batch_size: Option<usize>,
-
-    /// Normalization mode for embeddings
-    pub normalization_mode: NormalizationMode,
-
-    /// Pooling strategy for embeddings
-    pub pooling_strategy: PoolingStrategy,
 
     /// Maximum number of tokens per input
     pub max_tokens: Option<usize>,
@@ -395,22 +342,6 @@ pub struct EngineConfig {
 
     /// Temperature for sampling (not typically used for embeddings)
     pub temperature: Option<f32>,
-
-    /// Use memory mapping for model loading
-    /// NOTE: This setting is not yet supported by llama-cpp-2 API
-    pub use_mmap: bool,
-
-    /// Use memory locking to prevent swapping
-    /// NOTE: This setting is not yet supported by llama-cpp-2 API
-    pub use_mlock: bool,
-
-    /// Whether to add BOS (beginning-of-sequence) token during tokenization
-    /// None = auto-detect based on model type
-    pub add_bos_token: Option<bool>,
-
-    /// Maximum number of sequences for batch processing
-    /// Default: 1, max: 64 (llama.cpp limit)
-    pub n_seq_max: Option<u32>,
 
     /// Cache configuration
     pub cache: Option<CacheConfig>,
@@ -657,33 +588,6 @@ impl CacheConfigBuilder {
     }
 }
 
-impl Default for EngineConfig {
-    fn default() -> Self {
-        Self {
-            model_path: PathBuf::new(),
-            model_name: String::new(),
-            context_size: None,
-            n_ubatch: None,
-            n_threads: None,
-            use_gpu: false,
-            n_gpu_layers: None,
-            batch_size: None,
-            normalization_mode: NormalizationMode::L2,
-            pooling_strategy: PoolingStrategy::default(),
-            max_tokens: None,
-            memory_limit_mb: None,
-            verbose: false,
-            seed: None,
-            temperature: None,
-            use_mmap: true,
-            use_mlock: false,
-            add_bos_token: None,
-            n_seq_max: None,
-            cache: None,
-        }
-    }
-}
-
 impl EngineConfig {
     /// Create a new configuration builder
     pub fn builder() -> EngineConfigBuilder {
@@ -711,54 +615,15 @@ impl EngineConfig {
     /// # Errors
     ///
     /// Returns an error if:
-    /// - The model path is empty
-    /// - The model file does not exist
-    /// - The model file extension is not `.gguf`
-    /// - Invalid thread count (0)
+    /// - The model configuration is invalid
     /// - Invalid batch size (0)
-    /// - Invalid `n_seq_max` (0 or > 64)
+    /// - Invalid max tokens (0)
+    /// - Cache configuration is invalid
     pub fn validate(&self) -> Result<()> {
-        if self.model_path.as_os_str().is_empty() {
-            return Err(Error::config("Model path cannot be empty"));
-        }
+        // Validate the model configuration
+        self.model_config.validate()?;
 
-        if !self.model_path.exists() {
-            return Err(Error::config(format!(
-                "Model file does not exist: {}",
-                self.model_path.display()
-            )));
-        }
-
-        // Validate GGUF extension
-        if self.model_path.extension().and_then(|e| e.to_str()) != Some("gguf") {
-            return Err(Error::config(format!(
-                "Model file must have .gguf extension: {}",
-                self.model_path.display()
-            )));
-        }
-
-        if self.model_name.trim().is_empty() {
-            return Err(Error::config("Model name cannot be empty"));
-        }
-
-        if let Some(context_size) = self.context_size
-            && context_size == 0
-        {
-            return Err(Error::config("Context size must be greater than 0"));
-        }
-
-        if let Some(n_ubatch) = self.n_ubatch
-            && n_ubatch == 0
-        {
-            return Err(Error::config("Micro-batch size must be greater than 0"));
-        }
-
-        if let Some(n_threads) = self.n_threads
-            && n_threads == 0
-        {
-            return Err(Error::config("Number of threads must be greater than 0"));
-        }
-
+        // Validate engine-specific fields
         if let Some(batch_size) = self.batch_size
             && batch_size == 0
         {
@@ -769,17 +634,6 @@ impl EngineConfig {
             && max_tokens == 0
         {
             return Err(Error::config("Max tokens must be greater than 0"));
-        }
-
-        if let Some(n_seq) = self.n_seq_max {
-            if n_seq == 0 {
-                return Err(Error::config("n_seq_max must be greater than 0"));
-            }
-            if n_seq > 64 {
-                return Err(Error::config(
-                    "n_seq_max cannot exceed 64 (llama.cpp limit)",
-                ));
-            }
         }
 
         // Validate cache configuration if present
@@ -829,28 +683,6 @@ impl EngineConfig {
 
         builder.build()
     }
-
-    /// Convert `EngineConfig` to `ModelConfig`
-    pub fn to_model_config(&self) -> ModelConfig {
-        ModelConfig {
-            model_path: self.model_path.clone(),
-            model_name: self.model_name.clone(),
-            n_ctx: self.context_size.and_then(|s| u32::try_from(s).ok()),
-            n_ubatch: self.n_ubatch,
-            n_threads: self.n_threads,
-            n_gpu_layers: self.n_gpu_layers,
-            use_mmap: self.use_mmap,
-            use_mlock: self.use_mlock,
-            normalization_mode: self.normalization_mode,
-            pooling_strategy: self.pooling_strategy,
-            add_bos_token: self.add_bos_token,
-            n_seq_max: self.n_seq_max,
-            context_size: self.context_size.and_then(|s| u32::try_from(s).ok()),
-            #[allow(deprecated)]
-            kv_cache_size: None, // Deprecated field for backward compatibility
-            enable_kv_optimization: true, // Enable by default
-        }
-    }
 }
 
 /// Builder for creating `EngineConfig` instances
@@ -867,40 +699,102 @@ impl EngineConfigBuilder {
         }
     }
 
-    /// Set the model path
+    /// Set the entire model configuration
+    #[must_use]
+    pub fn with_model_config(mut self, model_config: ModelConfig) -> Self {
+        self.config.model_config = model_config;
+        self
+    }
+
+    // Convenience methods that modify the nested model_config for backward compatibility
+
+    /// Set the model path (convenience method)
     #[must_use]
     pub fn with_model_path<P: AsRef<Path>>(mut self, path: P) -> Self {
-        self.config.model_path = path.as_ref().to_path_buf();
+        self.config.model_config.model_path = path.as_ref().to_path_buf();
         self
     }
 
-    /// Set the model name
+    /// Set the model name (convenience method)
     #[must_use]
     pub fn with_model_name<S: Into<String>>(mut self, name: S) -> Self {
-        self.config.model_name = name.into();
+        self.config.model_config.model_name = name.into();
         self
     }
 
-    /// Set the context size
+    /// Set the context size (convenience method)
     #[must_use]
     pub fn with_context_size(mut self, size: usize) -> Self {
-        self.config.context_size = Some(size);
+        self.config.model_config.context_size = u32::try_from(size).ok();
         self
     }
 
-    /// Set the micro-batch size for prompt processing
+    /// Set the micro-batch size for prompt processing (convenience method)
     #[must_use]
     pub fn with_n_ubatch(mut self, ubatch: u32) -> Self {
-        self.config.n_ubatch = Some(ubatch);
+        self.config.model_config.n_ubatch = Some(ubatch);
         self
     }
 
-    /// Set the number of threads
+    /// Set the number of threads (convenience method)
     #[must_use]
     pub fn with_n_threads(mut self, threads: usize) -> Self {
-        self.config.n_threads = Some(threads);
+        self.config.model_config.n_threads = Some(threads);
         self
     }
+
+    /// Set the number of GPU layers (convenience method)
+    #[must_use]
+    pub fn with_n_gpu_layers(mut self, layers: u32) -> Self {
+        self.config.model_config.n_gpu_layers = Some(layers);
+        self
+    }
+
+    /// Set the normalization mode for embeddings (convenience method)
+    #[must_use]
+    pub fn with_normalization_mode(mut self, mode: NormalizationMode) -> Self {
+        self.config.model_config.normalization_mode = mode;
+        self
+    }
+
+    /// Set the pooling strategy (convenience method)
+    #[must_use]
+    pub fn with_pooling_strategy(mut self, strategy: PoolingStrategy) -> Self {
+        self.config.model_config.pooling_strategy = strategy;
+        self
+    }
+
+    /// Set whether to use memory mapping (convenience method)
+    #[must_use]
+    pub fn with_use_mmap(mut self, use_mmap: bool) -> Self {
+        self.config.model_config.use_mmap = use_mmap;
+        self
+    }
+
+    /// Set whether to use memory locking (convenience method)
+    #[must_use]
+    pub fn with_use_mlock(mut self, use_mlock: bool) -> Self {
+        self.config.model_config.use_mlock = use_mlock;
+        self
+    }
+
+    /// Set whether to add BOS token during tokenization (convenience method)
+    /// None = auto-detect based on model type
+    #[must_use]
+    pub fn with_add_bos_token(mut self, add_bos: Option<bool>) -> Self {
+        self.config.model_config.add_bos_token = add_bos;
+        self
+    }
+
+    /// Set the maximum number of sequences for batch processing (convenience method)
+    /// Default: 1, max: 64 (llama.cpp limit)
+    #[must_use]
+    pub fn with_n_seq_max(mut self, n_seq_max: u32) -> Self {
+        self.config.model_config.n_seq_max = Some(n_seq_max);
+        self
+    }
+
+    // Engine-specific methods
 
     /// Set whether to use GPU
     #[must_use]
@@ -909,43 +803,10 @@ impl EngineConfigBuilder {
         self
     }
 
-    /// Set the number of GPU layers
-    #[must_use]
-    pub fn with_n_gpu_layers(mut self, layers: u32) -> Self {
-        self.config.n_gpu_layers = Some(layers);
-        self
-    }
-
     /// Set the batch size
     #[must_use]
     pub fn with_batch_size(mut self, size: usize) -> Self {
         self.config.batch_size = Some(size);
-        self
-    }
-
-    /// Set the normalization mode for embeddings
-    #[must_use]
-    pub fn with_normalization_mode(mut self, mode: NormalizationMode) -> Self {
-        self.config.normalization_mode = mode;
-        self
-    }
-
-    /// Set whether to normalize embeddings (deprecated - use `with_normalization_mode`)
-    #[must_use]
-    #[deprecated(since = "0.4.0", note = "Use with_normalization_mode instead")]
-    pub fn with_normalize_embeddings(mut self, normalize: bool) -> Self {
-        self.config.normalization_mode = if normalize {
-            NormalizationMode::L2
-        } else {
-            NormalizationMode::None
-        };
-        self
-    }
-
-    /// Set the pooling strategy
-    #[must_use]
-    pub fn with_pooling_strategy(mut self, strategy: PoolingStrategy) -> Self {
-        self.config.pooling_strategy = strategy;
         self
     }
 
@@ -981,36 +842,6 @@ impl EngineConfigBuilder {
     #[must_use]
     pub fn with_temperature(mut self, temperature: f32) -> Self {
         self.config.temperature = Some(temperature);
-        self
-    }
-
-    /// Set whether to use memory mapping
-    #[must_use]
-    pub fn with_use_mmap(mut self, use_mmap: bool) -> Self {
-        self.config.use_mmap = use_mmap;
-        self
-    }
-
-    /// Set whether to use memory locking
-    #[must_use]
-    pub fn with_use_mlock(mut self, use_mlock: bool) -> Self {
-        self.config.use_mlock = use_mlock;
-        self
-    }
-
-    /// Set whether to add BOS token during tokenization
-    /// None = auto-detect based on model type
-    #[must_use]
-    pub fn with_add_bos_token(mut self, add_bos: Option<bool>) -> Self {
-        self.config.add_bos_token = add_bos;
-        self
-    }
-
-    /// Set the maximum number of sequences for batch processing
-    /// Default: 1, max: 64 (llama.cpp limit)
-    #[must_use]
-    pub fn with_n_seq_max(mut self, n_seq_max: u32) -> Self {
-        self.config.n_seq_max = Some(n_seq_max);
         self
     }
 
@@ -1103,12 +934,13 @@ mod tests {
     }
 
     #[test]
-    fn test_engine_to_model_config() {
+    fn test_engine_with_model_config() {
         let dir = tempdir().unwrap();
         let model_path = dir.path().join("model.gguf");
         fs::write(&model_path, b"dummy").unwrap();
 
-        let engine_config = EngineConfig::builder()
+        // Build a model config
+        let model_config = ModelConfig::builder()
             .with_model_path(&model_path)
             .with_model_name("test-model")
             .with_context_size(1024)
@@ -1116,11 +948,17 @@ mod tests {
             .build()
             .unwrap();
 
-        let model_config = engine_config.to_model_config();
-        assert_eq!(model_config.model_path, model_path);
-        assert_eq!(model_config.model_name, "test-model");
-        assert_eq!(model_config.n_ctx, Some(1024));
-        assert_eq!(model_config.n_threads, Some(8));
+        // Build engine config using the model config
+        let engine_config = EngineConfig::builder()
+            .with_model_config(model_config.clone())
+            .build()
+            .unwrap();
+
+        // Verify the model config is properly stored
+        assert_eq!(engine_config.model_config.model_path, model_path);
+        assert_eq!(engine_config.model_config.model_name, "test-model");
+        assert_eq!(engine_config.model_config.context_size, Some(1024));
+        assert_eq!(engine_config.model_config.n_threads, Some(8));
     }
 
     #[test]
@@ -1138,10 +976,10 @@ mod tests {
             .build()
             .unwrap();
 
-        assert_eq!(config.model_path, model_path);
-        assert_eq!(config.model_name, "test-model");
-        assert_eq!(config.context_size, Some(512));
-        assert_eq!(config.n_threads, Some(4));
+        assert_eq!(config.model_config.model_path, model_path);
+        assert_eq!(config.model_config.model_name, "test-model");
+        assert_eq!(config.model_config.context_size, Some(512));
+        assert_eq!(config.model_config.n_threads, Some(4));
         assert!(config.use_gpu);
     }
 
@@ -1229,12 +1067,15 @@ mod tests {
             .build()
             .unwrap();
 
-        assert_eq!(config.context_size, Some(2048));
-        assert_eq!(config.n_threads, Some(16));
+        assert_eq!(config.model_config.context_size, Some(2048));
+        assert_eq!(config.model_config.n_threads, Some(16));
         assert!(config.use_gpu);
-        assert_eq!(config.n_gpu_layers, Some(32));
-        assert_eq!(config.normalization_mode, NormalizationMode::L2);
-        assert_eq!(config.pooling_strategy, PoolingStrategy::Cls);
+        assert_eq!(config.model_config.n_gpu_layers, Some(32));
+        assert_eq!(
+            config.model_config.normalization_mode,
+            NormalizationMode::L2
+        );
+        assert_eq!(config.model_config.pooling_strategy, PoolingStrategy::Cls);
         assert_eq!(config.batch_size, Some(128));
     }
 
@@ -1269,12 +1110,15 @@ mod tests {
             .unwrap();
 
         // Check defaults
-        assert!(config.context_size.is_none());
-        assert!(config.n_threads.is_none());
+        assert!(config.model_config.context_size.is_none());
+        assert!(config.model_config.n_threads.is_none());
         assert!(!config.use_gpu);
-        assert!(config.n_gpu_layers.is_none());
-        assert_eq!(config.normalization_mode, NormalizationMode::L2);
-        assert_eq!(config.pooling_strategy, PoolingStrategy::Mean);
+        assert!(config.model_config.n_gpu_layers.is_none());
+        assert_eq!(
+            config.model_config.normalization_mode,
+            NormalizationMode::L2
+        );
+        assert_eq!(config.model_config.pooling_strategy, PoolingStrategy::Mean);
         assert!(config.batch_size.is_none());
     }
 
@@ -1300,7 +1144,7 @@ mod tests {
                 .build()
                 .unwrap();
 
-            assert_eq!(config.pooling_strategy, strategy);
+            assert_eq!(config.model_config.pooling_strategy, strategy);
         }
     }
 
@@ -1355,7 +1199,7 @@ mod tests {
             .with_context_size(1_000_000)
             .build()
             .unwrap();
-        assert_eq!(config.context_size, Some(1_000_000));
+        assert_eq!(config.model_config.context_size, Some(1_000_000));
 
         // Test with large thread count
         let config = EngineConfig::builder()
@@ -1364,7 +1208,7 @@ mod tests {
             .with_n_threads(256)
             .build()
             .unwrap();
-        assert_eq!(config.n_threads, Some(256));
+        assert_eq!(config.model_config.n_threads, Some(256));
 
         // Test with large batch size
         let config = EngineConfig::builder()
@@ -1390,9 +1234,18 @@ mod tests {
             .unwrap();
 
         let cloned = original.clone();
-        assert_eq!(cloned.model_path, original.model_path);
-        assert_eq!(cloned.model_name, original.model_name);
-        assert_eq!(cloned.context_size, original.context_size);
+        assert_eq!(
+            cloned.model_config.model_path,
+            original.model_config.model_path
+        );
+        assert_eq!(
+            cloned.model_config.model_name,
+            original.model_config.model_name
+        );
+        assert_eq!(
+            cloned.model_config.context_size,
+            original.model_config.context_size
+        );
     }
 
     #[test]
@@ -1424,7 +1277,7 @@ mod tests {
             .with_model_name("test-model_v2.0")
             .build()
             .unwrap();
-        assert_eq!(config.model_name, "test-model_v2.0");
+        assert_eq!(config.model_config.model_name, "test-model_v2.0");
 
         // Test with Unicode characters
         let config = EngineConfig::builder()
@@ -1432,7 +1285,7 @@ mod tests {
             .with_model_name("模型-测试")
             .build()
             .unwrap();
-        assert_eq!(config.model_name, "模型-测试");
+        assert_eq!(config.model_config.model_name, "模型-测试");
     }
 
     #[test]
@@ -1472,6 +1325,6 @@ mod tests {
             .unwrap();
 
         assert!(!config.use_gpu);
-        assert_eq!(config.n_gpu_layers, Some(10));
+        assert_eq!(config.model_config.n_gpu_layers, Some(10));
     }
 }

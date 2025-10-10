@@ -65,7 +65,7 @@ fn test_thread_local_isolation() {
                     .build()
                     .unwrap();
 
-                assert_eq!(config.model_name, format!("model-{i}"));
+                assert_eq!(config.model_config.model_name, format!("model-{i}"));
             })
         })
         .collect();
@@ -337,9 +337,12 @@ fn test_model_operation_isolation() {
 
     // Verify each config maintains its settings
     for (i, config) in configs.iter().enumerate() {
-        assert_eq!(config.model_name, format!("model-{i}"));
-        assert_eq!(config.context_size, Some(512 * (i + 1)));
-        assert_eq!(config.n_threads, Some((i + 1) * 2));
+        assert_eq!(config.model_config.model_name, format!("model-{i}"));
+        assert_eq!(
+            config.model_config.context_size,
+            Some((512 * (i + 1)) as u32)
+        );
+        assert_eq!(config.model_config.n_threads, Some((i + 1) * 2));
     }
 }
 

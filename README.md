@@ -20,17 +20,22 @@ High-performance Rust library for generating text embeddings using llama-cpp.
 ## Quick Start
 
 ```rust
-use embellama::{EmbeddingEngine, EngineConfig};
+use embellama::{ModelConfig, EngineConfig, EmbeddingEngine, NormalizationMode};
 
-// Create configuration
-let config = EngineConfig::builder()
+// Build model configuration
+let model_config = ModelConfig::builder()
     .with_model_path("/path/to/model.gguf")
     .with_model_name("my-model")
-    .with_normalize_embeddings(true)
+    .with_normalization_mode(NormalizationMode::L2)
     .build()?;
 
-// Create engine (uses singleton pattern internally)
-let engine = EmbeddingEngine::new(config)?;
+// Build engine configuration
+let engine_config = EngineConfig::builder()
+    .with_model_config(model_config)
+    .build()?;
+
+// Create engine
+let engine = EmbeddingEngine::new(engine_config)?;
 
 // Generate single embedding
 let text = "Hello, world!";
@@ -108,26 +113,38 @@ embellama = { version = "0.4.0", features = ["cpu-optimized"] }
 ### Basic Configuration
 
 ```rust
-let config = EngineConfig::builder()
+use embellama::{ModelConfig, EngineConfig};
+
+let model_config = ModelConfig::builder()
     .with_model_path("/path/to/model.gguf")
     .with_model_name("my-model")
+    .build()?;
+
+let config = EngineConfig::builder()
+    .with_model_config(model_config)
     .build()?;
 ```
 
 ### Advanced Configuration
 
 ```rust
-let config = EngineConfig::builder()
+use embellama::{ModelConfig, EngineConfig, PoolingStrategy, NormalizationMode};
+
+let model_config = ModelConfig::builder()
     .with_model_path("/path/to/model.gguf")
     .with_model_name("my-model")
-    .with_context_size(2048)           // Model context window (usize)
-    .with_n_threads(8)                 // CPU threads (usize)
-    .with_use_gpu(true)                // Enable GPU acceleration
-    .with_n_gpu_layers(32)             // Layers to offload to GPU (u32)
-    .with_batch_size(64)               // Batch processing size (usize)
-    .with_normalize_embeddings(true)   // L2 normalize embeddings
-    .with_pooling_strategy(PoolingStrategy::Mean)  // Pooling method
-    .with_add_bos_token(Some(false))   // Disable BOS for encoder models (Option<bool>)
+    .with_context_size(2048)
+    .with_n_threads(8)
+    .with_n_gpu_layers(32)
+    .with_normalization_mode(NormalizationMode::L2)
+    .with_pooling_strategy(PoolingStrategy::Mean)
+    .with_add_bos_token(Some(false))
+    .build()?;
+
+let config = EngineConfig::builder()
+    .with_model_config(model_config)
+    .with_use_gpu(true)
+    .with_batch_size(64)
     .build()?;
 ```
 
@@ -174,21 +191,21 @@ The library automatically detects model types and applies appropriate BOS token 
 **Manual Override**:
 ```rust
 // Force disable BOS for a specific model
-let config = EngineConfig::builder()
+let model_config = ModelConfig::builder()
     .with_model_path("/path/to/model.gguf")
     .with_model_name("custom-encoder")
     .with_add_bos_token(Some(false))  // Explicitly disable BOS
     .build()?;
 
 // Force enable BOS
-let config = EngineConfig::builder()
+let model_config = ModelConfig::builder()
     .with_model_path("/path/to/model.gguf")
     .with_model_name("custom-decoder")
     .with_add_bos_token(Some(true))   // Explicitly enable BOS
     .build()?;
 
 // Auto-detect (default)
-let config = EngineConfig::builder()
+let model_config = ModelConfig::builder()
     .with_model_path("/path/to/model.gguf")
     .with_model_name("some-model")
     .with_add_bos_token(None)         // Let the library decide

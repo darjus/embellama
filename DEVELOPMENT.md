@@ -571,9 +571,14 @@ brew install cmake
 
 Reduce the context size or use a smaller model:
 ```rust
-let config = EngineConfig::builder()
+let model_config = ModelConfig::builder()
+    .with_model_path("/path/to/model.gguf")
     .with_context_size(512)  // Smaller context
     .with_use_mmap(true)     // Enable memory mapping
+    .build()?;
+
+let config = EngineConfig::builder()
+    .with_model_config(model_config)
     .build()?;
 ```
 
@@ -581,8 +586,13 @@ let config = EngineConfig::builder()
 
 Enable multi-threading and optimize thread count:
 ```rust
-let config = EngineConfig::builder()
+let model_config = ModelConfig::builder()
+    .with_model_path("/path/to/model.gguf")
     .with_n_threads(num_cpus::get())
+    .build()?;
+
+let config = EngineConfig::builder()
+    .with_model_config(model_config)
     .build()?;
 ```
 

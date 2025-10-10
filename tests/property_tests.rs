@@ -23,7 +23,7 @@
 //! - `EMBELLAMA_TEST_CONTEXT_SIZE`: Override auto-detected context size
 //!   (e.g., set to 8192 for decoder models that support 32k but recommend 8k)
 
-use embellama::{EmbeddingEngine, EngineConfig};
+use embellama::{EmbeddingEngine, EngineConfig, NormalizationMode};
 use proptest::prelude::*;
 use serial_test::serial;
 use std::path::PathBuf;
@@ -50,7 +50,7 @@ fn ensure_engine_initialized() {
         let mut config_builder = EngineConfig::builder()
             .with_model_path(model_path)
             .with_model_name("proptest-model")
-            .with_normalize_embeddings(true)
+            .with_normalization_mode(NormalizationMode::L2)
             .with_n_ubatch(2048); // Large enough for long texts in property tests
 
         // Allow overriding context size via environment variable

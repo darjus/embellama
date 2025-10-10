@@ -151,7 +151,7 @@ impl EmbeddingEngine {
     /// # Panics
     ///
     /// Panics if the initialization lock cannot be acquired.
-    #[instrument(skip(config), fields(model_name = %config.model_name))]
+    #[instrument(skip(config), fields(model_name = %config.model_config.model_name))]
     pub fn get_or_init(config: EngineConfig) -> Result<Arc<Mutex<Self>>> {
         // Fast path: check if already initialized
         {
@@ -261,7 +261,7 @@ impl EmbeddingEngine {
         // Validate configuration
         config.validate()?;
 
-        let model_name = config.model_name.clone();
+        let model_name = config.model_config.model_name.clone();
         info!("Initializing embedding engine with model: {}", model_name);
 
         // Get or create the shared backend
@@ -379,12 +379,12 @@ impl EmbeddingEngine {
     /// This function will return an error if:
     /// - A model with the same name is already loaded
     /// - Model loading fails
-    #[instrument(skip(self, config), fields(model_name = %config.model_name))]
+    #[instrument(skip(self, config), fields(model_name = %config.model_config.model_name))]
     pub fn load_model(&mut self, config: EngineConfig) -> Result<()> {
         // Validate configuration
         config.validate()?;
 
-        let model_name = config.model_name.clone();
+        let model_name = config.model_config.model_name.clone();
 
         // Check if model already exists
         {
@@ -534,10 +534,9 @@ impl EmbeddingEngine {
 
             info!("Loading model '{}' in current thread", model_name);
 
-            // Convert EngineConfig to ModelConfig and create model
-            let model_config = config.to_model_config();
+            // Use the model configuration from EngineConfig
             let backend_guard = self.backend.lock().unwrap();
-            let model = EmbeddingModel::new(&backend_guard, &model_config)?;
+            let model = EmbeddingModel::new(&backend_guard, &config.model_config)?;
             drop(backend_guard); // Release lock as soon as we're done
 
             // Store in thread-local map
@@ -598,8 +597,8 @@ impl EmbeddingEngine {
             let key = EmbeddingCache::compute_key(
                 text,
                 &model_name,
-                config.pooling_strategy,
-                config.normalization_mode,
+                config.model_config.pooling_strategy,
+                config.model_config.normalization_mode,
             );
 
             // Check cache
@@ -670,8 +669,8 @@ impl EmbeddingEngine {
             let key = EmbeddingCache::compute_key(
                 text,
                 &model_name,
-                config.pooling_strategy,
-                config.normalization_mode,
+                config.model_config.pooling_strategy,
+                config.model_config.normalization_mode,
             );
 
             cache.insert(key, embedding.clone());
@@ -736,8 +735,8 @@ impl EmbeddingEngine {
                 let key = EmbeddingCache::compute_key(
                     text,
                     &model_name,
-                    config.pooling_strategy,
-                    config.normalization_mode,
+                    config.model_config.pooling_strategy,
+                    config.model_config.normalization_mode,
                 );
 
                 if let Some(embedding) = cache.get(&key) {
@@ -773,8 +772,8 @@ impl EmbeddingEngine {
         // Create batch processor with model configuration
         let batch_processor = BatchProcessorBuilder::default()
             .with_max_batch_size(64) // Default batch size
-            .with_normalization(config.normalization_mode != NormalizationMode::None)
-            .with_pooling_strategy(config.pooling_strategy)
+            .with_normalization(config.model_config.normalization_mode != NormalizationMode::None)
+            .with_pooling_strategy(config.model_config.pooling_strategy)
             .build();
 
         // Process uncached texts using the BatchProcessor
@@ -796,8 +795,8 @@ impl EmbeddingEngine {
                 let key = EmbeddingCache::compute_key(
                     text,
                     &model_name,
-                    config.pooling_strategy,
-                    config.normalization_mode,
+                    config.model_config.pooling_strategy,
+                    config.model_config.normalization_mode,
                 );
 
                 cache.insert(key, embedding.clone());
@@ -836,12 +835,11 @@ impl EmbeddingEngine {
         configs
             .iter()
             .map(|(name, config)| {
-                // Get context_size from either the EngineConfig's context_size field
-                // or n_ctx from the converted ModelConfig
+                // Get context_size from the model configuration
                 let context_size = config
+                    .model_config
                     .context_size
-                    .and_then(|s| u32::try_from(s).ok())
-                    .or_else(|| config.to_model_config().n_ctx);
+                    .or(config.model_config.n_ctx);
                 (name.clone(), context_size)
             })
             .collect()
@@ -939,25 +937,6 @@ impl EmbeddingEngine {
             let models = models.borrow();
             models.contains_key(model_name)
         })
-    }
-
-    /// Checks if a model is loaded (deprecated, use `is_model_registered`).
-    ///
-    /// # Deprecated
-    ///
-    /// This method has been deprecated in favor of `is_model_registered` for clarity.
-    /// The original name was misleading as it only checked registration, not actual loading.
-    ///
-    /// # Arguments
-    ///
-    /// * `model_name` - The name of the model to check
-    ///
-    /// # Returns
-    ///
-    /// Returns true if the model is registered, false otherwise.
-    #[deprecated(since = "0.2.0", note = "Use is_model_registered instead for clarity")]
-    pub fn is_model_loaded(&self, model_name: &str) -> bool {
-        self.is_model_registered(model_name)
     }
 
     /// Gets the default model name.

@@ -14,7 +14,7 @@
 
 //! Integration tests for the embellama library
 
-use embellama::{EmbeddingEngine, EngineConfig, PoolingStrategy};
+use embellama::{EmbeddingEngine, EngineConfig, NormalizationMode, PoolingStrategy};
 use serial_test::serial;
 use std::fs;
 use std::path::PathBuf;
@@ -52,7 +52,7 @@ fn create_test_config(model_path: PathBuf, name: &str) -> EngineConfig {
         .with_model_name(name)
         .with_context_size(2048) // Increased from 512 to accommodate embedding overhead
         .with_n_threads(1)
-        .with_normalize_embeddings(true)
+        .with_normalization_mode(NormalizationMode::L2)
         .with_pooling_strategy(PoolingStrategy::Mean)
         .build()
         .unwrap()
@@ -78,7 +78,11 @@ fn test_engine_creation_and_embedding() {
         .with_model_path(model_path)
         .with_model_name("test-model")
         .with_context_size(2048) // Increased from 512 to accommodate embedding overhead
-        .with_normalize_embeddings(normalize)
+        .with_normalization_mode(if normalize {
+            NormalizationMode::L2
+        } else {
+            NormalizationMode::None
+        })
         .build()
         .unwrap();
 
@@ -182,7 +186,7 @@ fn test_multiple_models() {
     let config2 = EngineConfig::builder()
         .with_model_path(model_path)
         .with_model_name("model2")
-        .with_normalize_embeddings(false) // Different config
+        .with_normalization_mode(NormalizationMode::None) // Different config
         .build()
         .unwrap();
 

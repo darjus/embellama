@@ -223,12 +223,7 @@ impl EmbeddingModel {
         ctx_params = ctx_params.with_n_seq_max(n_seq_max);
 
         // Set context size (use context_size if specified, otherwise use n_ctx)
-        // Also check deprecated kv_cache_size for backward compatibility
-        #[allow(deprecated)]
-        let context_size = config
-            .context_size
-            .or(config.kv_cache_size)
-            .unwrap_or(ctx_size);
+        let context_size = config.context_size.unwrap_or(ctx_size);
         let n_ctx = NonZeroU32::new(context_size);
         ctx_params = ctx_params.with_n_ctx(n_ctx);
 

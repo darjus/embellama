@@ -122,7 +122,7 @@ fn test_config_with_backend_detection() {
     // If we have a GPU backend, GPU layers should be set
     if backend.is_gpu_accelerated() {
         assert!(config.use_gpu);
-        assert_eq!(config.n_gpu_layers, Some(999));
+        assert_eq!(config.model_config.n_gpu_layers, Some(999));
     }
 
     // The config should be valid

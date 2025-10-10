@@ -132,24 +132,30 @@ The library will be configured using a builder pattern for `EmbeddingEngine`.
 **Example Usage:**
 
 ```rust
-use embellama::{EmbeddingEngine, EngineConfig};
+use embellama::{ModelConfig, EngineConfig, EmbeddingEngine};
 
-// 1. Configure and build the engine
-let config = EngineConfig::builder()
+// 1. Build model configuration
+let model_config = ModelConfig::builder()
     .with_model_path("path/to/your/model.gguf")
     .with_model_name("my-embedding-model")
     .build()?;
 
-let engine = EmbeddingEngine::new(config)?;
+// 2. Build engine configuration
+let engine_config = EngineConfig::builder()
+    .with_model_config(model_config)
+    .build()?;
 
-// 2. Generate a single embedding
+// 3. Create the engine
+let engine = EmbeddingEngine::new(engine_config)?;
+
+// 4. Generate a single embedding
 let embedding = engine.embed("my-embedding-model", "Hello, world!")?;
 
-// 3. Generate embeddings in a batch
+// 5. Generate embeddings in a batch
 let texts = vec!["First text", "Second text"];
 let embeddings = engine.embed_batch("my-embedding-model", texts)?;
 
-// 4. Unload the model when no longer needed
+// 6. Unload the model when no longer needed
 engine.unload_model("my-embedding-model")?;
 ```
 
