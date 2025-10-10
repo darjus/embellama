@@ -15,7 +15,7 @@
 //! Performance benchmarks for embellama
 
 use criterion::{BenchmarkId, Criterion, Throughput, black_box, criterion_group, criterion_main};
-use embellama::{EmbeddingEngine, EngineConfig, PoolingStrategy};
+use embellama::{EmbeddingEngine, EngineConfig, NormalizationMode, PoolingStrategy};
 use std::time::Duration;
 
 /// Helper to get model path from environment
@@ -36,7 +36,7 @@ fn bench_single_embedding(c: &mut Criterion) {
     let config = EngineConfig::builder()
         .with_model_path(model_path)
         .with_model_name("bench-model")
-        .with_normalize_embeddings(true)
+        .with_normalization_mode(NormalizationMode::L2)
         .build()
         .expect("Failed to create config");
 
@@ -179,7 +179,7 @@ fn bench_normalization(c: &mut Criterion) {
     let config_no_norm = EngineConfig::builder()
         .with_model_path(&model_path)
         .with_model_name("bench-no-norm")
-        .with_normalize_embeddings(false)
+        .with_normalization_mode(NormalizationMode::None)
         .build()
         .expect("Failed to create config");
 
@@ -198,7 +198,7 @@ fn bench_normalization(c: &mut Criterion) {
     let config_norm = EngineConfig::builder()
         .with_model_path(&model_path)
         .with_model_name("bench-norm")
-        .with_normalize_embeddings(true)
+        .with_normalization_mode(NormalizationMode::L2)
         .build()
         .expect("Failed to create config");
 

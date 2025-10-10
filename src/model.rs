@@ -19,7 +19,7 @@
 
 use crate::cache::CacheStore;
 use crate::cache::token_cache::TokenCache;
-use crate::config::{ModelConfig, PoolingStrategy};
+use crate::config::{ModelConfig, NormalizationMode, PoolingStrategy};
 use crate::error::{Error, Result};
 use crate::gguf;
 use llama_cpp_2::context::LlamaContext;
@@ -870,11 +870,11 @@ impl EmbeddingModel {
             Self::apply_pooling(embeddings, self.config.pooling_strategy)?
         };
 
-        // Normalize if configured
-        if self.config.normalize_embeddings {
-            Self::normalize_embedding(pooled)
-        } else {
+        // Apply normalization based on configured mode
+        if self.config.normalization_mode == NormalizationMode::None {
             Ok(pooled)
+        } else {
+            Self::normalize_embedding(pooled, self.config.normalization_mode)
         }
     }
 
@@ -1096,32 +1096,77 @@ impl EmbeddingModel {
         }
     }
 
-    /// Normalizes an embedding vector to unit length (L2 normalization).
+    /// Normalizes an embedding vector according to the specified mode.
     ///
     /// # Arguments
     ///
     /// * `embedding` - The embedding vector to normalize
+    /// * `mode` - The normalization mode to apply
     ///
     /// # Returns
     ///
     /// Returns the normalized embedding vector.
-    fn normalize_embedding(mut embedding: Vec<f32>) -> Result<Vec<f32>> {
-        // Calculate L2 norm
-        let norm: f32 = embedding.iter().map(|x| x * x).sum::<f32>().sqrt();
+    ///
+    /// # Errors
+    ///
+    /// Returns an error if P-norm is used with a non-positive exponent.
+    fn normalize_embedding(mut embedding: Vec<f32>, mode: NormalizationMode) -> Result<Vec<f32>> {
+        match mode {
+            NormalizationMode::None => Ok(embedding),
 
-        if norm == 0.0 {
-            return Err(Error::EmbeddingGenerationError {
-                message: "Cannot normalize zero vector".to_string(),
-                source: None,
-            });
+            NormalizationMode::L2 => {
+                // Calculate L2 (Euclidean) norm
+                let norm: f32 = embedding.iter().map(|x| x * x).sum::<f32>().sqrt();
+                if norm == 0.0 {
+                    // Return zero vector as-is, matching llama-server behavior
+                    return Ok(embedding);
+                }
+                // Normalize the vector
+                for val in &mut embedding {
+                    *val /= norm;
+                }
+                Ok(embedding)
+            }
+
+            NormalizationMode::MaxAbs => {
+                // Find maximum absolute value
+                let max_abs = embedding.iter().map(|x| x.abs()).fold(0.0f32, f32::max);
+                if max_abs == 0.0 {
+                    // Return zero vector as-is
+                    return Ok(embedding);
+                }
+                // Scale to [-1, 1] range
+                for val in &mut embedding {
+                    *val /= max_abs;
+                }
+                Ok(embedding)
+            }
+
+            NormalizationMode::PNorm(p) => {
+                if p <= 0 {
+                    return Err(Error::InvalidInput {
+                        message: format!("P-norm exponent must be positive, got {p}"),
+                    });
+                }
+                #[allow(clippy::cast_precision_loss)]
+                let p_f32 = p as f32;
+                // Calculate p-norm
+                let norm: f32 = embedding
+                    .iter()
+                    .map(|x| x.abs().powf(p_f32))
+                    .sum::<f32>()
+                    .powf(1.0 / p_f32);
+                if norm == 0.0 {
+                    // Return zero vector as-is
+                    return Ok(embedding);
+                }
+                // Normalize the vector
+                for val in &mut embedding {
+                    *val /= norm;
+                }
+                Ok(embedding)
+            }
         }
-
-        // Normalize the vector
-        for val in &mut embedding {
-            *val /= norm;
-        }
-
-        Ok(embedding)
     }
 
     /// Save the current KV cache state to memory

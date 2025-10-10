@@ -13,7 +13,7 @@
 // limitations under the License.
 
 use crate::cache::{CacheMetrics, CacheStats, CacheStore};
-use crate::config::PoolingStrategy;
+use crate::config::{NormalizationMode, PoolingStrategy};
 use lru::LruCache;
 use moka::sync::Cache;
 use sha2::{Digest, Sha256};
@@ -56,13 +56,22 @@ impl EmbeddingCache {
         text: &str,
         model_name: &str,
         pooling: PoolingStrategy,
-        normalize: bool,
+        normalization: NormalizationMode,
     ) -> String {
         let mut hasher = Sha256::new();
         hasher.update(text.as_bytes());
         hasher.update(model_name.as_bytes());
         hasher.update([pooling as u8]);
-        hasher.update([u8::from(normalize)]);
+        // Hash the normalization mode discriminant and value
+        match normalization {
+            NormalizationMode::None => hasher.update([0u8]),
+            NormalizationMode::MaxAbs => hasher.update([1u8]),
+            NormalizationMode::L2 => hasher.update([2u8]),
+            NormalizationMode::PNorm(p) => {
+                hasher.update([3u8]);
+                hasher.update(p.to_le_bytes());
+            }
+        }
         format!("{:x}", hasher.finalize())
     }
 

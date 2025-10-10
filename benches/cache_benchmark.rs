@@ -13,9 +13,9 @@
 // limitations under the License.
 
 use criterion::{BenchmarkId, Criterion, Throughput, black_box, criterion_group, criterion_main};
-use embellama::PoolingStrategy;
 use embellama::cache::CacheStore;
 use embellama::cache::embedding_cache::EmbeddingCache;
+use embellama::{NormalizationMode, PoolingStrategy};
 use std::sync::Arc;
 use std::thread;
 
@@ -68,7 +68,7 @@ fn benchmark_cache_operations(c: &mut Criterion) {
                 black_box("This is a sample text for embedding"),
                 black_box("model-name"),
                 black_box(PoolingStrategy::Mean),
-                black_box(true),
+                black_box(NormalizationMode::L2),
             )
         })
     });

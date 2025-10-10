@@ -14,7 +14,7 @@
 
 //! Common test utilities and fixtures
 
-use embellama::{EngineConfig, PoolingStrategy};
+use embellama::{EngineConfig, NormalizationMode, PoolingStrategy};
 use std::fs;
 use std::path::PathBuf;
 use tempfile::TempDir;
@@ -49,7 +49,7 @@ pub fn create_test_config(model_path: PathBuf) -> EngineConfig {
         .with_model_name("test-model")
         .with_context_size(2048) // Increased from 512 to accommodate embedding overhead
         .with_n_threads(2)
-        .with_normalize_embeddings(true)
+        .with_normalization_mode(NormalizationMode::L2)
         .with_pooling_strategy(PoolingStrategy::Mean)
         .build()
         .expect("Failed to create test config")

@@ -48,8 +48,8 @@ pub struct ModelConfig {
     /// NOTE: This setting is not yet supported by llama-cpp-2 API
     pub use_mlock: bool,
 
-    /// Enable embedding normalization
-    pub normalize_embeddings: bool,
+    /// Normalization mode for embeddings
+    pub normalization_mode: NormalizationMode,
 
     /// Pooling strategy for embeddings
     pub pooling_strategy: PoolingStrategy,
@@ -175,7 +175,7 @@ impl Default for ModelConfig {
             n_gpu_layers: None,
             use_mmap: true,
             use_mlock: false,
-            normalize_embeddings: true,
+            normalization_mode: NormalizationMode::L2,
             pooling_strategy: PoolingStrategy::default(),
             add_bos_token: None,
             n_seq_max: None,
@@ -257,10 +257,22 @@ impl ModelConfigBuilder {
         self
     }
 
-    /// Set whether to normalize embeddings
+    /// Set the normalization mode for embeddings
     #[must_use]
+    pub fn with_normalization_mode(mut self, mode: NormalizationMode) -> Self {
+        self.config.normalization_mode = mode;
+        self
+    }
+
+    /// Set whether to normalize embeddings (deprecated - use `with_normalization_mode`)
+    #[must_use]
+    #[deprecated(since = "0.4.0", note = "Use with_normalization_mode instead")]
     pub fn with_normalize_embeddings(mut self, normalize: bool) -> Self {
-        self.config.normalize_embeddings = normalize;
+        self.config.normalization_mode = if normalize {
+            NormalizationMode::L2
+        } else {
+            NormalizationMode::None
+        };
         self
     }
 
@@ -363,8 +375,8 @@ pub struct EngineConfig {
     /// Batch size for processing
     pub batch_size: Option<usize>,
 
-    /// Enable embedding normalization
-    pub normalize_embeddings: bool,
+    /// Normalization mode for embeddings
+    pub normalization_mode: NormalizationMode,
 
     /// Pooling strategy for embeddings
     pub pooling_strategy: PoolingStrategy,
@@ -422,6 +434,25 @@ pub enum PoolingStrategy {
 impl Default for PoolingStrategy {
     fn default() -> Self {
         Self::Mean
+    }
+}
+
+/// Normalization mode for embedding vectors
+#[derive(Debug, Clone, Copy, Serialize, Deserialize, PartialEq, Eq)]
+pub enum NormalizationMode {
+    /// No normalization (-1 in llama-server)
+    None,
+    /// Max absolute normalization scaled to int16 range (0 in llama-server)
+    MaxAbs,
+    /// L2 (Euclidean) normalization - default (2 in llama-server)
+    L2,
+    /// P-norm with custom exponent (N in llama-server)
+    PNorm(i32),
+}
+
+impl Default for NormalizationMode {
+    fn default() -> Self {
+        Self::L2
     }
 }
 
@@ -637,7 +668,7 @@ impl Default for EngineConfig {
             use_gpu: false,
             n_gpu_layers: None,
             batch_size: None,
-            normalize_embeddings: true,
+            normalization_mode: NormalizationMode::L2,
             pooling_strategy: PoolingStrategy::default(),
             max_tokens: None,
             memory_limit_mb: None,
@@ -810,7 +841,7 @@ impl EngineConfig {
             n_gpu_layers: self.n_gpu_layers,
             use_mmap: self.use_mmap,
             use_mlock: self.use_mlock,
-            normalize_embeddings: self.normalize_embeddings,
+            normalization_mode: self.normalization_mode,
             pooling_strategy: self.pooling_strategy,
             add_bos_token: self.add_bos_token,
             n_seq_max: self.n_seq_max,
@@ -892,10 +923,22 @@ impl EngineConfigBuilder {
         self
     }
 
-    /// Set whether to normalize embeddings
+    /// Set the normalization mode for embeddings
     #[must_use]
+    pub fn with_normalization_mode(mut self, mode: NormalizationMode) -> Self {
+        self.config.normalization_mode = mode;
+        self
+    }
+
+    /// Set whether to normalize embeddings (deprecated - use `with_normalization_mode`)
+    #[must_use]
+    #[deprecated(since = "0.4.0", note = "Use with_normalization_mode instead")]
     pub fn with_normalize_embeddings(mut self, normalize: bool) -> Self {
-        self.config.normalize_embeddings = normalize;
+        self.config.normalization_mode = if normalize {
+            NormalizationMode::L2
+        } else {
+            NormalizationMode::None
+        };
         self
     }
 
@@ -1180,7 +1223,7 @@ mod tests {
             .with_n_threads(16)
             .with_use_gpu(true)
             .with_n_gpu_layers(32)
-            .with_normalize_embeddings(true)
+            .with_normalization_mode(NormalizationMode::L2)
             .with_pooling_strategy(PoolingStrategy::Cls)
             .with_batch_size(128)
             .build()
@@ -1190,7 +1233,7 @@ mod tests {
         assert_eq!(config.n_threads, Some(16));
         assert!(config.use_gpu);
         assert_eq!(config.n_gpu_layers, Some(32));
-        assert!(config.normalize_embeddings);
+        assert_eq!(config.normalization_mode, NormalizationMode::L2);
         assert_eq!(config.pooling_strategy, PoolingStrategy::Cls);
         assert_eq!(config.batch_size, Some(128));
     }
@@ -1230,7 +1273,7 @@ mod tests {
         assert!(config.n_threads.is_none());
         assert!(!config.use_gpu);
         assert!(config.n_gpu_layers.is_none());
-        assert!(config.normalize_embeddings);
+        assert_eq!(config.normalization_mode, NormalizationMode::L2);
         assert_eq!(config.pooling_strategy, PoolingStrategy::Mean);
         assert!(config.batch_size.is_none());
     }

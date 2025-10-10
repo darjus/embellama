@@ -23,7 +23,7 @@ use crate::cache::embedding_cache::EmbeddingCache;
 use crate::cache::prefix_cache::PrefixCache;
 use crate::cache::token_cache::TokenCache;
 use crate::cache::{CacheStats, CacheStore};
-use crate::config::EngineConfig;
+use crate::config::{EngineConfig, NormalizationMode};
 use crate::error::{Error, Result};
 use crate::model::EmbeddingModel;
 use llama_cpp_2::llama_backend::LlamaBackend;
@@ -599,7 +599,7 @@ impl EmbeddingEngine {
                 text,
                 &model_name,
                 config.pooling_strategy,
-                config.normalize_embeddings,
+                config.normalization_mode,
             );
 
             // Check cache
@@ -671,7 +671,7 @@ impl EmbeddingEngine {
                 text,
                 &model_name,
                 config.pooling_strategy,
-                config.normalize_embeddings,
+                config.normalization_mode,
             );
 
             cache.insert(key, embedding.clone());
@@ -737,7 +737,7 @@ impl EmbeddingEngine {
                     text,
                     &model_name,
                     config.pooling_strategy,
-                    config.normalize_embeddings,
+                    config.normalization_mode,
                 );
 
                 if let Some(embedding) = cache.get(&key) {
@@ -773,7 +773,7 @@ impl EmbeddingEngine {
         // Create batch processor with model configuration
         let batch_processor = BatchProcessorBuilder::default()
             .with_max_batch_size(64) // Default batch size
-            .with_normalization(config.normalize_embeddings)
+            .with_normalization(config.normalization_mode != NormalizationMode::None)
             .with_pooling_strategy(config.pooling_strategy)
             .build();
 
@@ -797,7 +797,7 @@ impl EmbeddingEngine {
                     text,
                     &model_name,
                     config.pooling_strategy,
-                    config.normalize_embeddings,
+                    config.normalization_mode,
                 );
 
                 cache.insert(key, embedding.clone());

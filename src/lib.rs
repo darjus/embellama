@@ -93,7 +93,7 @@ pub use backend::{BackendInfo, BackendType, detect_best_backend, get_compiled_ba
 pub use batch::{BatchProcessor, BatchProcessorBuilder};
 pub use config::{
     CacheConfig, CacheConfigBuilder, EngineConfig, EngineConfigBuilder, ModelConfig,
-    ModelConfigBuilder, PoolingStrategy,
+    ModelConfigBuilder, NormalizationMode, PoolingStrategy,
 };
 pub use engine::{EmbeddingEngine, ModelInfo};
 pub use error::{Error, Result};

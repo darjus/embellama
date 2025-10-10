@@ -14,7 +14,7 @@
 
 //! Example of batch embedding processing
 
-use embellama::{EmbeddingEngine, EngineConfig};
+use embellama::{EmbeddingEngine, EngineConfig, NormalizationMode};
 use std::env;
 use std::path::PathBuf;
 use std::time::Instant;
@@ -44,7 +44,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
         .with_model_path(model_path)
         .with_model_name("batch-model")
         .with_batch_size(64) // Optimize batch size
-        .with_normalize_embeddings(true)
+        .with_normalization_mode(NormalizationMode::L2)
         .with_n_threads(num_cpus::get()) // Use all CPU cores
         .build()?;
 

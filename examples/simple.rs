@@ -14,7 +14,7 @@
 
 //! Simple example of generating text embeddings
 
-use embellama::{EmbeddingEngine, EngineConfig};
+use embellama::{EmbeddingEngine, EngineConfig, NormalizationMode};
 use std::env;
 use std::path::PathBuf;
 
@@ -40,7 +40,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
     let config = EngineConfig::builder()
         .with_model_path(model_path)
         .with_model_name("example-model")
-        .with_normalize_embeddings(true)
+        .with_normalization_mode(NormalizationMode::L2)
         .build()?;
 
     // Create embedding engine

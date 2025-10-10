@@ -18,7 +18,9 @@
 //! The state must be Send + Sync + Clone for use with Axum.
 
 use crate::server::dispatcher::Dispatcher;
-use crate::{EmbeddingEngine, EngineConfig, PoolingStrategy, extract_gguf_metadata};
+use crate::{
+    EmbeddingEngine, EngineConfig, NormalizationMode, PoolingStrategy, extract_gguf_metadata,
+};
 use std::path::Path;
 use std::sync::{Arc, Mutex};
 use tracing::{info, warn};
@@ -259,7 +261,7 @@ impl AppState {
         let mut engine_config_builder = EngineConfig::builder()
             .with_model_path(&config.model_path)
             .with_model_name(&config.model_name)
-            .with_normalize_embeddings(true)
+            .with_normalization_mode(NormalizationMode::L2)
             .with_n_seq_max(config.n_seq_max);
 
         // Add context_size if we extracted it

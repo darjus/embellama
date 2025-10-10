@@ -12,9 +12,9 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-use embellama::PoolingStrategy;
+use embellama::cache::CacheStore;
 use embellama::cache::embedding_cache::EmbeddingCache;
-use embellama::cache::{CacheStats, CacheStore};
+use embellama::{NormalizationMode, PoolingStrategy};
 use std::sync::Arc;
 use std::thread;
 use std::time::Duration;
@@ -51,23 +51,23 @@ fn test_cache_key_computation() {
     let text = "Hello, world!";
     let model = "test-model";
     let pooling = PoolingStrategy::Mean;
-    let normalize = true;
+    let normalization = NormalizationMode::L2;
 
-    let key1 = EmbeddingCache::compute_key(text, model, pooling, normalize);
-    let key2 = EmbeddingCache::compute_key(text, model, pooling, normalize);
+    let key1 = EmbeddingCache::compute_key(text, model, pooling, normalization);
+    let key2 = EmbeddingCache::compute_key(text, model, pooling, normalization);
     assert_eq!(key1, key2);
 
     // Test that different inputs produce different keys
-    let key3 = EmbeddingCache::compute_key("Different text", model, pooling, normalize);
+    let key3 = EmbeddingCache::compute_key("Different text", model, pooling, normalization);
     assert_ne!(key1, key3);
 
-    let key4 = EmbeddingCache::compute_key(text, "different-model", pooling, normalize);
+    let key4 = EmbeddingCache::compute_key(text, "different-model", pooling, normalization);
     assert_ne!(key1, key4);
 
-    let key5 = EmbeddingCache::compute_key(text, model, PoolingStrategy::Cls, normalize);
+    let key5 = EmbeddingCache::compute_key(text, model, PoolingStrategy::Cls, normalization);
     assert_ne!(key1, key5);
 
-    let key6 = EmbeddingCache::compute_key(text, model, pooling, false);
+    let key6 = EmbeddingCache::compute_key(text, model, pooling, NormalizationMode::None);
     assert_ne!(key1, key6);
 }
 

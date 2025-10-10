@@ -15,7 +15,7 @@
 mod common;
 
 use common::*;
-use embellama::{CacheConfigBuilder, EmbeddingEngine, EngineConfigBuilder};
+use embellama::{CacheConfigBuilder, EmbeddingEngine, EngineConfigBuilder, NormalizationMode};
 use std::time::Instant;
 
 #[test]
@@ -325,7 +325,7 @@ fn test_cache_with_different_models() {
     let config2 = EngineConfigBuilder::new()
         .with_model_path(model_path)
         .with_model_name("model2")
-        .with_normalize_embeddings(false) // Different normalization
+        .with_normalization_mode(NormalizationMode::None) // Different normalization
         .build()
         .expect("Failed to build config");
 
@@ -371,11 +371,20 @@ fn test_cache_key_differences() {
     let model = "test-model";
 
     // Different configurations should produce different cache keys
-    let key1 = EmbeddingCache::compute_key(text, model, PoolingStrategy::Mean, true);
-    let key2 = EmbeddingCache::compute_key(text, model, PoolingStrategy::Mean, false);
-    let key3 = EmbeddingCache::compute_key(text, model, PoolingStrategy::Cls, true);
-    let key4 = EmbeddingCache::compute_key(text, model, PoolingStrategy::Max, true);
-    let key5 = EmbeddingCache::compute_key(text, "different-model", PoolingStrategy::Mean, true);
+    let key1 =
+        EmbeddingCache::compute_key(text, model, PoolingStrategy::Mean, NormalizationMode::L2);
+    let key2 =
+        EmbeddingCache::compute_key(text, model, PoolingStrategy::Mean, NormalizationMode::None);
+    let key3 =
+        EmbeddingCache::compute_key(text, model, PoolingStrategy::Cls, NormalizationMode::L2);
+    let key4 =
+        EmbeddingCache::compute_key(text, model, PoolingStrategy::Max, NormalizationMode::L2);
+    let key5 = EmbeddingCache::compute_key(
+        text,
+        "different-model",
+        PoolingStrategy::Mean,
+        NormalizationMode::L2,
+    );
 
     // All keys should be different
     assert_ne!(key1, key2); // Different normalization
@@ -384,7 +393,8 @@ fn test_cache_key_differences() {
     assert_ne!(key1, key5); // Different model
 
     // Same configuration should produce same key
-    let key1_duplicate = EmbeddingCache::compute_key(text, model, PoolingStrategy::Mean, true);
+    let key1_duplicate =
+        EmbeddingCache::compute_key(text, model, PoolingStrategy::Mean, NormalizationMode::L2);
     assert_eq!(key1, key1_duplicate);
 }
 
