@@ -15,7 +15,13 @@
 //! Property-based tests for embellama
 //!
 //! These tests use proptest to verify invariants with real models.
-//! Requires `EMBELLAMA_TEST_MODEL` to be set to a valid GGUF model file.
+//!
+//! Required environment variables:
+//! - `EMBELLAMA_TEST_MODEL`: Path to a valid GGUF model file
+//!
+//! Optional environment variables:
+//! - `EMBELLAMA_TEST_CONTEXT_SIZE`: Override auto-detected context size
+//!   (e.g., set to 8192 for decoder models that support 32k but recommend 8k)
 
 use embellama::{EmbeddingEngine, EngineConfig};
 use proptest::prelude::*;
@@ -41,13 +47,22 @@ fn ensure_engine_initialized() {
             model_path.display()
         );
 
-        let config = EngineConfig::builder()
+        let mut config_builder = EngineConfig::builder()
             .with_model_path(model_path)
             .with_model_name("proptest-model")
             .with_normalize_embeddings(true)
-            .with_n_ubatch(2048) // Large enough for long texts in property tests
-            .build()
-            .expect("Failed to create config");
+            .with_n_ubatch(2048); // Large enough for long texts in property tests
+
+        // Allow overriding context size via environment variable
+        // Useful for decoder models where full context (32k) is supported but 8k is recommended
+        if let Ok(context_size_str) = std::env::var("EMBELLAMA_TEST_CONTEXT_SIZE") {
+            let context_size: usize = context_size_str
+                .parse()
+                .expect("EMBELLAMA_TEST_CONTEXT_SIZE must be a valid positive integer");
+            config_builder = config_builder.with_context_size(context_size);
+        }
+
+        let config = config_builder.build().expect("Failed to create config");
 
         let engine = EmbeddingEngine::new(config).expect("Failed to create engine");
 

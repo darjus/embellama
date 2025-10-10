@@ -126,6 +126,7 @@ test-property-encoder: download-test-model
 test-property-decoder: download-decoder-model
     @echo "Running property-based tests with decoder model ({{backend_features}})..."
     EMBELLAMA_TEST_MODEL={{decoder_test_model_file}} \
+    EMBELLAMA_TEST_CONTEXT_SIZE=8192 \
     cargo test --test property_tests --features "{{backend_features}}" -- --nocapture
 
 # Run property-based tests with both encoder and decoder models
@@ -143,6 +144,7 @@ test-property-quick-encoder: download-test-model
 test-property-quick-decoder: download-decoder-model
     @echo "Running property-based tests (quick mode) with decoder model ({{backend_features}})..."
     EMBELLAMA_TEST_MODEL={{decoder_test_model_file}} \
+    EMBELLAMA_TEST_CONTEXT_SIZE=8192 \
     PROPTEST_CASES=10 \
     cargo test --test property_tests --features "{{backend_features}}" -- --nocapture
 
