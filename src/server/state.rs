@@ -19,7 +19,8 @@
 
 use crate::server::dispatcher::Dispatcher;
 use crate::{
-    EmbeddingEngine, EngineConfig, NormalizationMode, PoolingStrategy, extract_gguf_metadata,
+    EmbeddingEngine, EngineConfig, ModelConfig, NormalizationMode, PoolingStrategy,
+    extract_gguf_metadata,
 };
 use std::path::Path;
 use std::sync::{Arc, Mutex};
@@ -46,6 +47,8 @@ pub struct ServerConfig {
     pub n_seq_max: u32,
     /// Pooling strategy for embeddings (None = use default)
     pub pooling_strategy: Option<PoolingStrategy>,
+    /// Normalization mode for embeddings (None = use default L2)
+    pub normalization_mode: Option<NormalizationMode>,
 }
 
 impl Default for ServerConfig {
@@ -60,6 +63,7 @@ impl Default for ServerConfig {
             request_timeout: std::time::Duration::from_secs(60),
             n_seq_max: 8,
             pooling_strategy: None,
+            normalization_mode: None,
         }
     }
 }
@@ -83,6 +87,7 @@ pub struct ServerConfigBuilder {
     request_timeout: Option<std::time::Duration>,
     n_seq_max: Option<u32>,
     pooling_strategy: Option<PoolingStrategy>,
+    normalization_mode: Option<NormalizationMode>,
 }
 
 impl ServerConfigBuilder {
@@ -149,6 +154,13 @@ impl ServerConfigBuilder {
         self
     }
 
+    /// Set the normalization mode for embeddings
+    #[must_use]
+    pub fn normalization_mode(mut self, mode: NormalizationMode) -> Self {
+        self.normalization_mode = Some(mode);
+        self
+    }
+
     /// Build the `ServerConfig`
     ///
     /// # Errors
@@ -211,6 +223,7 @@ impl ServerConfigBuilder {
             request_timeout: self.request_timeout.unwrap_or(default.request_timeout),
             n_seq_max: self.n_seq_max.unwrap_or(default.n_seq_max),
             pooling_strategy: self.pooling_strategy,
+            normalization_mode: self.normalization_mode,
         })
     }
 }
@@ -257,24 +270,34 @@ impl AppState {
             }
         };
 
-        // Initialize the embedding engine singleton
-        let mut engine_config_builder = EngineConfig::builder()
+        // Build the model configuration first
+        let mut model_config_builder = ModelConfig::builder()
             .with_model_path(&config.model_path)
             .with_model_name(&config.model_name)
-            .with_normalization_mode(NormalizationMode::L2)
             .with_n_seq_max(config.n_seq_max);
 
         // Add context_size if we extracted it
         if let Some(size) = context_size {
-            engine_config_builder = engine_config_builder.with_context_size(size as usize);
+            model_config_builder = model_config_builder.with_context_size(size);
         }
 
         // Add pooling_strategy if specified
         if let Some(strategy) = config.pooling_strategy {
-            engine_config_builder = engine_config_builder.with_pooling_strategy(strategy);
+            model_config_builder = model_config_builder.with_pooling_strategy(strategy);
         }
 
-        let engine = EmbeddingEngine::get_or_init(engine_config_builder.build()?)?;
+        // Add normalization_mode if specified, otherwise use default L2
+        let normalization_mode = config.normalization_mode.unwrap_or(NormalizationMode::L2);
+        model_config_builder = model_config_builder.with_normalization_mode(normalization_mode);
+
+        let model_config = model_config_builder.build()?;
+
+        // Build the engine configuration using the model configuration
+        let engine_config = EngineConfig::builder()
+            .with_model_config(model_config)
+            .build()?;
+
+        let engine = EmbeddingEngine::get_or_init(engine_config)?;
 
         // Create the dispatcher with worker pool
         let dispatcher = Dispatcher::new(config.worker_count, config.queue_size);
