@@ -108,11 +108,18 @@ fn test_backend_gpu_acceleration() {
 
 #[test]
 fn test_config_with_backend_detection() {
-    let model_path = get_test_model_path();
+    use tempfile::NamedTempFile;
+
+    // Create a temporary dummy GGUF file for testing
+    let temp_file = NamedTempFile::new().expect("Failed to create temp file");
+    let model_path = temp_file.path().with_extension("gguf");
+
+    // Write minimal GGUF header to make it a valid file
+    std::fs::write(&model_path, b"GGUF").expect("Failed to write temp file");
 
     // Test auto-detection configuration
     let config = EngineConfig::with_backend_detection()
-        .with_model_path(&model_path)
+        .with_model_path(model_path.to_str().unwrap())
         .with_model_name("test-backend")
         .build()
         .expect("Failed to build config");
