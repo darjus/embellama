@@ -54,10 +54,6 @@ pub struct ModelConfig {
     /// Pooling strategy for embeddings
     pub pooling_strategy: PoolingStrategy,
 
-    /// Whether to add BOS (beginning-of-sequence) token during tokenization
-    /// None = auto-detect based on model type (encoder models like BERT/E5/BGE/GTE = false, decoder models = true)
-    pub add_bos_token: Option<bool>,
-
     /// Maximum number of sequences for batch processing
     /// Default: 1, max: 64 (llama.cpp limit)
     pub n_seq_max: Option<u32>,
@@ -177,7 +173,6 @@ impl Default for ModelConfig {
             use_mlock: false,
             normalization_mode: NormalizationMode::L2,
             pooling_strategy: PoolingStrategy::default(),
-            add_bos_token: None,
             n_seq_max: None,
             context_size: None,
             enable_kv_optimization: false,
@@ -266,14 +261,6 @@ impl ModelConfigBuilder {
     #[must_use]
     pub fn with_pooling_strategy(mut self, strategy: PoolingStrategy) -> Self {
         self.config.pooling_strategy = strategy;
-        self
-    }
-
-    /// Set whether to add BOS token during tokenization
-    /// None = auto-detect based on model type
-    #[must_use]
-    pub fn with_add_bos_token(mut self, add_bos: Option<bool>) -> Self {
-        self.config.add_bos_token = add_bos;
         self
     }
 
@@ -775,14 +762,6 @@ impl EngineConfigBuilder {
     #[must_use]
     pub fn with_use_mlock(mut self, use_mlock: bool) -> Self {
         self.config.model_config.use_mlock = use_mlock;
-        self
-    }
-
-    /// Set whether to add BOS token during tokenization (convenience method)
-    /// None = auto-detect based on model type
-    #[must_use]
-    pub fn with_add_bos_token(mut self, add_bos: Option<bool>) -> Self {
-        self.config.model_config.add_bos_token = add_bos;
         self
     }
 

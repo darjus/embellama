@@ -624,7 +624,7 @@ impl EmbeddingEngine {
             // Check prefix cache if enabled
             if let Some(ref prefix_cache) = self.prefix_cache {
                 // First tokenize to check for prefix matches
-                let tokens = model.tokenize(text, false)?;
+                let tokens = model.tokenize(text)?;
                 let token_ids: Vec<i32> = tokens.iter().map(|t| t.0).collect();
 
                 // Try to find a matching prefix
@@ -1087,7 +1087,7 @@ impl EmbeddingEngine {
                     })?;
 
                 // Tokenize the prefix
-                let tokens = model.tokenize(prefix, false)?;
+                let tokens = model.tokenize(prefix)?;
 
                 // Generate embedding to populate KV cache
                 model.generate_embedding(prefix)?;

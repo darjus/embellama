@@ -103,8 +103,6 @@ pub struct EmbeddingModel {
     embedding_dimensions: usize,
     /// Maximum context size
     max_context_size: usize,
-    /// Whether to add BOS token during tokenization
-    add_bos_token: bool,
     /// Maximum number of sequences for batch processing
     n_seq_max: u32,
     /// GGUF metadata containing architecture info, dimensions, context size
@@ -296,21 +294,6 @@ impl EmbeddingModel {
                 })
         })?;
 
-        // Determine whether to add BOS token (using architecture detection from earlier)
-        let add_bos_token = if let Some(add_bos) = config.add_bos_token {
-            // Use explicitly configured value
-            debug!("Using configured add_bos_token: {}", add_bos);
-            add_bos
-        } else {
-            // Auto-detect: decoder models need BOS, encoder models don't
-            debug!(
-                "Auto-detected add_bos_token: {} for {} model",
-                is_decoder,
-                if is_decoder { "decoder" } else { "encoder" }
-            );
-            is_decoder
-        };
-
         let model = Self {
             cell,
             config: config.clone(),
@@ -319,7 +302,6 @@ impl EmbeddingModel {
             embedding_dimensions,
             #[allow(clippy::cast_lossless)]
             max_context_size: ctx_size as usize,
-            add_bos_token,
             n_seq_max,
             metadata,
         };
@@ -443,11 +425,6 @@ impl EmbeddingModel {
         &self.model_path
     }
 
-    /// Returns whether BOS token should be added during tokenization.
-    pub fn add_bos_token(&self) -> bool {
-        self.add_bos_token
-    }
-
     /// Returns the maximum number of sequences for batch processing.
     pub fn n_seq_max(&self) -> u32 {
         self.n_seq_max
@@ -476,7 +453,7 @@ impl EmbeddingModel {
     pub fn effective_max_tokens(&self) -> usize {
         // For embedding models, only special tokens ([CLS], [SEP]) consume overhead
         // The output embeddings don't use KV cache space
-        let overhead = if self.add_bos_token { 3 } else { 2 };
+        let overhead = 2;
 
         self.max_context_size.saturating_sub(overhead)
     }
@@ -486,7 +463,6 @@ impl EmbeddingModel {
     /// # Arguments
     ///
     /// * `text` - The text to tokenize
-    /// * `add_bos` - Whether to add the beginning-of-sequence token
     ///
     /// # Returns
     ///
@@ -495,16 +471,10 @@ impl EmbeddingModel {
     /// # Errors
     ///
     /// Returns an error if tokenization fails.
-    pub fn tokenize(&self, text: &str, add_bos: bool) -> Result<Vec<LlamaToken>> {
-        let add_bos = if add_bos {
-            AddBos::Always
-        } else {
-            AddBos::Never
-        };
-
+    pub fn tokenize(&self, text: &str) -> Result<Vec<LlamaToken>> {
         self.cell
             .borrow_owner()
-            .str_to_token(text, add_bos)
+            .str_to_token(text, AddBos::Never)
             .map_err(|e| Error::TokenizationError {
                 message: format!("Failed to tokenize text: {e}"),
             })
@@ -515,7 +485,6 @@ impl EmbeddingModel {
     /// # Arguments
     ///
     /// * `text` - The text to tokenize
-    /// * `add_bos` - Whether to add a beginning-of-sentence token
     /// * `cache` - Optional token cache for caching tokenization results
     ///
     /// # Returns
@@ -528,25 +497,24 @@ impl EmbeddingModel {
     pub fn tokenize_cached(
         &self,
         text: &str,
-        add_bos: bool,
         cache: Option<&TokenCache>,
     ) -> Result<Vec<LlamaToken>> {
         // If cache is available, try to get cached tokens
         if let Some(cache) = cache {
-            let key = TokenCache::compute_key(text, &self.model_name, add_bos);
+            let key = TokenCache::compute_key(text, &self.model_name);
             if let Some(tokens) = cache.get(&key) {
                 debug!("Using cached tokens for text (length: {})", text.len());
                 return Ok(tokens);
             }
 
             // Cache miss, tokenize and cache the result
-            let tokens = self.tokenize(text, add_bos)?;
+            let tokens = self.tokenize(text)?;
             cache.insert(key, tokens.clone());
             return Ok(tokens);
         }
 
         // No cache available, fallback to regular tokenization
-        self.tokenize(text, add_bos)
+        self.tokenize(text)
     }
 
     /// Generates an embedding for the given text.
@@ -601,7 +569,7 @@ impl EmbeddingModel {
         }
 
         // Tokenize the text with caching support
-        let tokens = self.tokenize_cached(text, self.add_bos_token, token_cache)?;
+        let tokens = self.tokenize_cached(text, token_cache)?;
 
         // Validate token limit
         self.validate_token_limit(tokens.len(), Some("Input"))?;
@@ -1271,7 +1239,7 @@ impl EmbeddingModel {
         token_cache: Option<&TokenCache>,
     ) -> Result<Vec<f32>> {
         // First tokenize to get tokens
-        let tokens = self.tokenize_cached(text, self.add_bos_token, token_cache)?;
+        let tokens = self.tokenize_cached(text, token_cache)?;
         let tokens_i: Vec<i32> = tokens.iter().map(|t| t.0).collect();
 
         // Check for cached prefix if available

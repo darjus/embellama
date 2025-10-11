@@ -265,7 +265,6 @@ impl BatchProcessor {
     ) -> Result<Vec<Vec<LlamaToken>>> {
         debug!("Starting tokenization of {} texts", texts.len());
 
-        let add_bos = model.add_bos_token();
         let max_seq_len = model.max_sequence_length();
 
         // First, validate all texts in parallel
@@ -287,7 +286,7 @@ impl BatchProcessor {
         let mut results = Vec::with_capacity(texts.len());
         for text in texts {
             // Use real tokenizer from model
-            let tokens = model.tokenize(text, add_bos)?;
+            let tokens = model.tokenize(text)?;
 
             // Check token limit
             if tokens.len() > max_seq_len {

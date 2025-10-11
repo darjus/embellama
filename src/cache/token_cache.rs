@@ -66,11 +66,10 @@ impl TokenCache {
     }
 
     /// Compute cache key from tokenization parameters
-    pub fn compute_key(text: &str, model_name: &str, add_bos: bool) -> String {
+    pub fn compute_key(text: &str, model_name: &str) -> String {
         let mut hasher = Sha256::new();
         hasher.update(text.as_bytes());
         hasher.update(model_name.as_bytes());
-        hasher.update([u8::from(add_bos)]);
         format!("{:x}", hasher.finalize())
     }
 
@@ -231,19 +230,17 @@ mod tests {
 
     #[test]
     fn test_compute_key() {
-        let key1 = TokenCache::compute_key("hello", "model1", true);
-        let key2 = TokenCache::compute_key("hello", "model1", true);
-        let key3 = TokenCache::compute_key("hello", "model1", false);
-        let key4 = TokenCache::compute_key("hello", "model2", true);
-        let key5 = TokenCache::compute_key("world", "model1", true);
+        let key1 = TokenCache::compute_key("hello", "model1");
+        let key2 = TokenCache::compute_key("hello", "model1");
+        let key3 = TokenCache::compute_key("hello", "model2");
+        let key4 = TokenCache::compute_key("world", "model1");
 
         // Same inputs should produce same key
         assert_eq!(key1, key2);
 
         // Different inputs should produce different keys
-        assert_ne!(key1, key3); // different add_bos
-        assert_ne!(key1, key4); // different model
-        assert_ne!(key1, key5); // different text
+        assert_ne!(key1, key3); // different model
+        assert_ne!(key1, key4); // different text
     }
 
     #[test]
