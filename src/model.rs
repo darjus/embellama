@@ -202,20 +202,13 @@ impl EmbeddingModel {
             config.model_name
         );
 
-        // Determine n_seq_max based on model architecture
-        // IMPORTANT: Decoder models (Qwen, LLaMA, Mistral, etc.) crash with n_seq_max > 1
-        // due to how they handle sequence batching in llama.cpp. Encoder models (BERT, etc.)
-        // can safely use higher values for better batch processing performance.
-        let n_seq_max = if is_decoder {
-            // Force decoder models to n_seq_max=1 to prevent crashes
-            debug!("Setting n_seq_max=1 for decoder model (required to prevent crashes)");
-            1
-        } else {
-            // Encoder models can use configured value (default to 8 for better batching)
-            let value = config.n_seq_max.unwrap_or(8);
-            debug!("Setting n_seq_max={} for encoder model", value);
-            value
-        };
+        // Use configured n_seq_max or default to 2 for reasonable batching
+        let n_seq_max = config.n_seq_max.unwrap_or(2);
+        debug!(
+            "Setting n_seq_max={} for {} model",
+            n_seq_max,
+            if is_decoder { "decoder" } else { "encoder" }
+        );
 
         let mut ctx_params = LlamaContextParams::default();
         ctx_params = ctx_params.with_n_seq_max(n_seq_max);
