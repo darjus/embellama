@@ -427,7 +427,7 @@ impl EmbeddingModel {
     ///
     /// For BERT-style embedding models, the `max_position_embeddings` parameter
     /// defines the maximum sequence length the model can handle. The only overhead
-    /// is from special tokens like [CLS] and [SEP] that the tokenizer adds.
+    /// is from special tokens like \[CLS\] and \[SEP\] that the tokenizer adds.
     ///
     /// # Returns
     ///
@@ -441,7 +441,7 @@ impl EmbeddingModel {
     /// # Example
     ///
     /// For a model with `max_position_embeddings` = 512:
-    /// - Overhead: 2 tokens ([CLS] and [SEP])
+    /// - Overhead: 2 tokens (\[CLS\] and \[SEP\])
     /// - Effective max: 512 - 2 = 510 tokens
     pub fn effective_max_tokens(&self) -> usize {
         // For embedding models, only special tokens ([CLS], [SEP]) consume overhead
