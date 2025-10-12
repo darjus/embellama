@@ -467,7 +467,7 @@ impl EmbeddingModel {
     pub fn tokenize(&self, text: &str) -> Result<Vec<LlamaToken>> {
         self.cell
             .borrow_owner()
-            .str_to_token(text, AddBos::Never)
+            .str_to_token(text, AddBos::Always)
             .map_err(|e| Error::TokenizationError {
                 message: format!("Failed to tokenize text: {e}"),
             })
