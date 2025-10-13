@@ -105,6 +105,8 @@ pub struct EmbeddingModel {
     max_context_size: usize,
     /// Maximum number of sequences for batch processing
     n_seq_max: u32,
+    /// Batch packing capacity (total tokens that can be packed together)
+    n_batch: u32,
     /// GGUF metadata containing architecture info, dimensions, context size
     metadata: crate::gguf::GGUFMetadata,
 }
@@ -129,6 +131,7 @@ impl EmbeddingModel {
     /// - Invalid configuration parameters are provided
     #[instrument(skip(backend, config), fields(model_path = %config.model_path.display()))]
     #[allow(clippy::too_many_lines)]
+    #[allow(clippy::similar_names)]
     pub fn new(backend: &LlamaBackend, config: &ModelConfig) -> Result<Self> {
         info!("Loading model from {:?}", config.model_path);
 
@@ -202,6 +205,10 @@ impl EmbeddingModel {
             config.model_name
         );
 
+        // Set n_batch with default of 2048 (matches llama-server default)
+        let n_batch = config.n_batch.unwrap_or(2048);
+        debug!("Setting n_batch={}", n_batch);
+
         // Use configured n_seq_max or default to 2 for reasonable batching
         let n_seq_max = config.n_seq_max.unwrap_or(2);
         debug!(
@@ -224,27 +231,20 @@ impl EmbeddingModel {
             // > NOTE: These optimizations are enabled through llama-cpp parameters
         }
 
-        // Set micro-batch size with architecture-aware defaults
-        // Decoder models (Qwen, LLaMA, etc.) need smaller n_ubatch to prevent memory issues and crashes
-        // Encoder models (BERT, etc.) can use larger values for better batch processing
+        // Set micro-batch size
+        // For embeddings, it's recommended to set n_ubatch = n_batch for atomic sequence processing
+        // If n_ubatch is not explicitly set, default it to n_batch
         let n_ubatch = if let Some(ubatch) = config.n_ubatch {
             // Use explicitly configured value
             debug!("Using configured n_ubatch: {}", ubatch);
             ubatch
-        } else if is_decoder {
-            // Decoder models: use conservative 512 to prevent crashes
-            // llama-server uses 2048, but 512 is safer for large contexts
-            let ubatch = 512_u32;
-            debug!(
-                "Setting n_ubatch={} for decoder model (conservative default)",
-                ubatch
-            );
-            ubatch
         } else {
-            // Encoder models: can use larger values for better performance
-            let ubatch = 2048_u32;
-            debug!("Setting n_ubatch={} for encoder model", ubatch);
-            ubatch
+            // Default to n_batch for embeddings (atomic sequence processing)
+            debug!(
+                "Setting n_ubatch={} (defaulted to n_batch for atomic sequence processing)",
+                n_batch
+            );
+            n_batch
         };
         ctx_params = ctx_params.with_n_ubatch(n_ubatch);
 
@@ -279,6 +279,10 @@ impl EmbeddingModel {
             "Model initialized: dimensions={}, context_size={}, threads={}",
             embedding_dimensions, context_size, n_threads
         );
+        info!(
+            "Batch configuration: n_batch={}, n_ubatch={}, n_seq_max={}",
+            n_batch, n_ubatch, n_seq_max
+        );
 
         let cell = ModelCell::try_new(model, |m| {
             m.new_context(backend, ctx_params)
@@ -296,6 +300,7 @@ impl EmbeddingModel {
             #[allow(clippy::cast_lossless)]
             max_context_size: ctx_size as usize,
             n_seq_max,
+            n_batch,
             metadata,
         };
 
@@ -421,6 +426,11 @@ impl EmbeddingModel {
     /// Returns the maximum number of sequences for batch processing.
     pub fn n_seq_max(&self) -> u32 {
         self.n_seq_max
+    }
+
+    /// Returns the batch packing capacity (total tokens).
+    pub fn n_batch(&self) -> u32 {
+        self.n_batch
     }
 
     /// Calculate the effective maximum tokens available for input.

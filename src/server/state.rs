@@ -45,6 +45,8 @@ pub struct ServerConfig {
     pub request_timeout: std::time::Duration,
     /// Maximum number of sequences to process in parallel (`n_seq_max`)
     pub n_seq_max: u32,
+    /// Batch packing capacity - total tokens that can be packed together (None = use default 2048)
+    pub n_batch: Option<u32>,
     /// Pooling strategy for embeddings (None = use default)
     pub pooling_strategy: Option<PoolingStrategy>,
     /// Normalization mode for embeddings (None = use default L2)
@@ -62,6 +64,7 @@ impl Default for ServerConfig {
             port: 8080,
             request_timeout: std::time::Duration::from_secs(60),
             n_seq_max: 8,
+            n_batch: None,
             pooling_strategy: None,
             normalization_mode: None,
         }
@@ -86,6 +89,7 @@ pub struct ServerConfigBuilder {
     port: Option<u16>,
     request_timeout: Option<std::time::Duration>,
     n_seq_max: Option<u32>,
+    n_batch: Option<u32>,
     pooling_strategy: Option<PoolingStrategy>,
     normalization_mode: Option<NormalizationMode>,
 }
@@ -144,6 +148,13 @@ impl ServerConfigBuilder {
     #[must_use]
     pub fn n_seq_max(mut self, n_seq_max: u32) -> Self {
         self.n_seq_max = Some(n_seq_max);
+        self
+    }
+
+    /// Set the batch packing capacity (total tokens)
+    #[must_use]
+    pub fn n_batch(mut self, n_batch: u32) -> Self {
+        self.n_batch = Some(n_batch);
         self
     }
 
@@ -222,6 +233,7 @@ impl ServerConfigBuilder {
             port: self.port.unwrap_or(default.port),
             request_timeout: self.request_timeout.unwrap_or(default.request_timeout),
             n_seq_max: self.n_seq_max.unwrap_or(default.n_seq_max),
+            n_batch: self.n_batch,
             pooling_strategy: self.pooling_strategy,
             normalization_mode: self.normalization_mode,
         })
@@ -275,6 +287,11 @@ impl AppState {
             .with_model_path(&config.model_path)
             .with_model_name(&config.model_name)
             .with_n_seq_max(config.n_seq_max);
+
+        // Add n_batch if specified
+        if let Some(n_batch) = config.n_batch {
+            model_config_builder = model_config_builder.with_n_batch(n_batch);
+        }
 
         // Add context_size if we extracted it
         if let Some(size) = context_size {

@@ -34,6 +34,15 @@ pub struct ModelConfig {
     /// This must be >= the number of tokens in any single input
     pub n_ubatch: Option<u32>,
 
+    /// Batch packing capacity (total tokens that can be packed together)
+    /// This controls how many tokens from multiple sequences can be packed
+    /// into a single batch before processing. Default: 2048
+    ///
+    /// For embedding models, it's recommended to set `n_ubatch = n_batch`
+    /// to ensure atomic sequence processing (sequences cannot be split).
+    /// If `n_ubatch` is not set, it will default to `n_batch`.
+    pub n_batch: Option<u32>,
+
     /// Number of threads for CPU inference
     pub n_threads: Option<usize>,
 
@@ -139,6 +148,22 @@ impl ModelConfig {
             return Err(Error::config("Micro-batch size must be greater than 0"));
         }
 
+        if let Some(n_batch) = self.n_batch
+            && n_batch == 0
+        {
+            return Err(Error::config("Batch size (n_batch) must be greater than 0"));
+        }
+
+        // Validate that n_batch >= n_ubatch if both are set
+        if let (Some(n_batch), Some(n_ubatch)) = (self.n_batch, self.n_ubatch)
+            && n_batch < n_ubatch
+        {
+            return Err(Error::config(format!(
+                "Batch size (n_batch={n_batch}) must be >= micro-batch size (n_ubatch={n_ubatch}). \
+                 For embedding workloads, consider setting n_ubatch = n_batch for simplicity."
+            )));
+        }
+
         if let Some(n_threads) = self.n_threads
             && n_threads == 0
         {
@@ -167,6 +192,7 @@ impl Default for ModelConfig {
             model_name: String::new(),
             n_ctx: None,
             n_ubatch: None,
+            n_batch: None,
             n_threads: None,
             n_gpu_layers: None,
             use_mmap: true,
@@ -219,6 +245,13 @@ impl ModelConfigBuilder {
     #[must_use]
     pub fn with_n_ubatch(mut self, ubatch: u32) -> Self {
         self.config.n_ubatch = Some(ubatch);
+        self
+    }
+
+    /// Set the batch packing capacity (total tokens)
+    #[must_use]
+    pub fn with_n_batch(mut self, batch: u32) -> Self {
+        self.config.n_batch = Some(batch);
         self
     }
 
@@ -720,6 +753,13 @@ impl EngineConfigBuilder {
     #[must_use]
     pub fn with_n_ubatch(mut self, ubatch: u32) -> Self {
         self.config.model_config.n_ubatch = Some(ubatch);
+        self
+    }
+
+    /// Set the batch packing capacity (convenience method)
+    #[must_use]
+    pub fn with_n_batch(mut self, batch: u32) -> Self {
+        self.config.model_config.n_batch = Some(batch);
         self
     }
 
@@ -1305,5 +1345,119 @@ mod tests {
 
         assert!(!config.use_gpu);
         assert_eq!(config.model_config.n_gpu_layers, Some(10));
+    }
+
+    #[test]
+    fn test_n_batch_builder() {
+        let dir = tempdir().unwrap();
+        let model_path = dir.path().join("model.gguf");
+        fs::write(&model_path, b"dummy").unwrap();
+
+        let config = ModelConfig::builder()
+            .with_model_path(&model_path)
+            .with_model_name("test")
+            .with_n_batch(4096)
+            .build()
+            .unwrap();
+
+        assert_eq!(config.n_batch, Some(4096));
+    }
+
+    #[test]
+    fn test_n_batch_validation_zero() {
+        let dir = tempdir().unwrap();
+        let model_path = dir.path().join("model.gguf");
+        fs::write(&model_path, b"dummy").unwrap();
+
+        let result = ModelConfig::builder()
+            .with_model_path(&model_path)
+            .with_model_name("test")
+            .with_n_batch(0)
+            .build();
+
+        assert!(result.is_err());
+        assert!(
+            result
+                .unwrap_err()
+                .to_string()
+                .contains("Batch size (n_batch) must be greater than 0")
+        );
+    }
+
+    #[test]
+    fn test_n_batch_less_than_n_ubatch() {
+        let dir = tempdir().unwrap();
+        let model_path = dir.path().join("model.gguf");
+        fs::write(&model_path, b"dummy").unwrap();
+
+        // n_batch (1024) < n_ubatch (2048) should fail
+        let result = ModelConfig::builder()
+            .with_model_path(&model_path)
+            .with_model_name("test")
+            .with_n_batch(1024)
+            .with_n_ubatch(2048)
+            .build();
+
+        assert!(result.is_err());
+        assert!(
+            result
+                .unwrap_err()
+                .to_string()
+                .contains("must be >= micro-batch size")
+        );
+    }
+
+    #[test]
+    fn test_n_batch_equals_n_ubatch() {
+        let dir = tempdir().unwrap();
+        let model_path = dir.path().join("model.gguf");
+        fs::write(&model_path, b"dummy").unwrap();
+
+        // n_batch == n_ubatch should pass
+        let config = ModelConfig::builder()
+            .with_model_path(&model_path)
+            .with_model_name("test")
+            .with_n_batch(2048)
+            .with_n_ubatch(2048)
+            .build()
+            .unwrap();
+
+        assert_eq!(config.n_batch, Some(2048));
+        assert_eq!(config.n_ubatch, Some(2048));
+    }
+
+    #[test]
+    fn test_n_batch_greater_than_n_ubatch() {
+        let dir = tempdir().unwrap();
+        let model_path = dir.path().join("model.gguf");
+        fs::write(&model_path, b"dummy").unwrap();
+
+        // n_batch (4096) > n_ubatch (2048) should pass
+        let config = ModelConfig::builder()
+            .with_model_path(&model_path)
+            .with_model_name("test")
+            .with_n_batch(4096)
+            .with_n_ubatch(2048)
+            .build()
+            .unwrap();
+
+        assert_eq!(config.n_batch, Some(4096));
+        assert_eq!(config.n_ubatch, Some(2048));
+    }
+
+    #[test]
+    fn test_engine_config_with_n_batch() {
+        let dir = tempdir().unwrap();
+        let model_path = dir.path().join("model.gguf");
+        fs::write(&model_path, b"dummy").unwrap();
+
+        let config = EngineConfig::builder()
+            .with_model_path(&model_path)
+            .with_model_name("test")
+            .with_n_batch(8192)
+            .build()
+            .unwrap();
+
+        assert_eq!(config.model_config.n_batch, Some(8192));
     }
 }
