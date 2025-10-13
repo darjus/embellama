@@ -14,12 +14,12 @@
 
 //! Integration tests for batch overflow handling with Jina model
 //!
-//! This test reproduces the GGML assertion failure when processing batches
-//! that exceed the effective max tokens limit (ctx_size - embedding_dimensions - padding).
+//! This test validates batch packing behavior using n_batch capacity.
+//! After Phase 3 refactoring, batch chunking is based on n_batch (default 2048)
+//! rather than n_seq_max, enabling more efficient packing.
 //!
-//! The test is designed to fail initially (TDD red phase) and pass after implementing:
-//! 1. effective_max_tokens() method
-//! 2. Batch splitting logic that respects effective_max
+//! Individual sequences are still validated against effective_max during tokenization.
+//! The n_seq_max parameter is managed internally by llama.cpp for parallelism.
 
 use embellama::{EmbeddingEngine, EngineConfig};
 use serial_test::serial;
@@ -98,7 +98,8 @@ fn test_jina_batch_overflow_with_8042_tokens() {
     // Jina models typically have:
     // - context_size: 8192
     // - embedding_dimensions: 768
-    // - effective_max should be: 8192 - (768 + 100) = 7324 tokens
+    // - n_batch: 2048 (default)
+    // - effective_max: auto-detected per-sequence limit
     let config = EngineConfig::builder()
         .with_model_path(model_path)
         .with_model_name(model_name)
@@ -112,25 +113,21 @@ fn test_jina_batch_overflow_with_8042_tokens() {
     let batch = generate_large_token_batch();
 
     println!("Testing batch with {} sequences", batch.len());
-    println!("Expected total tokens: ~8042 (exceeds effective_max of 7324)");
+    println!("Expected total tokens: ~8042");
+    println!("With n_batch=2048, this will be automatically split into multiple batches");
+    println!("Individual sequences are validated against effective_max during tokenization");
 
-    // CURRENT STATE (TDD Red Phase):
-    // This test will FAIL with GGML assertion:
-    // "GGML_ASSERT(cparams.n_ubatch >= n_tokens) failed"
-    // Because we're trying to process 8042 tokens which exceeds the
-    // effective max of 7324 (8192 - 768 - 100)
-    //
-    // EXPECTED STATE (After Implementation):
-    // After implementing effective_max_tokens() and batch splitting,
-    // this should PASS by automatically splitting the batch into chunks
-    // that fit within effective_max limit
+    // AFTER PHASE 3:
+    // Batch is automatically split based on n_batch capacity (2048 tokens)
+    // This enables better packing compared to old n_seq_max-based chunking
+    // Individual sequences are validated against effective_max during tokenization
 
     let text_refs: Vec<&str> = batch.iter().map(String::as_str).collect();
     let result = engine.embed_batch(Some(model_name), &text_refs);
 
     match result {
         Ok(embeddings) => {
-            println!("✓ Successfully processed batch (after implementation)");
+            println!("✓ Successfully processed batch with n_batch-based chunking");
             assert_eq!(
                 embeddings.len(),
                 batch.len(),
@@ -159,9 +156,8 @@ fn test_jina_batch_overflow_with_8042_tokens() {
             );
         }
         Err(e) => {
-            // Before implementation, this will fail with GGML assertion
             panic!(
-                "Batch processing failed (expected before implementation): {}",
+                "Batch processing failed (should work with n_batch-based chunking): {}",
                 e
             );
         }

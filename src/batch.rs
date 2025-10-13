@@ -18,6 +18,16 @@
 //! embeddings for multiple texts simultaneously. It leverages parallel processing
 //! for pre/post-processing while respecting the single-threaded constraint of
 //! model inference.
+//!
+//! # Batching Strategy
+//!
+//! The module uses `n_batch` (batch packing capacity) to determine when to split
+//! requests into multiple batches. This is distinct from:
+//! - `effective_max`: Per-sequence token limit (embedding constraint)
+//! - `n_seq_max`: Internal llama.cpp parallelism (not used for packing decisions)
+//!
+//! This approach aligns with llama.cpp server behavior and enables better throughput
+//! through improved batch packing.
 
 use crate::config::PoolingStrategy;
 use crate::error::{Error, Result};
@@ -111,24 +121,39 @@ impl BatchProcessor {
         // Step 2: Parallel tokenization using the real tokenizer
         let token_sequences = Self::parallel_tokenize_real(model, texts)?;
 
-        // Step 3: Check if we need to chunk the batch based on total token count and n_seq_max
+        // Fast path: single sequence needs no chunking logic
+        if token_sequences.len() == 1 {
+            debug!("Fast path: single sequence, processing without chunking");
+            let batch_embeddings = model.process_batch_tokens(&token_sequences)?;
+
+            // Update progress
+            if let Some(ref callback) = self.progress_callback {
+                callback(1, total);
+            }
+
+            return Ok(batch_embeddings);
+        }
+
+        // Step 3: Check if we need to chunk the batch based on n_batch capacity
+        // Individual sequences are already validated against effective_max during tokenization
         let total_tokens: usize = token_sequences.iter().map(std::vec::Vec::len).sum();
-        let effective_max = model.effective_max_tokens();
-        let n_seq_max = model.n_seq_max() as usize;
+        let n_batch = model.n_batch() as usize;
 
         debug!(
-            "Batch validation: {} sequences, {} tokens, effective_max: {}",
+            "Batch validation: {} sequences, {} total tokens, n_batch capacity: {}",
             token_sequences.len(),
             total_tokens,
-            effective_max
+            n_batch
         );
 
-        let embeddings = if total_tokens <= effective_max && token_sequences.len() <= n_seq_max {
-            // Process all sequences in a single batch
+        let embeddings = if total_tokens <= n_batch {
+            // Process all sequences in a single batch - n_batch is the packing constraint
+            // Note: n_seq_max is validated internally by llama.cpp, not used for packing decisions
             debug!(
-                "Processing {} sequences with {} total tokens in single batch",
+                "Processing {} sequences with {} total tokens in single batch (n_batch={})",
                 token_sequences.len(),
-                total_tokens
+                total_tokens,
+                n_batch
             );
 
             let batch_embeddings = model.process_batch_tokens(&token_sequences)?;
@@ -141,13 +166,13 @@ impl BatchProcessor {
 
             batch_embeddings
         } else {
-            // Need to chunk into smaller batches
+            // Need to chunk into smaller batches based on n_batch capacity
+            // Note: llama.cpp handles sequential GPU processing internally
+            // Prefilling with one copy in/out is faster even if GPU processes non-parallel
+            let num_sequences = token_sequences.len();
             debug!(
-                "Chunking batch: {} total tokens (effective_max {}), {} sequences (n_seq_max {})",
-                total_tokens,
-                effective_max,
-                token_sequences.len(),
-                n_seq_max
+                "Chunking batch: {} sequences with {} total tokens exceeds n_batch capacity of {}",
+                num_sequences, total_tokens, n_batch
             );
 
             let mut all_embeddings = Vec::with_capacity(texts.len());
@@ -157,11 +182,9 @@ impl BatchProcessor {
             for seq in token_sequences {
                 let seq_len = seq.len();
 
-                // Check if adding this sequence would exceed either limit
-                if !current_batch.is_empty()
-                    && (current_tokens + seq_len > effective_max
-                        || current_batch.len() >= n_seq_max)
-                {
+                // Check if adding this sequence would exceed n_batch capacity
+                // Only token-based chunking - no n_seq_max constraint for packing
+                if !current_batch.is_empty() && (current_tokens + seq_len > n_batch) {
                     // Process current batch
                     let batch_embeddings = model.process_batch_tokens(&current_batch)?;
                     let batch_len = batch_embeddings.len();
@@ -196,6 +219,13 @@ impl BatchProcessor {
 
                 all_embeddings.extend(batch_embeddings);
             }
+
+            // Calculate number of batches created
+            let num_batches = all_embeddings.len().div_ceil(texts.len());
+            debug!(
+                "Packed {} sequences ({} total tokens) into {} batch(es) (n_batch={})",
+                num_sequences, total_tokens, num_batches, n_batch
+            );
 
             all_embeddings
         };

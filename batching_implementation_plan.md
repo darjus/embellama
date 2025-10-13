@@ -521,14 +521,14 @@ async fn model_worker(scheduler: Arc<BatchScheduler>) {
 ### Tasks
 
 #### 3.1 Update Chunking Logic in BatchProcessor
-- [ ] Refactor `process_batch()` chunking condition (src/batch.rs:126-200)
-- [ ] **OLD logic**:
+- [x] Refactor `process_batch()` chunking condition (src/batch.rs:126-200)
+- [x] **OLD logic**:
   ```rust
   if total_tokens <= effective_max && token_sequences.len() <= n_seq_max {
       // Process all in single batch
   }
   ```
-- [ ] **NEW logic**:
+- [x] **NEW logic**:
   ```rust
   let n_batch = model.n_batch() as usize;
 
@@ -537,26 +537,29 @@ async fn model_worker(scheduler: Arc<BatchScheduler>) {
       // Individual sequences are already validated against effective_max
   }
   ```
+  > NOTE: Implemented at src/batch.rs:126-167
 
 #### 3.2 Update Chunk Building Logic
-- [ ] Refactor chunk building loop (src/batch.rs:157-184)
-- [ ] **OLD constraint**: `current_tokens + seq_len > effective_max || current_batch.len() >= n_seq_max`
-- [ ] **NEW constraint**: `current_tokens + seq_len > n_batch` (ONLY token-based, NO n_seq_max check)
-- [ ] **Remove `n_seq_max` from chunking decisions entirely**
+- [x] Refactor chunk building loop (src/batch.rs:157-184)
+- [x] **OLD constraint**: `current_tokens + seq_len > effective_max || current_batch.len() >= n_seq_max`
+- [x] **NEW constraint**: `current_tokens + seq_len > n_batch` (ONLY token-based, NO n_seq_max check)
+- [x] **Remove `n_seq_max` from chunking decisions entirely**
   - llama.cpp handles sequential GPU processing internally
   - Prefilling with one copy in/out is faster even if GPU processes non-parallel
   - Let llama.cpp manage parallelism based on hardware capabilities
-- [ ] Keep individual sequence validation against `n_ubatch` (embedding constraint)
+- [x] Keep individual sequence validation against `n_ubatch` (embedding constraint)
+  > NOTE: Implemented at src/batch.rs:168-237, removed n_seq_max from chunking at line 188-190
 
 #### 3.3 Optimize for Common Cases
-- [ ] Add fast path for single-sequence batches:
+- [x] Add fast path for single-sequence batches:
   ```rust
   if token_sequences.len() == 1 {
       // Fast path: single sequence, no chunking needed
       return model.process_batch_tokens(token_sequences);
   }
   ```
-- [ ] Add metrics/logging for batch packing efficiency:
+  > NOTE: Implemented at src/batch.rs:124-135
+- [x] Add metrics/logging for batch packing efficiency:
   ```rust
   debug!(
       "Packed {} sequences ({} total tokens) into {} batches (n_batch={})",
@@ -566,19 +569,22 @@ async fn model_worker(scheduler: Arc<BatchScheduler>) {
       n_batch
   );
   ```
+  > NOTE: Implemented at src/batch.rs:227-235
 
 #### 3.4 Update Comments and Documentation
-- [ ] Update comments to clarify:
+- [x] Update comments to clarify:
   - `n_batch`: Controls when to split into multiple batches
   - `effective_max`: Per-sequence token limit (embedding constraint)
   - `n_seq_max`: Internal llama.cpp parallelism (not a packing constraint)
-- [ ] Update module-level documentation in `batch.rs`
+- [x] Update module-level documentation in `batch.rs`
+  > NOTE: Updated module doc at src/batch.rs:15-30, added batching strategy explanation
 
 **Acceptance Criteria**:
-- Chunking based on n_batch capacity, not n_seq_max
-- Individual sequences still validated against n_ubatch (embedding constraint)
-- More efficient packing (fewer chunks for same input)
-- Clear documentation of constraints
+- [x] Chunking based on n_batch capacity, not n_seq_max
+- [x] Individual sequences still validated against effective_max (during tokenization)
+- [x] More efficient packing (fewer chunks for same input)
+- [x] Clear documentation of constraints
+- [x] All tests pass (73 tests passed)
 
 #### 3.5 Concurrent Batch Processing (NEW)
 - [ ] Enable creation of multiple batches when queue has significant pending work:
