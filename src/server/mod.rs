@@ -45,6 +45,7 @@
 //! ```
 
 pub mod api_types;
+pub mod batch_scheduler;
 pub mod cache_handlers;
 pub mod channel;
 pub mod dispatcher;
@@ -62,6 +63,7 @@ pub mod metrics;
 pub mod rate_limiter;
 
 // Re-exports for convenience
+pub use batch_scheduler::{ActiveBatch, BatchRequest, BatchScheduler};
 pub use middleware::{
     API_KEY_HEADER, ApiKeyConfig, MAX_REQUEST_SIZE, REQUEST_ID_HEADER, authenticate_api_key,
     extract_request_id, inject_request_id, limit_request_size,

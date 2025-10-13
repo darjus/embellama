@@ -433,10 +433,11 @@ async fn model_worker(scheduler: Arc<BatchScheduler>) {
 - [x] All tests pass (73 tests passed)
 
 #### 2.4 Add Batch Scheduler State (NEW)
-- [ ] Use `tokio::sync::mpsc::unbounded_channel` for request queue
-- [ ] Use `tokio::sync::oneshot` for request/response coordination
-- [ ] Use `parking_lot::Mutex` for active batch tracking (faster than std)
-- [ ] Implementation:
+- [x] Use `tokio::sync::mpsc::unbounded_channel` for request queue
+- [x] Use `tokio::sync::oneshot` for request/response coordination
+- [x] Use `parking_lot::Mutex` for active batch tracking (faster than std)
+- [x] Implementation:
+  > NOTE: Implemented in src/server/batch_scheduler.rs with complete producer-consumer architecture
   ```rust
   use tokio::sync::{mpsc, oneshot};
   use parking_lot::Mutex;
@@ -456,8 +457,34 @@ async fn model_worker(scheduler: Arc<BatchScheduler>) {
       token_count: usize,
   }
   ```
-- [ ] Update pending_tokens when requests arrive/complete to maintain accurate counts
-- [ ] Log queue depth and active batch count for monitoring
+- [x] Update pending_tokens when requests arrive/complete to maintain accurate counts
+  > NOTE: Implemented add_pending_tokens() and remove_pending_tokens() methods with atomic operations
+- [x] Log queue depth and active batch count for monitoring
+  > NOTE: Comprehensive logging added for:
+  > - Pending token count changes (debug level)
+  > - Active batch tracking (info level with batch ID, token counts, elapsed time)
+  > - Batch processing start/completion (debug/info level)
+  > - Worker loop initialization and configuration
+- [x] Add helper methods for queue inspection
+  > NOTE: Implemented pending_tokens(), active_batch_count(), and active_token_count() methods
+- [x] Implement model worker loop
+  > NOTE: Implemented run_worker() async method that:
+  > - Collects requests up to n_batch capacity
+  > - Tracks active batches during processing
+  > - Processes batches through EmbeddingModel
+  > - Sends responses via oneshot channels
+  > - Handles graceful shutdown when channel closes
+- [x] Add unit tests for batch scheduler
+  > NOTE: Implemented 11 unit tests in tests/batch_scheduler_tests.rs covering:
+  > - Atomic counter increment/decrement operations
+  > - Saturating subtraction to prevent underflow
+  > - Concurrent safety verification
+  > - Active batch add/remove operations
+  > - Token sum calculations
+  > - Channel message structure validation
+  > - parking_lot::Mutex performance characteristics
+  > - UUID generation for batch IDs
+  > All tests pass with --features server enabled
 
 #### 2.5 Intelligent Batch Sizing (NEW)
 - [ ] Implement smart batch allocation based on queue state:
