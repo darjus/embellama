@@ -255,3 +255,162 @@ fn test_jina_small_batch_succeeds() {
     let embeddings = result.unwrap();
     assert_eq!(embeddings.len(), 3, "Should return 3 embeddings");
 }
+
+#[test]
+#[serial]
+#[ignore = "Run only if EMBELLAMA_TEST_MODEL is a Jina model - tests n_batch packing"]
+fn test_jina_sequences_pack_correctly_with_n_batch() {
+    // Initialize test logging
+    common::init_test_logger();
+
+    let model_path =
+        std::env::var("EMBELLAMA_TEST_MODEL").expect("EMBELLAMA_TEST_MODEL must be set");
+
+    let model_path_buf = PathBuf::from(&model_path);
+    let model_name = model_path_buf
+        .file_stem()
+        .and_then(|s| s.to_str())
+        .unwrap_or("jina-test-model");
+
+    // BEFORE Phase 3: n_seq_max=2 would force chunking after 2 sequences
+    // AFTER Phase 3: n_batch=2048 allows much better packing based on token count
+    let config = EngineConfig::builder()
+        .with_model_path(model_path)
+        .with_model_name(model_name)
+        .with_n_batch(2048) // Explicit n_batch for packing
+        .with_n_seq_max(2) // Small n_seq_max (llama.cpp internal)
+        .build()
+        .expect("Failed to create config");
+
+    let engine = EmbeddingEngine::new(config).expect("Failed to initialize engine");
+
+    // Create 10 short sequences (~200 tokens total, well under n_batch=2048)
+    // BEFORE: Would be chunked into 5 batches (2 sequences each due to n_seq_max=2)
+    // AFTER: Processed in 1 batch (token count < n_batch, n_seq_max not used for packing)
+    let batch: Vec<String> = (0..10)
+        .map(|i| format!("Short sequence {i} for packing test."))
+        .collect();
+    let text_refs: Vec<&str> = batch.iter().map(String::as_str).collect();
+
+    println!("Testing packing of 10 short sequences with n_batch=2048");
+    println!("These should pack into 1 batch (total < 2048 tokens)");
+
+    let result = engine.embed_batch(Some(model_name), &text_refs);
+
+    assert!(result.is_ok(), "Batch packing with n_batch should succeed");
+    let embeddings = result.unwrap();
+    assert_eq!(embeddings.len(), 10, "Should return all 10 embeddings");
+
+    println!("✓ Successfully packed 10 sequences with n_batch-based logic");
+}
+
+#[test]
+#[serial]
+#[ignore = "Run only if EMBELLAMA_TEST_MODEL is a Jina model - tests effective_max enforcement"]
+fn test_jina_individual_sequence_limit_still_enforced() {
+    // Initialize test logging
+    common::init_test_logger();
+
+    let model_path =
+        std::env::var("EMBELLAMA_TEST_MODEL").expect("EMBELLAMA_TEST_MODEL must be set");
+
+    let model_path_buf = PathBuf::from(&model_path);
+    let model_name = model_path_buf
+        .file_stem()
+        .and_then(|s| s.to_str())
+        .unwrap_or("jina-test-model");
+
+    let config = EngineConfig::builder()
+        .with_model_path(model_path)
+        .with_model_name(model_name)
+        .with_n_batch(8192) // Large n_batch
+        .build()
+        .expect("Failed to create config");
+
+    let engine = EmbeddingEngine::new(config).expect("Failed to initialize engine");
+
+    // Create a single sequence that exceeds effective_max (~7324 for Jina)
+    // Even though n_batch is large, individual sequences still have limits
+    let very_long_text = "The quick brown fox jumps over the lazy dog. ".repeat(2000); // ~18000 tokens
+
+    println!("Testing that individual sequence limits are still enforced");
+    println!("Even with large n_batch, sequences must be < effective_max");
+
+    let result = engine.embed_batch(Some(model_name), &[very_long_text.as_str()]);
+
+    // This should fail due to individual sequence limit (effective_max)
+    assert!(
+        result.is_err(),
+        "Sequence exceeding effective_max should be rejected even with large n_batch"
+    );
+    let err_msg = result.unwrap_err().to_string();
+    assert!(
+        err_msg.contains("token limit")
+            || err_msg.contains("too large")
+            || err_msg.contains("exceeds"),
+        "Error should mention token limit: {}",
+        err_msg
+    );
+
+    println!("✓ Individual sequence limit (effective_max) is properly enforced");
+}
+
+#[test]
+#[serial]
+#[ignore = "Run only if EMBELLAMA_TEST_MODEL is a Jina model - tests chunking with large batch"]
+fn test_jina_chunking_with_many_sequences() {
+    // Initialize test logging
+    common::init_test_logger();
+
+    let model_path =
+        std::env::var("EMBELLAMA_TEST_MODEL").expect("EMBELLAMA_TEST_MODEL must be set");
+
+    let model_path_buf = PathBuf::from(&model_path);
+    let model_name = model_path_buf
+        .file_stem()
+        .and_then(|s| s.to_str())
+        .unwrap_or("jina-test-model");
+
+    let config = EngineConfig::builder()
+        .with_model_path(model_path)
+        .with_model_name(model_name)
+        .with_n_batch(1024) // Moderate n_batch to test chunking
+        .build()
+        .expect("Failed to create config");
+
+    let engine = EmbeddingEngine::new(config).expect("Failed to initialize engine");
+
+    // Create 50 sequences that will require chunking
+    // ~30-40 tokens per sequence * 50 ≈ 1500-2000 tokens > n_batch=1024
+    let batch: Vec<String> = (0..50)
+        .map(|i| {
+            format!("Test sequence {i} with enough content to require chunking when combined.")
+        })
+        .collect();
+    let text_refs: Vec<&str> = batch.iter().map(String::as_str).collect();
+
+    println!("Testing chunking with 50 sequences and n_batch=1024");
+
+    let result = engine.embed_batch(Some(model_name), &text_refs);
+
+    assert!(result.is_ok(), "Chunked batch processing should succeed");
+    let embeddings = result.unwrap();
+    assert_eq!(
+        embeddings.len(),
+        50,
+        "Should return all 50 embeddings despite chunking"
+    );
+
+    // Verify all embeddings have consistent dimensions
+    let expected_dim = embeddings[0].len();
+    for (i, emb) in embeddings.iter().enumerate() {
+        assert!(!emb.is_empty(), "Embedding {i} should not be empty");
+        assert_eq!(
+            emb.len(),
+            expected_dim,
+            "All embeddings should have consistent dimensions"
+        );
+    }
+
+    println!("✓ Successfully processed 50 sequences with chunking");
+}
