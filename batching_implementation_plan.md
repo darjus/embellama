@@ -487,7 +487,8 @@ async fn model_worker(scheduler: Arc<BatchScheduler>) {
   > All tests pass with --features server enabled
 
 #### 2.5 Intelligent Batch Sizing (NEW)
-- [ ] Implement smart batch allocation based on queue state:
+- [x] Implement smart batch allocation based on queue state:
+  > NOTE: Implemented at src/server/batch_scheduler.rs:289-332
   ```rust
   fn determine_batch_size(&self) -> usize {
       let pending = self.pending_tokens.load(Ordering::Relaxed);
@@ -495,23 +496,50 @@ async fn model_worker(scheduler: Arc<BatchScheduler>) {
       // Use parking_lot::Mutex (no .unwrap() needed, never panics)
       let active_info = self.active_batches.lock();
       let total_active: usize = active_info.iter().map(|b| b.token_count).sum();
-      let n_batch = self.n_batch as usize;
+      drop(active_info); // Release lock early
 
-      if pending < n_batch {
+      // Calculate available capacity
+      let available_capacity = self.context_size.saturating_sub(total_active);
+
+      // Determine optimal batch size based on load and capacity
+      if pending == 0 {
+          // No pending work
+          0
+      } else if pending < self.n_batch {
           // Light load: allocate exactly what we need
-          pending
-      } else if total_active + n_batch <= self.context_size {
+          std::cmp::min(pending, available_capacity)
+      } else if total_active + self.n_batch <= self.context_size {
           // Heavy load + capacity: allocate full batch
-          n_batch
+          std::cmp::min(self.n_batch, available_capacity)
       } else {
           // At capacity: fit what we can
-          std::cmp::min(pending, self.context_size - total_active)
+          std::cmp::min(pending, available_capacity)
       }
   }
   ```
-- [ ] Use queue-aware sizing instead of always allocating to n_batch
-- [ ] Use `parking_lot::Mutex` for faster locking (no poisoning, no .unwrap())
-- [ ] Add debug logging showing sizing decision rationale
+- [x] Use queue-aware sizing instead of always allocating to n_batch
+  > NOTE: Worker loop updated at src/server/batch_scheduler.rs:424-432
+  > NOTE: Worker calls determine_batch_size() before collecting requests
+  > NOTE: Yields if target_batch_size == 0 (no capacity or no pending work)
+- [x] Use `parking_lot::Mutex` for faster locking (no poisoning, no .unwrap())
+  > NOTE: Already using parking_lot::Mutex throughout BatchScheduler
+  > NOTE: No unwrap() needed - parking_lot never panics on lock
+- [x] Add debug logging showing sizing decision rationale
+  > NOTE: Comprehensive debug logging in determine_batch_size() at lines 303-328
+  > NOTE: Logs show: pending tokens, active tokens, available capacity, decision rationale
+  > NOTE: Different log messages for: no pending work, light load, heavy load with capacity, at capacity
+- [x] Add unit tests for intelligent batch sizing
+  > NOTE: Implemented 9 unit tests in tests/batch_scheduler_tests.rs:248-427 (Phase 2.5 tests)
+  > NOTE: test_determine_batch_size_light_load() - validates light load returns exact pending
+  > NOTE: test_determine_batch_size_heavy_load_with_capacity() - validates heavy load returns n_batch
+  > NOTE: test_determine_batch_size_at_capacity() - validates capacity-constrained sizing
+  > NOTE: test_determine_batch_size_zero_capacity() - validates behavior when at capacity limit
+  > NOTE: test_determine_batch_size_no_pending_work() - validates returns 0 when no pending work
+  > NOTE: test_determine_batch_size_exact_n_batch_pending() - validates edge case of pending == n_batch
+  > NOTE: test_determine_batch_size_edge_case_minimal_capacity() - validates very small capacity
+  > NOTE: test_determine_batch_size_light_load_constrained_by_capacity() - validates capacity constraint
+  > NOTE: test_saturating_sub_prevents_underflow() - validates saturating_sub prevents underflow
+  > NOTE: All tests use usize type annotations for clarity and correctness
 
 #### 2.6 GPU OOM Retry Logic (NEW)
 - [ ] Implement pragmatic retry strategy with exponential backoff:

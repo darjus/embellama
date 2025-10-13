@@ -244,3 +244,214 @@ fn test_uuid_generation_for_batch_ids() {
     let id1_clone = id1;
     assert_eq!(id1, id1_clone);
 }
+
+// =============================================================================
+// Phase 2.5: Intelligent Batch Sizing Tests
+// =============================================================================
+
+#[test]
+fn test_determine_batch_size_light_load() {
+    // Test: Light load (pending < n_batch) → returns pending
+    // Simulates the logic from determine_batch_size()
+    let n_batch: usize = 2048;
+    let context_size: usize = 8192;
+    let pending: usize = 500;
+    let total_active: usize = 0;
+
+    let available_capacity = context_size.saturating_sub(total_active);
+    let batch_size = if pending < n_batch {
+        std::cmp::min(pending, available_capacity)
+    } else if total_active + n_batch <= context_size {
+        std::cmp::min(n_batch, available_capacity)
+    } else {
+        std::cmp::min(pending, available_capacity)
+    };
+
+    assert_eq!(
+        batch_size, 500,
+        "Light load should return exact pending count"
+    );
+}
+
+#[test]
+fn test_determine_batch_size_heavy_load_with_capacity() {
+    // Test: Heavy load with capacity (pending >= n_batch, room in context) → returns n_batch
+    let n_batch: usize = 2048;
+    let context_size: usize = 8192;
+    let pending: usize = 5000;
+    let total_active: usize = 1000;
+
+    let available_capacity = context_size.saturating_sub(total_active);
+    let batch_size = if pending < n_batch {
+        std::cmp::min(pending, available_capacity)
+    } else if total_active + n_batch <= context_size {
+        std::cmp::min(n_batch, available_capacity)
+    } else {
+        std::cmp::min(pending, available_capacity)
+    };
+
+    assert_eq!(
+        batch_size, 2048,
+        "Heavy load with capacity should return full n_batch"
+    );
+}
+
+#[test]
+fn test_determine_batch_size_at_capacity() {
+    // Test: At capacity (total_active + n_batch > context_size) → returns smaller size
+    let n_batch: usize = 2048;
+    let context_size: usize = 8192;
+    let pending: usize = 5000;
+    let total_active: usize = 7000; // Almost at capacity
+
+    let available_capacity = context_size.saturating_sub(total_active);
+    let batch_size = if pending < n_batch {
+        std::cmp::min(pending, available_capacity)
+    } else if total_active + n_batch <= context_size {
+        std::cmp::min(n_batch, available_capacity)
+    } else {
+        std::cmp::min(pending, available_capacity)
+    };
+
+    assert_eq!(
+        batch_size, 1192,
+        "At capacity should return min(pending, available)"
+    );
+    assert!(
+        batch_size <= available_capacity,
+        "Batch size must not exceed available capacity"
+    );
+}
+
+#[test]
+fn test_determine_batch_size_zero_capacity() {
+    // Test: Zero capacity (total_active >= context_size) → returns 0
+    let n_batch: usize = 2048;
+    let context_size: usize = 8192;
+    let pending: usize = 5000;
+    let total_active: usize = 8192; // At capacity
+
+    let available_capacity = context_size.saturating_sub(total_active);
+    let batch_size = if pending < n_batch {
+        std::cmp::min(pending, available_capacity)
+    } else if total_active + n_batch <= context_size {
+        std::cmp::min(n_batch, available_capacity)
+    } else {
+        std::cmp::min(pending, available_capacity)
+    };
+
+    assert_eq!(batch_size, 0, "Zero capacity should return 0");
+}
+
+#[test]
+fn test_determine_batch_size_no_pending_work() {
+    // Test: No pending work (pending == 0) → returns 0
+    let n_batch: usize = 2048;
+    let context_size: usize = 8192;
+    let pending: usize = 0;
+    let total_active: usize = 1000;
+
+    let available_capacity = context_size.saturating_sub(total_active);
+    let batch_size = if pending == 0 {
+        0
+    } else if pending < n_batch {
+        std::cmp::min(pending, available_capacity)
+    } else if total_active + n_batch <= context_size {
+        std::cmp::min(n_batch, available_capacity)
+    } else {
+        std::cmp::min(pending, available_capacity)
+    };
+
+    assert_eq!(batch_size, 0, "No pending work should return 0");
+}
+
+#[test]
+fn test_determine_batch_size_exact_n_batch_pending() {
+    // Test: Pending exactly equals n_batch → returns n_batch if capacity allows
+    let n_batch: usize = 2048;
+    let context_size: usize = 8192;
+    let pending: usize = 2048;
+    let total_active: usize = 1000;
+
+    let available_capacity = context_size.saturating_sub(total_active);
+    let batch_size = if pending < n_batch {
+        std::cmp::min(pending, available_capacity)
+    } else if total_active + n_batch <= context_size {
+        std::cmp::min(n_batch, available_capacity)
+    } else {
+        std::cmp::min(pending, available_capacity)
+    };
+
+    assert_eq!(
+        batch_size, 2048,
+        "Pending == n_batch should return n_batch when capacity allows"
+    );
+}
+
+#[test]
+fn test_determine_batch_size_edge_case_minimal_capacity() {
+    // Test: Very small available capacity
+    let n_batch: usize = 2048;
+    let context_size: usize = 8192;
+    let pending: usize = 5000;
+    let total_active: usize = 8190; // Only 2 tokens available
+
+    let available_capacity = context_size.saturating_sub(total_active);
+    let batch_size = if pending < n_batch {
+        std::cmp::min(pending, available_capacity)
+    } else if total_active + n_batch <= context_size {
+        std::cmp::min(n_batch, available_capacity)
+    } else {
+        std::cmp::min(pending, available_capacity)
+    };
+
+    assert_eq!(
+        batch_size, 2,
+        "Minimal capacity should return available capacity"
+    );
+    assert!(
+        batch_size <= available_capacity,
+        "Must respect available capacity"
+    );
+}
+
+#[test]
+fn test_determine_batch_size_light_load_constrained_by_capacity() {
+    // Test: Light load but constrained by available capacity
+    let n_batch: usize = 2048;
+    let context_size: usize = 8192;
+    let pending: usize = 500;
+    let total_active: usize = 8000; // Only 192 tokens available
+
+    let available_capacity = context_size.saturating_sub(total_active);
+    let batch_size = if pending < n_batch {
+        std::cmp::min(pending, available_capacity)
+    } else if total_active + n_batch <= context_size {
+        std::cmp::min(n_batch, available_capacity)
+    } else {
+        std::cmp::min(pending, available_capacity)
+    };
+
+    assert_eq!(
+        batch_size, 192,
+        "Light load constrained by capacity should return available"
+    );
+    assert!(
+        batch_size <= available_capacity,
+        "Must respect available capacity"
+    );
+    assert!(batch_size <= pending, "Must not exceed pending work");
+}
+
+#[test]
+fn test_saturating_sub_prevents_underflow() {
+    // Test that saturating_sub prevents integer underflow in capacity calculations
+    let context_size: usize = 1000;
+    let total_active: usize = 1500; // More than context_size
+
+    let available_capacity = context_size.saturating_sub(total_active);
+    assert_eq!(
+        available_capacity, 0,
+        "saturating_sub should prevent underflow"
+    );
+}

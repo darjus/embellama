@@ -84,6 +84,7 @@ pub struct ActiveBatch {
 /// - An atomic counter of pending tokens (for lock-free queue depth tracking)
 /// - A list of active batches (for capacity management)
 /// - An unbounded MPSC channel for incoming requests
+/// - Context size limit for capacity-aware batch sizing
 ///
 /// # Thread Safety
 ///
@@ -110,6 +111,14 @@ pub struct BatchScheduler {
     /// Note: `EmbeddingModel` is !Send, but the model worker stays on one thread
     /// The `BatchScheduler` itself will be Arc'd, so no need for Arc here
     model: Mutex<EmbeddingModel>,
+
+    /// Batch packing capacity (total tokens)
+    /// Used for intelligent batch sizing decisions
+    n_batch: usize,
+
+    /// Maximum context size (total tokens)
+    /// Used to ensure total active tokens don't exceed capacity
+    context_size: usize,
 }
 
 impl BatchScheduler {
@@ -125,7 +134,14 @@ impl BatchScheduler {
     pub fn new(model: EmbeddingModel) -> Self {
         let (tx, rx) = mpsc::unbounded_channel();
 
-        info!("Creating batch scheduler");
+        // Extract configuration from model for intelligent batch sizing
+        let n_batch = model.n_batch() as usize;
+        let context_size = model.max_sequence_length();
+
+        info!(
+            "Creating batch scheduler: n_batch={}, context_size={}",
+            n_batch, context_size
+        );
 
         Self {
             pending_tokens: AtomicUsize::new(0),
@@ -133,6 +149,8 @@ impl BatchScheduler {
             request_rx: Mutex::new(rx),
             request_tx: tx,
             model: Mutex::new(model),
+            n_batch,
+            context_size,
         }
     }
 
@@ -254,6 +272,63 @@ impl BatchScheduler {
         }
     }
 
+    /// Determine the optimal batch size based on queue state and capacity
+    ///
+    /// This method implements intelligent batch sizing that adapts to load:
+    /// - **Light load** (pending < `n_batch`): Allocate exactly what's needed to avoid waste
+    /// - **Heavy load** (pending >= `n_batch`): Allocate full `n_batch` for maximum throughput
+    /// - **At capacity** (active + `n_batch` > `context_size`): Fit what we can within limits
+    ///
+    /// # Returns
+    ///
+    /// The optimal batch size in tokens, considering pending work and active capacity
+    ///
+    /// # Implementation Note
+    ///
+    /// Uses `parking_lot::Mutex` which never panics, so no `unwrap()` needed
+    fn determine_batch_size(&self) -> usize {
+        let pending = self.pending_tokens.load(Ordering::Relaxed);
+
+        // parking_lot::Mutex never panics, no unwrap needed
+        let active_info = self.active_batches.lock();
+        let total_active: usize = active_info.iter().map(|b| b.token_count).sum();
+        drop(active_info); // Release lock early
+
+        // Calculate available capacity
+        let available_capacity = self.context_size.saturating_sub(total_active);
+
+        // Determine optimal batch size based on load and capacity
+        if pending == 0 {
+            // No pending work
+            debug!("No pending work, batch_size=0");
+            0
+        } else if pending < self.n_batch {
+            // Light load: allocate exactly what we need
+            let size = std::cmp::min(pending, available_capacity);
+            debug!(
+                "Light load: pending={} < n_batch={}, available={}, batch_size={}",
+                pending, self.n_batch, available_capacity, size
+            );
+            size
+        } else if total_active + self.n_batch <= self.context_size {
+            // Heavy load with capacity: allocate full batch
+            let size = std::cmp::min(self.n_batch, available_capacity);
+            debug!(
+                "Heavy load with capacity: pending={}, active={}, n_batch={}, available={}, batch_size={}",
+                pending, total_active, self.n_batch, available_capacity, size
+            );
+            size
+        } else {
+            // At capacity: fit what we can
+            let size = std::cmp::min(pending, available_capacity);
+            debug!(
+                "At capacity: pending={}, active={}, context_size={}, available={}, batch_size={}",
+                pending, total_active, self.context_size, available_capacity, size
+            );
+            size
+        }
+    }
+
     /// Process a single batch request
     ///
     /// This is the core processing logic that:
@@ -328,8 +403,8 @@ impl BatchScheduler {
     /// Run the model worker loop
     ///
     /// This is the main processing loop that:
-    /// 1. Collects requests from the queue
-    /// 2. Groups them into batches up to `n_batch` capacity
+    /// 1. Determines optimal batch size based on queue state and capacity
+    /// 2. Collects requests from the queue up to the determined size
     /// 3. Tracks active batches during processing
     /// 4. Processes batches through the model
     /// 5. Sends responses back via oneshot channels
@@ -337,29 +412,37 @@ impl BatchScheduler {
     /// The loop runs until the request channel is closed.
     pub async fn run_worker(self: Arc<Self>) {
         info!("Starting batch scheduler worker loop");
+        info!(
+            "Worker configured: n_batch={}, context_size={}",
+            self.n_batch, self.context_size
+        );
 
         let mut batch_requests = Vec::new();
-        let model = self.model.lock();
-        let n_batch = model.n_batch() as usize;
-        drop(model); // Release lock
-
-        info!("Worker configured with n_batch={}", n_batch);
 
         loop {
-            // Try to collect requests up to n_batch capacity
+            // Determine optimal batch size based on current load and capacity
+            let target_batch_size = self.determine_batch_size();
+
+            // If no capacity or no pending work, yield and try again
+            if target_batch_size == 0 {
+                tokio::time::sleep(tokio::time::Duration::from_micros(100)).await;
+                continue;
+            }
+
+            // Try to collect requests up to the determined batch size
             let mut rx = self.request_rx.lock();
 
-            // Collect as many requests as we can up to n_batch
+            // Collect as many requests as we can up to target_batch_size
             while let Ok(req) = rx.try_recv() {
                 batch_requests.push(req);
 
                 let total_tokens: usize = batch_requests.iter().map(|r| r.token_count).sum();
 
-                // Stop collecting if we've reached batch capacity
-                if total_tokens >= n_batch {
+                // Stop collecting if we've reached the target size
+                if total_tokens >= target_batch_size {
                     debug!(
-                        "Reached batch capacity: {} tokens >= {} n_batch",
-                        total_tokens, n_batch
+                        "Reached target batch size: {} tokens >= {} target",
+                        total_tokens, target_batch_size
                     );
                     break;
                 }
