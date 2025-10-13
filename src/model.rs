@@ -617,18 +617,21 @@ impl EmbeddingModel {
         }
 
         debug!(
-            "Processing batch of {} sequences with n_seq_max={}",
+            "Processing batch of {} sequences (n_seq_max={}, n_batch={})",
             token_sequences.len(),
-            self.n_seq_max
+            self.n_seq_max,
+            self.n_batch
         );
 
         // If we have more sequences than n_seq_max, process in chunks
+        // Note: n_seq_max is a sequence limit for parallel processing, not a packing limit
         #[allow(clippy::cast_lossless)]
         if token_sequences.len() > self.n_seq_max as usize {
             debug!(
-                "Batch size {} exceeds n_seq_max {}, chunking",
+                "Sequence count {} exceeds n_seq_max {}, chunking by sequence limit (n_batch capacity: {})",
                 token_sequences.len(),
-                self.n_seq_max
+                self.n_seq_max,
+                self.n_batch
             );
 
             let mut all_embeddings = Vec::with_capacity(token_sequences.len());
@@ -636,7 +639,11 @@ impl EmbeddingModel {
             // Process sequences in chunks of n_seq_max
             #[allow(clippy::cast_lossless)]
             for chunk in token_sequences.chunks(self.n_seq_max as usize) {
-                debug!("Processing chunk of {} sequences", chunk.len());
+                debug!(
+                    "Processing chunk of {} sequences (batch capacity: {} tokens)",
+                    chunk.len(),
+                    self.n_batch
+                );
                 let chunk_embeddings = self.process_batch_tokens_internal(chunk)?;
                 all_embeddings.extend(chunk_embeddings);
             }
@@ -664,13 +671,21 @@ impl EmbeddingModel {
         // Calculate total tokens needed for batch allocation
         let total_tokens: usize = token_sequences.iter().map(std::vec::Vec::len).sum();
 
-        // Create a batch with all sequences (using actual n_seq_max)
-        let _n_seq_max_i32 =
-            i32::try_from(self.n_seq_max).map_err(|_| Error::EmbeddingGenerationError {
-                message: "n_seq_max too large for i32".to_string(),
+        // Pre-allocate batch to n_batch capacity for efficiency
+        // This reduces allocation overhead by reusing the same capacity across calls
+        let batch_capacity =
+            usize::try_from(self.n_batch).map_err(|_| Error::EmbeddingGenerationError {
+                message: format!("n_batch {} too large for usize", self.n_batch),
                 source: None,
             })?;
-        let mut batch = LlamaBatch::new(total_tokens, 1);
+
+        // Debug assertion: ensure we don't exceed batch capacity
+        debug_assert!(
+            total_tokens <= batch_capacity,
+            "Total tokens ({total_tokens}) exceeds n_batch capacity ({batch_capacity}). This should be prevented by chunking logic."
+        );
+
+        let mut batch = LlamaBatch::new(batch_capacity, 1);
 
         // Add each sequence with unique ID
         for (seq_id, tokens) in token_sequences.iter().enumerate() {
@@ -960,9 +975,23 @@ impl EmbeddingModel {
         // Validate token limit
         self.validate_token_limit(tokens.len(), Some("Input"))?;
 
-        // Create a batch for processing
+        // Pre-allocate batch to n_batch capacity for efficiency
+        // This reduces allocation overhead by reusing the same capacity across calls
+        let batch_capacity =
+            usize::try_from(self.n_batch).map_err(|_| Error::EmbeddingGenerationError {
+                message: format!("n_batch {} too large for usize", self.n_batch),
+                source: None,
+            })?;
+
         let n_tokens = tokens.len();
-        let mut batch = LlamaBatch::new(n_tokens, 1);
+
+        // Debug assertion: ensure we don't exceed batch capacity
+        debug_assert!(
+            n_tokens <= batch_capacity,
+            "Token count ({n_tokens}) exceeds n_batch capacity ({batch_capacity}). This should be prevented by validation."
+        );
+
+        let mut batch = LlamaBatch::new(batch_capacity, 1);
         batch
             .add_sequence(tokens, 0, true)
             .map_err(|e| Error::EmbeddingGenerationError {

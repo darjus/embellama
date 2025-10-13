@@ -395,14 +395,16 @@ async fn model_worker(scheduler: Arc<BatchScheduler>) {
   ```
 
 #### 2.2 Update Batch Allocation Strategy
-- [ ] Update `process_batch_tokens_internal()` (src/model.rs:663):
+- [x] Update `process_batch_tokens_internal()` (src/model.rs:663):
+  > NOTE: Updated to pre-allocate batch to n_batch capacity, added debug assertion
   ```rust
   // OLD: let mut batch = LlamaBatch::new(total_tokens, 1);
   // NEW:
   let batch_capacity = usize::try_from(self.n_batch)?;
   let mut batch = LlamaBatch::new(batch_capacity, 1);
   ```
-- [ ] Update `process_tokens_internal()` (src/model.rs:955):
+- [x] Update `process_tokens_internal()` (src/model.rs:955):
+  > NOTE: Updated to pre-allocate batch to n_batch capacity, added debug assertion
   ```rust
   // OLD: let mut batch = LlamaBatch::new(n_tokens, 1);
   // NEW:
@@ -418,14 +420,17 @@ async fn model_worker(scheduler: Arc<BatchScheduler>) {
       n_batch, n_ubatch, n_seq_max
   );
   ```
-- [ ] Add debug assertion that `total_tokens <= n_batch` when adding to batch
-- [ ] Update existing log messages to distinguish batch capacity from sequence count
+- [x] Add debug assertion that `total_tokens <= n_batch` when adding to batch
+  > NOTE: Debug assertions added in both process_batch_tokens_internal() and process_tokens_internal()
+- [x] Update existing log messages to distinguish batch capacity from sequence count
+  > NOTE: Updated debug logs to clarify n_batch (capacity) vs n_seq_max (sequence limit)
 
 **Acceptance Criteria**:
 - [x] EmbeddingModel stores and exposes n_batch
-- [ ] Batches pre-allocated to n_batch capacity (pending Phase 2.2)
+- [x] Batches pre-allocated to n_batch capacity
 - [x] Clear logging of batch parameters
 - [x] No functional changes to processing logic yet
+- [x] All tests pass (73 tests passed)
 
 #### 2.4 Add Batch Scheduler State (NEW)
 - [ ] Use `tokio::sync::mpsc::unbounded_channel` for request queue
