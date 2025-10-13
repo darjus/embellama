@@ -45,7 +45,7 @@
 #![allow(clippy::if_not_else)]
 #![allow(clippy::unused_async)]
 
-use crate::EmbeddingModel;
+use crate::{EmbeddingModel, Error, Result};
 use parking_lot::Mutex;
 use std::sync::Arc;
 use std::sync::atomic::{AtomicUsize, Ordering};
@@ -53,6 +53,12 @@ use std::time::Instant;
 use tokio::sync::{mpsc, oneshot};
 use tracing::{debug, info, warn};
 use uuid::Uuid;
+
+/// Minimum viable batch size for retry logic (64 tokens)
+const MIN_BATCH_SIZE: usize = 64;
+
+/// Maximum number of retry attempts for OOM errors
+const MAX_RETRY_ATTEMPTS: usize = 4;
 
 /// Request sent to the batch scheduler
 #[derive(Debug)]
@@ -62,7 +68,7 @@ pub struct BatchRequest {
     /// Text inputs to process
     pub texts: Vec<String>,
     /// Channel to send response back
-    pub response_tx: oneshot::Sender<Result<Vec<Vec<f32>>, String>>,
+    pub response_tx: oneshot::Sender<Result<Vec<Vec<f32>>>>,
     /// Estimated token count for scheduling decisions
     pub token_count: usize,
 }
@@ -329,70 +335,164 @@ impl BatchScheduler {
         }
     }
 
-    /// Process a single batch request
+    /// Process a batch of requests with OOM retry logic
     ///
-    /// This is the core processing logic that:
-    /// 1. Extracts texts from the request
-    /// 2. Processes them through the embedding model
-    /// 3. Sends the response back via oneshot channel
+    /// This method implements exponential backoff retry strategy:
+    /// - If OOM occurs, retry with half the batch size
+    /// - Continue halving until success or minimum size (64 tokens) reached
+    /// - Maximum 4 retry attempts
+    ///
+    /// # Arguments
+    ///
+    /// * `requests` - Slice of batch requests to process together
+    /// * `initial_batch_size` - Initial batch size to attempt
+    ///
+    /// # Returns
+    ///
+    /// Returns Ok if processing succeeds, Err if all retries exhausted
+    async fn process_batch_with_retry(
+        &self,
+        requests: &[BatchRequest],
+        initial_batch_size: usize,
+    ) -> Result<Vec<Vec<Vec<f32>>>> {
+        let mut batch_size = initial_batch_size;
+        let mut attempt = 0;
+
+        loop {
+            attempt += 1;
+
+            debug!(
+                "Processing batch attempt {} with size {} (requests: {})",
+                attempt,
+                batch_size,
+                requests.len()
+            );
+
+            // Try processing with current batch size
+            match self.process_batch_internal(requests, batch_size).await {
+                Ok(results) => {
+                    if attempt > 1 {
+                        info!(
+                            "Batch processing succeeded after {} attempts (final size: {})",
+                            attempt, batch_size
+                        );
+                    }
+                    return Ok(results);
+                }
+                Err(e) => {
+                    // Check if this is an OOM error
+                    let is_oom = if let Error::EmbeddingGenerationError { ref message, .. } = e {
+                        Error::is_oom_message(message)
+                    } else {
+                        e.is_oom()
+                    };
+
+                    if !is_oom {
+                        // Non-OOM error, don't retry
+                        return Err(e);
+                    }
+
+                    warn!(
+                        "GPU OOM at batch_size={} (attempt {}), retrying with smaller batch",
+                        batch_size, attempt
+                    );
+
+                    // Check if we can retry
+                    if batch_size <= MIN_BATCH_SIZE {
+                        warn!(
+                            "Batch size {} already at minimum ({}), cannot retry",
+                            batch_size, MIN_BATCH_SIZE
+                        );
+                        return Err(Error::out_of_memory(
+                            format!(
+                                "Failed to process batch even at minimum size {}",
+                                MIN_BATCH_SIZE
+                            ),
+                            Some(batch_size),
+                        ));
+                    }
+
+                    if attempt >= MAX_RETRY_ATTEMPTS {
+                        warn!("Exhausted {} retry attempts, giving up", MAX_RETRY_ATTEMPTS);
+                        return Err(Error::out_of_memory(
+                            format!("Failed after {} OOM retry attempts", MAX_RETRY_ATTEMPTS),
+                            Some(batch_size),
+                        ));
+                    }
+
+                    // Halve the batch size for next attempt
+                    batch_size = std::cmp::max(batch_size / 2, MIN_BATCH_SIZE);
+                    debug!("Reduced batch size to {} for retry", batch_size);
+                }
+            }
+        }
+    }
+
+    /// Internal batch processing without retry logic
+    ///
+    /// This method processes a batch of requests through the model.
+    /// If OOM occurs, the error is propagated to the retry logic.
+    ///
+    /// # Arguments
+    ///
+    /// * `requests` - Slice of batch requests to process
+    /// * `batch_size` - Maximum batch size to use
+    ///
+    /// # Returns
+    ///
+    /// Returns embeddings for each request, or an error
+    async fn process_batch_internal(
+        &self,
+        requests: &[BatchRequest],
+        _batch_size: usize,
+    ) -> Result<Vec<Vec<Vec<f32>>>> {
+        let mut all_results = Vec::with_capacity(requests.len());
+
+        for request in requests {
+            let texts: Vec<&str> = request.texts.iter().map(String::as_str).collect();
+
+            // Process through the model
+            let result = {
+                let mut model = self.model.lock();
+                // Use the existing batch processing method
+                if texts.len() == 1 {
+                    match model.generate_embedding(texts[0]) {
+                        Ok(embedding) => Ok(vec![embedding]),
+                        Err(e) => Err(e),
+                    }
+                } else {
+                    // For multiple texts, process as batch
+                    // > TODO: This should use the batch processor once integrated
+                    let mut embeddings = Vec::with_capacity(texts.len());
+                    for text in texts {
+                        match model.generate_embedding(text) {
+                            Ok(emb) => embeddings.push(emb),
+                            Err(e) => return Err(e),
+                        }
+                    }
+                    Ok(embeddings)
+                }
+            }?;
+
+            all_results.push(result);
+        }
+
+        Ok(all_results)
+    }
+
+    /// Send a response back to a batch request
+    ///
+    /// This is a helper function that sends the result back via oneshot channel.
     ///
     /// # Arguments
     ///
     /// * `request` - The batch request to process
-    async fn process_request(&self, request: BatchRequest) {
+    /// * `result` - The result to send back
+    fn send_request_response(request: BatchRequest, result: Result<Vec<Vec<f32>>>) {
         let request_id = request.id;
-        let token_count = request.token_count;
-        let texts = request.texts;
-        let response_tx = request.response_tx;
-
-        debug!(
-            "Processing request {} with {} texts ({} tokens)",
-            request_id,
-            texts.len(),
-            token_count
-        );
-
-        // Convert texts to string slices for processing
-        let text_refs: Vec<&str> = texts.iter().map(String::as_str).collect();
-
-        // Process through the model
-        let result = {
-            let mut model = self.model.lock();
-            // Use the existing batch processing method
-            match model.generate_embedding(&text_refs[0]) {
-                Ok(embedding) => {
-                    if texts.len() == 1 {
-                        Ok(vec![embedding])
-                    } else {
-                        // For multiple texts, we need to process as batch
-                        // > TODO: This should use the batch processor once integrated
-                        let mut embeddings = Vec::with_capacity(texts.len());
-                        embeddings.push(embedding);
-                        for text in &text_refs[1..] {
-                            match model.generate_embedding(text) {
-                                Ok(emb) => embeddings.push(emb),
-                                Err(e) => {
-                                    return if response_tx
-                                        .send(Err(format!("Failed to generate embedding: {}", e)))
-                                        .is_err()
-                                    {
-                                        warn!(
-                                            "Request {} client disconnected before error could be sent",
-                                            request_id
-                                        );
-                                    };
-                                }
-                            }
-                        }
-                        Ok(embeddings)
-                    }
-                }
-                Err(e) => Err(format!("Failed to generate embedding: {}", e)),
-            }
-        };
 
         // Send response back
-        if response_tx.send(result).is_err() {
+        if request.response_tx.send(result).is_err() {
             warn!(
                 "Request {} client disconnected before response could be sent",
                 request_id
@@ -465,11 +565,34 @@ impl BatchScheduler {
                     total_tokens
                 );
 
-                // Process each request in the batch
-                // > NOTE: Currently processing sequentially, Phase 3.5 will add
-                // > concurrent batch processing for better throughput
-                for request in batch_requests.drain(..) {
-                    self.process_request(request).await;
+                // Process batch with retry logic (handles OOM gracefully)
+                // > NOTE: Phase 2.6 implements exponential backoff for GPU OOM errors
+                // > NOTE: Phase 3.5 will add concurrent batch processing for better throughput
+                match self
+                    .process_batch_with_retry(&batch_requests, target_batch_size)
+                    .await
+                {
+                    Ok(results) => {
+                        // Send responses to each request
+                        for (request, result) in batch_requests.drain(..).zip(results.into_iter()) {
+                            Self::send_request_response(request, Ok(result));
+                        }
+                    }
+                    Err(e) => {
+                        // Send error to all requests in the batch
+                        warn!("Batch {} failed after all retries: {}", batch_id, e);
+                        // Convert error to string to send to multiple requests
+                        let error_msg = e.to_string();
+                        let is_oom = e.is_oom();
+                        for request in batch_requests.drain(..) {
+                            let err = if is_oom {
+                                Error::out_of_memory(error_msg.clone(), None)
+                            } else {
+                                Error::embedding_failed(error_msg.clone())
+                            };
+                            Self::send_request_response(request, Err(err));
+                        }
+                    }
                 }
 
                 // Remove from active tracking

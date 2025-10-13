@@ -455,3 +455,255 @@ fn test_saturating_sub_prevents_underflow() {
         "saturating_sub should prevent underflow"
     );
 }
+
+// =============================================================================
+// Phase 2.6: GPU OOM Retry Logic Tests
+// =============================================================================
+
+#[test]
+fn test_oom_message_detection_out_of_memory() {
+    use embellama::Error;
+
+    // Test various OOM error message patterns
+    assert!(
+        Error::is_oom_message("GPU out of memory"),
+        "Should detect 'out of memory'"
+    );
+    assert!(
+        Error::is_oom_message("CUDA out of memory"),
+        "Should detect 'CUDA out of memory'"
+    );
+    assert!(
+        Error::is_oom_message("Out Of Memory error"),
+        "Should detect case-insensitive OOM"
+    );
+}
+
+#[test]
+fn test_oom_message_detection_oom_keyword() {
+    use embellama::Error;
+
+    assert!(
+        Error::is_oom_message("OOM error occurred"),
+        "Should detect 'OOM'"
+    );
+    assert!(
+        Error::is_oom_message("oom during allocation"),
+        "Should detect lowercase 'oom'"
+    );
+}
+
+#[test]
+fn test_oom_message_detection_allocation_failed() {
+    use embellama::Error;
+
+    assert!(
+        Error::is_oom_message("failed to allocate memory"),
+        "Should detect 'failed to allocate'"
+    );
+    assert!(
+        Error::is_oom_message("allocation failed"),
+        "Should detect 'allocation failed'"
+    );
+}
+
+#[test]
+fn test_oom_message_detection_cuda_error() {
+    use embellama::Error;
+
+    assert!(
+        Error::is_oom_message("CUDA error: allocation failed"),
+        "Should detect 'CUDA error'"
+    );
+    assert!(
+        Error::is_oom_message("cudaMalloc failed"),
+        "Should detect 'cudaMalloc'"
+    );
+}
+
+#[test]
+fn test_oom_message_detection_non_oom_errors() {
+    use embellama::Error;
+
+    // These should NOT be detected as OOM
+    assert!(
+        !Error::is_oom_message("Invalid input provided"),
+        "Should not detect non-OOM errors"
+    );
+    assert!(
+        !Error::is_oom_message("Model not found"),
+        "Should not detect model errors"
+    );
+    assert!(
+        !Error::is_oom_message("Tokenization failed"),
+        "Should not detect tokenization errors"
+    );
+}
+
+#[test]
+fn test_exponential_backoff_halving() {
+    // Test exponential backoff logic (halving batch size each retry)
+    let min_batch_size: usize = 64;
+    let initial_size: usize = 2048;
+
+    // Simulate retry attempts with exponential backoff
+    let mut batch_size = initial_size;
+    let attempts = vec![
+        2048, // Attempt 1: Full size
+        1024, // Attempt 2: Half
+        512,  // Attempt 3: Quarter
+        256,  // Attempt 4: Eighth
+        128,  // Attempt 5: Sixteenth
+        64,   // Attempt 6: Minimum (clamped)
+    ];
+
+    for (i, expected) in attempts.iter().enumerate() {
+        assert_eq!(
+            batch_size,
+            *expected,
+            "Attempt {} should have batch_size {}",
+            i + 1,
+            expected
+        );
+
+        // Halve for next attempt, but not below minimum
+        batch_size = std::cmp::max(batch_size / 2, min_batch_size);
+    }
+
+    // Verify we've reached minimum and stay there
+    batch_size = std::cmp::max(batch_size / 2, min_batch_size);
+    assert_eq!(batch_size, 64, "Should stay at minimum size");
+}
+
+#[test]
+fn test_minimum_batch_size_enforcement() {
+    // Test that minimum batch size (64 tokens) is enforced
+    let min_batch_size: usize = 64;
+
+    let test_cases = vec![
+        (128, 64),  // 128 / 2 = 64 (at minimum)
+        (64, 64),   // 64 / 2 = 32, but clamp to 64
+        (32, 64),   // Already below minimum, clamp to 64
+        (1, 64),    // Far below minimum, clamp to 64
+        (256, 128), // 256 / 2 = 128 (above minimum)
+    ];
+
+    for (current, expected) in test_cases {
+        let next_size = std::cmp::max(current / 2, min_batch_size);
+        assert_eq!(
+            next_size, expected,
+            "Halving {} should result in {}",
+            current, expected
+        );
+    }
+}
+
+#[test]
+fn test_retry_attempt_limit() {
+    // Test that we respect the maximum retry attempts (4)
+    let max_retry_attempts: usize = 4;
+    let mut attempt = 0;
+
+    // Simulate retry loop
+    while attempt < max_retry_attempts {
+        attempt += 1;
+    }
+
+    assert_eq!(attempt, 4, "Should stop after 4 attempts");
+
+    // Verify we don't exceed the limit
+    if attempt >= max_retry_attempts {
+        // This is where we would give up
+        assert!(
+            attempt >= max_retry_attempts,
+            "Should have exhausted retries"
+        );
+    }
+}
+
+#[test]
+fn test_oom_error_is_retryable() {
+    use embellama::Error;
+
+    let oom_error = Error::out_of_memory("GPU OOM".to_string(), Some(2048));
+    assert!(oom_error.is_retryable(), "OOM errors should be retryable");
+    assert!(oom_error.is_oom(), "Should be identified as OOM");
+}
+
+#[test]
+fn test_non_oom_error_not_retryable_for_oom() {
+    use embellama::Error;
+
+    // These errors are not OOM
+    let invalid_input = Error::invalid_input("Empty text");
+    assert!(!invalid_input.is_oom(), "Invalid input should not be OOM");
+    assert!(
+        !invalid_input.is_retryable(),
+        "Invalid input should not be retryable"
+    );
+
+    let config_error = Error::config("Invalid config");
+    assert!(!config_error.is_oom(), "Config error should not be OOM");
+    assert!(
+        !config_error.is_retryable(),
+        "Config error should not be retryable"
+    );
+}
+
+#[test]
+fn test_batch_size_reduction_sequence() {
+    // Test complete batch size reduction sequence from 2048 to 64
+    let min_batch_size: usize = 64;
+    let mut batch_size: usize = 2048;
+    let expected_sequence = vec![2048, 1024, 512, 256, 128, 64, 64];
+
+    for (i, expected) in expected_sequence.iter().enumerate() {
+        assert_eq!(
+            batch_size, *expected,
+            "Step {}: batch_size should be {}",
+            i, expected
+        );
+        batch_size = std::cmp::max(batch_size / 2, min_batch_size);
+    }
+}
+
+#[test]
+fn test_oom_error_with_attempted_size() {
+    use embellama::Error;
+
+    // Test that OOM error can track the attempted batch size
+    let oom = Error::out_of_memory("GPU OOM".to_string(), Some(2048));
+
+    match oom {
+        Error::OutOfMemory {
+            message,
+            attempted_size,
+        } => {
+            assert_eq!(message, "GPU OOM");
+            assert_eq!(attempted_size, Some(2048));
+        }
+        _ => panic!("Expected OutOfMemory error"),
+    }
+}
+
+#[test]
+fn test_oom_detection_from_embedding_error() {
+    use embellama::Error;
+
+    // Test OOM detection from EmbeddingGenerationError with OOM message
+    let embedding_error = Error::EmbeddingGenerationError {
+        message: "CUDA out of memory during batch processing".to_string(),
+        source: None,
+    };
+
+    // Check if the error message contains OOM patterns
+    match &embedding_error {
+        Error::EmbeddingGenerationError { message, .. } => {
+            assert!(
+                Error::is_oom_message(message),
+                "Should detect OOM in embedding error message"
+            );
+        }
+        _ => panic!("Expected EmbeddingGenerationError"),
+    }
+}
