@@ -672,7 +672,7 @@ impl EmbeddingModel {
         let total_tokens: usize = token_sequences.iter().map(std::vec::Vec::len).sum();
 
         // Pre-allocate batch to n_batch capacity for efficiency
-        // This reduces allocation overhead by reusing the same capacity across calls
+        // Use batch pool to reuse allocations across requests
         let batch_capacity =
             usize::try_from(self.n_batch).map_err(|_| Error::EmbeddingGenerationError {
                 message: format!("n_batch {} too large for usize", self.n_batch),
@@ -685,7 +685,7 @@ impl EmbeddingModel {
             "Total tokens ({total_tokens}) exceeds n_batch capacity ({batch_capacity}). This should be prevented by chunking logic."
         );
 
-        let mut batch = LlamaBatch::new(batch_capacity, 1);
+        let mut batch = crate::batch_pool::get_or_create_batch(batch_capacity);
 
         // Add each sequence with unique ID
         for (seq_id, tokens) in token_sequences.iter().enumerate() {
@@ -730,6 +730,9 @@ impl EmbeddingModel {
                 self.finalize_embedding(&embeddings, token_sequences[seq_id].len())?;
             all_embeddings.push(final_embedding);
         }
+
+        // Return batch to pool for reuse
+        crate::batch_pool::return_batch(batch);
 
         Ok(all_embeddings)
     }
@@ -976,7 +979,7 @@ impl EmbeddingModel {
         self.validate_token_limit(tokens.len(), Some("Input"))?;
 
         // Pre-allocate batch to n_batch capacity for efficiency
-        // This reduces allocation overhead by reusing the same capacity across calls
+        // Use batch pool to reuse allocations across requests
         let batch_capacity =
             usize::try_from(self.n_batch).map_err(|_| Error::EmbeddingGenerationError {
                 message: format!("n_batch {} too large for usize", self.n_batch),
@@ -991,7 +994,7 @@ impl EmbeddingModel {
             "Token count ({n_tokens}) exceeds n_batch capacity ({batch_capacity}). This should be prevented by validation."
         );
 
-        let mut batch = LlamaBatch::new(batch_capacity, 1);
+        let mut batch = crate::batch_pool::get_or_create_batch(batch_capacity);
         batch
             .add_sequence(tokens, 0, true)
             .map_err(|e| Error::EmbeddingGenerationError {
@@ -1009,6 +1012,9 @@ impl EmbeddingModel {
         // the pooled embedding, which we retrieve as a sequence embedding.
         // When pooling is NONE, we get individual token embeddings and pool ourselves.
         let all_embeddings = self.extract_sequence_embeddings(0, n_tokens, None)?;
+
+        // Return batch to pool for reuse
+        crate::batch_pool::return_batch(batch);
 
         Ok(all_embeddings)
     }

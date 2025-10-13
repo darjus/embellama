@@ -81,6 +81,9 @@ mod engine;
 /// Batch processing module
 mod batch;
 
+/// Batch pooling for allocation optimization
+pub mod batch_pool;
+
 /// Cache module for token and embedding caching
 pub mod cache;
 
