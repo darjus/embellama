@@ -1363,6 +1363,49 @@ impl EmbeddingModel {
         self.extract_sequence_embeddings(0, tokens.len(), None)
     }
 
+    /// Performs a warmup run to initialize GPU/CPU resources.
+    ///
+    /// This runs a minimal embedding request with BOS+EOS tokens (or just token 0)
+    /// to trigger GPU memory allocation and kernel compilation at startup rather
+    /// than on the first user request.
+    ///
+    /// Based on llama.cpp's warmup implementation.
+    ///
+    /// # Errors
+    ///
+    /// Returns an error if the warmup embedding generation fails.
+    pub fn warmup(&mut self) -> Result<()> {
+        debug!("Starting model warmup");
+
+        // Get BOS and EOS tokens from the model
+        let model = self.cell.borrow_owner();
+        let bos = model.token_bos();
+        let eos = model.token_eos();
+
+        // Build minimal token sequence (similar to llama.cpp warmup)
+        let mut tokens = Vec::new();
+
+        // Some models (e.g., T5) don't have a BOS token
+        if bos.0 != -1 {
+            tokens.push(bos);
+        }
+        if eos.0 != -1 {
+            tokens.push(eos);
+        }
+        // If no special tokens, use token 0
+        if tokens.is_empty() {
+            tokens.push(LlamaToken(0));
+        }
+
+        debug!("Warmup with {} tokens", tokens.len());
+
+        // Run one embedding pass (result is discarded)
+        let _ = self.process_tokens_internal(&tokens)?;
+
+        info!("Model warmup completed");
+        Ok(())
+    }
+
     /// Extract context size from GGUF file metadata
     ///
     /// Uses the `gguf::extract_metadata` function to get model metadata.

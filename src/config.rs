@@ -74,6 +74,10 @@ pub struct ModelConfig {
     /// Enable KV cache optimization for batch processing
     /// This includes batch reordering and similar-length grouping
     pub enable_kv_optimization: bool,
+
+    /// Skip warmup run on model load (default: false, warmup enabled)
+    /// Warmup runs a minimal embedding request at startup to initialize GPU/CPU resources
+    pub no_warmup: bool,
 }
 
 impl ModelConfig {
@@ -216,6 +220,7 @@ impl Default for ModelConfig {
             n_seq_max: None,
             context_size: None,
             enable_kv_optimization: false,
+            no_warmup: false,
         }
     }
 }
@@ -330,6 +335,13 @@ impl ModelConfigBuilder {
     #[must_use]
     pub fn with_kv_optimization(mut self, enable: bool) -> Self {
         self.config.enable_kv_optimization = enable;
+        self
+    }
+
+    /// Skip warmup run on model load
+    #[must_use]
+    pub fn with_no_warmup(mut self, no_warmup: bool) -> Self {
+        self.config.no_warmup = no_warmup;
         self
     }
 
@@ -824,6 +836,13 @@ impl EngineConfigBuilder {
     #[must_use]
     pub fn with_n_seq_max(mut self, n_seq_max: u32) -> Self {
         self.config.model_config.n_seq_max = Some(n_seq_max);
+        self
+    }
+
+    /// Skip warmup run on model load (convenience method)
+    #[must_use]
+    pub fn with_no_warmup(mut self, no_warmup: bool) -> Self {
+        self.config.model_config.no_warmup = no_warmup;
         self
     }
 

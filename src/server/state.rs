@@ -51,6 +51,8 @@ pub struct ServerConfig {
     pub pooling_strategy: Option<PoolingStrategy>,
     /// Normalization mode for embeddings (None = use default L2)
     pub normalization_mode: Option<NormalizationMode>,
+    /// Skip warmup run on model load
+    pub no_warmup: bool,
 }
 
 impl Default for ServerConfig {
@@ -67,6 +69,7 @@ impl Default for ServerConfig {
             n_batch: None,
             pooling_strategy: None,
             normalization_mode: None,
+            no_warmup: false,
         }
     }
 }
@@ -92,6 +95,7 @@ pub struct ServerConfigBuilder {
     n_batch: Option<u32>,
     pooling_strategy: Option<PoolingStrategy>,
     normalization_mode: Option<NormalizationMode>,
+    no_warmup: Option<bool>,
 }
 
 impl ServerConfigBuilder {
@@ -172,6 +176,13 @@ impl ServerConfigBuilder {
         self
     }
 
+    /// Set whether to skip warmup run on model load
+    #[must_use]
+    pub fn no_warmup(mut self, no_warmup: bool) -> Self {
+        self.no_warmup = Some(no_warmup);
+        self
+    }
+
     /// Build the `ServerConfig`
     ///
     /// # Errors
@@ -236,6 +247,7 @@ impl ServerConfigBuilder {
             n_batch: self.n_batch,
             pooling_strategy: self.pooling_strategy,
             normalization_mode: self.normalization_mode,
+            no_warmup: self.no_warmup.unwrap_or(default.no_warmup),
         })
     }
 }
@@ -286,7 +298,8 @@ impl AppState {
         let mut model_config_builder = ModelConfig::builder()
             .with_model_path(&config.model_path)
             .with_model_name(&config.model_name)
-            .with_n_seq_max(config.n_seq_max);
+            .with_n_seq_max(config.n_seq_max)
+            .with_no_warmup(config.no_warmup);
 
         // Add n_batch if specified
         if let Some(n_batch) = config.n_batch {

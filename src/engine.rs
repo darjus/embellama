@@ -536,8 +536,16 @@ impl EmbeddingEngine {
 
             // Use the model configuration from EngineConfig
             let backend_guard = self.backend.lock().unwrap();
-            let model = EmbeddingModel::new(&backend_guard, &config.model_config)?;
+            let mut model = EmbeddingModel::new(&backend_guard, &config.model_config)?;
             drop(backend_guard); // Release lock as soon as we're done
+
+            // Run warmup if enabled (default)
+            if !config.model_config.no_warmup
+                && let Err(e) = model.warmup()
+            {
+                // Warmup failure is non-fatal, just log warning
+                debug!("Model warmup failed (non-fatal): {}", e);
+            }
 
             // Store in thread-local map
             models.insert(model_name.to_string(), model);

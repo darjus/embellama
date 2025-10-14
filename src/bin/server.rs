@@ -73,6 +73,10 @@ struct Args {
     /// Log level (trace, debug, info, warn, error)
     #[arg(long, env = "EMBELLAMA_LOG_LEVEL", default_value = "info")]
     log_level: String,
+
+    /// Skip warmup run on model load
+    #[arg(long, env = "EMBELLAMA_NO_WARMUP")]
+    no_warmup: bool,
 }
 
 /// Parse pooling strategy from string
@@ -157,7 +161,8 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
         .host(args.host)
         .port(args.port)
         .request_timeout(std::time::Duration::from_secs(args.request_timeout))
-        .n_seq_max(args.n_seq_max);
+        .n_seq_max(args.n_seq_max)
+        .no_warmup(args.no_warmup);
 
     // Add n_batch if specified
     if let Some(n_batch) = args.n_batch {
