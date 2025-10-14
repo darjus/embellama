@@ -143,7 +143,8 @@ async fn test_single_embedding_medium_text() {
 #[serial]
 async fn test_single_embedding_long_text() {
     let model_path = get_test_model_path().expect("Test model not found");
-    let server = TestServer::spawn(model_path, 2)
+    // Use n_seq_max=1 to allow full context (512 tokens) for single sequences
+    let server = TestServer::spawn_with_config(model_path, 2, Some(1))
         .await
         .expect("Failed to spawn server");
     let client = TestClient::new();

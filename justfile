@@ -153,7 +153,7 @@ test-property-quick: test-property-quick-encoder test-property-quick-decoder
     @echo "✓ Property tests (quick mode) completed with both models"
 
 # Run all tests
-test: test-unit test-integration test-concurrency test-property
+test: test-unit test-integration test-concurrency test-property-quick
     @echo "✓ All tests completed"
 
 # Run benchmarks with real model

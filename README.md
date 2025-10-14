@@ -148,6 +148,57 @@ let config = EngineConfig::builder()
     .build()?;
 ```
 
+### Context Size and Parallel Sequence Handling
+
+When using `n_seq_max > 1` for parallel sequence processing, the available context per sequence is automatically divided:
+
+```rust
+// Per-sequence context = n_ctx / n_seq_max
+// Example: n_ctx = 2048, n_seq_max = 8
+// Each sequence gets: 2048 / 8 = 256 tokens
+
+let model_config = ModelConfig::builder()
+    .with_model_path("/path/to/model.gguf")
+    .with_model_name("my-model")
+    .with_context_size(2048)    // Total KV cache size
+    .with_n_seq_max(8)          // Parallel sequences
+    .build()?;
+// Effective max per sequence: (2048 / 8) - 2 = 254 tokens
+```
+
+**Key Points:**
+
+- **Per-Sequence Limit**: When `n_seq_max > 1`, llama.cpp divides the KV cache by `n_seq_max`, so each sequence can only use `n_ctx / n_seq_max` tokens
+- **Overhead**: Special tokens ([CLS], [SEP]) reduce available space by ~2 tokens
+- **Single Sequence**: Use `n_seq_max = 1` to allow the full context size for a single sequence
+- **Batch Processing**: The library automatically handles batch chunking based on `n_batch` capacity
+- **Validation**: Input validation ensures sequences don't exceed their per-sequence token limit
+
+**Example Configurations:**
+
+```rust
+// High throughput: Process 8 short sequences in parallel
+// Each sequence limited to ~254 tokens
+let config = ModelConfig::builder()
+    .with_context_size(2048)
+    .with_n_seq_max(8)
+    .build()?;
+
+// Long documents: Process single long sequences up to full context
+// Single sequence can use full ~2046 tokens
+let config = ModelConfig::builder()
+    .with_context_size(2048)
+    .with_n_seq_max(1)
+    .build()?;
+
+// Large context: Handle very long documents
+// Single sequence with ~32766 tokens available
+let config = ModelConfig::builder()
+    .with_context_size(32768)
+    .with_n_seq_max(1)
+    .build()?;
+```
+
 ### Backend Auto-Detection
 
 The library can automatically detect and use the best available backend:

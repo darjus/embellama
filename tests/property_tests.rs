@@ -51,7 +51,8 @@ fn ensure_engine_initialized() {
             .with_model_path(model_path)
             .with_model_name("proptest-model")
             .with_normalization_mode(NormalizationMode::L2)
-            .with_n_ubatch(2048); // Large enough for long texts in property tests
+            .with_n_ubatch(2048) // Large enough for long texts in property tests
+            .with_n_seq_max(1); // Use full context for single-sequence property tests
 
         // Allow overriding context size via environment variable
         // Useful for decoder models where full context (32k) is supported but 8k is recommended

@@ -291,14 +291,23 @@ impl EmbeddingModel {
                 })
         })?;
 
+        // Calculate per-sequence context size
+        // When n_seq_max > 1, llama.cpp divides the KV cache by n_seq_max,
+        // so each sequence can only use n_ctx / n_seq_max tokens
+        #[allow(clippy::cast_lossless)]
+        let max_context_size = if n_seq_max > 1 {
+            (ctx_size / n_seq_max) as usize
+        } else {
+            ctx_size as usize
+        };
+
         let model = Self {
             cell,
             config: config.clone(),
             model_path: config.model_path.clone(),
             model_name: config.model_name.clone(),
             embedding_dimensions,
-            #[allow(clippy::cast_lossless)]
-            max_context_size: ctx_size as usize,
+            max_context_size,
             n_seq_max,
             n_batch,
             metadata,
@@ -306,8 +315,15 @@ impl EmbeddingModel {
 
         // Log effective max tokens for debugging batch size issues
         let effective_max = model.effective_max_tokens();
+        #[allow(clippy::cast_lossless)]
+        if n_seq_max > 1 {
+            info!(
+                "Context allocation: n_ctx={}, n_ctx_per_seq={}, n_seq_max={}",
+                ctx_size, model.max_context_size, n_seq_max
+            );
+        }
         info!(
-            "Effective max tokens: {} (context: {}, overhead: {})",
+            "Effective max tokens per sequence: {} (context: {}, overhead: {})",
             effective_max,
             model.max_context_size,
             model.max_context_size - effective_max
@@ -433,15 +449,19 @@ impl EmbeddingModel {
         self.n_batch
     }
 
-    /// Calculate the effective maximum tokens available for input.
+    /// Calculate the effective maximum tokens available for input per sequence.
     ///
     /// For BERT-style embedding models, the `max_position_embeddings` parameter
     /// defines the maximum sequence length the model can handle. The only overhead
     /// is from special tokens like \[CLS\] and \[SEP\] that the tokenizer adds.
     ///
+    /// When `n_seq_max > 1`, llama.cpp divides the KV cache by `n_seq_max`, so
+    /// each sequence can only use `n_ctx / n_seq_max` tokens. This method returns
+    /// the per-sequence limit, not the total context size.
+    ///
     /// # Returns
     ///
-    /// The maximum number of input tokens that can be safely processed.
+    /// The maximum number of input tokens that can be safely processed per sequence.
     ///
     /// # Implementation Note
     ///
@@ -450,9 +470,14 @@ impl EmbeddingModel {
     ///
     /// # Example
     ///
-    /// For a model with `max_position_embeddings` = 512:
+    /// For a model with `n_ctx = 512` and `n_seq_max = 1`:
     /// - Overhead: 2 tokens (\[CLS\] and \[SEP\])
     /// - Effective max: 512 - 2 = 510 tokens
+    ///
+    /// For a model with `n_ctx = 32768` and `n_seq_max = 2`:
+    /// - Per-sequence context: 32768 / 2 = 16384
+    /// - Overhead: 2 tokens
+    /// - Effective max: 16384 - 2 = 16382 tokens per sequence
     pub fn effective_max_tokens(&self) -> usize {
         // For embedding models, only special tokens ([CLS], [SEP]) consume overhead
         // The output embeddings don't use KV cache space

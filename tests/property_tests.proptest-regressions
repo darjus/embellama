@@ -7,3 +7,5 @@
 cc 473e9fbac1de97f82024041270c0cb1481d49a2384e0220a42f2fbd391e5f28d # shrinks to base_text = "  AAN  in ", suffix = "fXDf"
 cc 0731e8ac554dfd7f7eee5864b436612fdfd118a7cc1ecc2a4c0e3205c883fc00 # shrinks to base_text = "AAaaMrdIGg", suffix = "Z Izdsm A"
 cc da8bf4147cd9a1d9efc72586ea2765d6c6a403b99d5173bd703d6ffcc27ee845 # shrinks to texts = ["A", "A3a"]
+cc 8c36aa9fbdb8f474815130f326a4126d741fa69f0d9df25e603f69d3d0391779 # shrinks to text = "0"
+cc ee1f682f8d14ced81fb73261080face6c194debcd11f3c3c708f34e3acbf3430 # shrinks to num_sequences = 10, word_count = 54
