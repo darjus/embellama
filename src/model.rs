@@ -105,6 +105,8 @@ pub struct EmbeddingModel {
     max_context_size: usize,
     /// Maximum number of sequences for batch processing
     n_seq_max: u32,
+    /// Batch packing capacity (total tokens that can be packed together)
+    n_batch: u32,
     /// GGUF metadata containing architecture info, dimensions, context size
     metadata: crate::gguf::GGUFMetadata,
 }
@@ -129,6 +131,7 @@ impl EmbeddingModel {
     /// - Invalid configuration parameters are provided
     #[instrument(skip(backend, config), fields(model_path = %config.model_path.display()))]
     #[allow(clippy::too_many_lines)]
+    #[allow(clippy::similar_names)]
     pub fn new(backend: &LlamaBackend, config: &ModelConfig) -> Result<Self> {
         info!("Loading model from {:?}", config.model_path);
 
@@ -202,6 +205,10 @@ impl EmbeddingModel {
             config.model_name
         );
 
+        // Set n_batch with default of 2048 (matches llama-server default)
+        let n_batch = config.n_batch.unwrap_or(2048);
+        debug!("Setting n_batch={}", n_batch);
+
         // Use configured n_seq_max or default to 2 for reasonable batching
         let n_seq_max = config.n_seq_max.unwrap_or(2);
         debug!(
@@ -224,27 +231,20 @@ impl EmbeddingModel {
             // > NOTE: These optimizations are enabled through llama-cpp parameters
         }
 
-        // Set micro-batch size with architecture-aware defaults
-        // Decoder models (Qwen, LLaMA, etc.) need smaller n_ubatch to prevent memory issues and crashes
-        // Encoder models (BERT, etc.) can use larger values for better batch processing
+        // Set micro-batch size
+        // For embeddings, it's recommended to set n_ubatch = n_batch for atomic sequence processing
+        // If n_ubatch is not explicitly set, default it to n_batch
         let n_ubatch = if let Some(ubatch) = config.n_ubatch {
             // Use explicitly configured value
             debug!("Using configured n_ubatch: {}", ubatch);
             ubatch
-        } else if is_decoder {
-            // Decoder models: use conservative 512 to prevent crashes
-            // llama-server uses 2048, but 512 is safer for large contexts
-            let ubatch = 512_u32;
-            debug!(
-                "Setting n_ubatch={} for decoder model (conservative default)",
-                ubatch
-            );
-            ubatch
         } else {
-            // Encoder models: can use larger values for better performance
-            let ubatch = 2048_u32;
-            debug!("Setting n_ubatch={} for encoder model", ubatch);
-            ubatch
+            // Default to n_batch for embeddings (atomic sequence processing)
+            debug!(
+                "Setting n_ubatch={} (defaulted to n_batch for atomic sequence processing)",
+                n_batch
+            );
+            n_batch
         };
         ctx_params = ctx_params.with_n_ubatch(n_ubatch);
 
@@ -279,6 +279,10 @@ impl EmbeddingModel {
             "Model initialized: dimensions={}, context_size={}, threads={}",
             embedding_dimensions, context_size, n_threads
         );
+        info!(
+            "Batch configuration: n_batch={}, n_ubatch={}, n_seq_max={}",
+            n_batch, n_ubatch, n_seq_max
+        );
 
         let cell = ModelCell::try_new(model, |m| {
             m.new_context(backend, ctx_params)
@@ -287,22 +291,39 @@ impl EmbeddingModel {
                 })
         })?;
 
+        // Calculate per-sequence context size
+        // When n_seq_max > 1, llama.cpp divides the KV cache by n_seq_max,
+        // so each sequence can only use n_ctx / n_seq_max tokens
+        #[allow(clippy::cast_lossless)]
+        let max_context_size = if n_seq_max > 1 {
+            (ctx_size / n_seq_max) as usize
+        } else {
+            ctx_size as usize
+        };
+
         let model = Self {
             cell,
             config: config.clone(),
             model_path: config.model_path.clone(),
             model_name: config.model_name.clone(),
             embedding_dimensions,
-            #[allow(clippy::cast_lossless)]
-            max_context_size: ctx_size as usize,
+            max_context_size,
             n_seq_max,
+            n_batch,
             metadata,
         };
 
         // Log effective max tokens for debugging batch size issues
         let effective_max = model.effective_max_tokens();
+        #[allow(clippy::cast_lossless)]
+        if n_seq_max > 1 {
+            info!(
+                "Context allocation: n_ctx={}, n_ctx_per_seq={}, n_seq_max={}",
+                ctx_size, model.max_context_size, n_seq_max
+            );
+        }
         info!(
-            "Effective max tokens: {} (context: {}, overhead: {})",
+            "Effective max tokens per sequence: {} (context: {}, overhead: {})",
             effective_max,
             model.max_context_size,
             model.max_context_size - effective_max
@@ -423,15 +444,24 @@ impl EmbeddingModel {
         self.n_seq_max
     }
 
-    /// Calculate the effective maximum tokens available for input.
+    /// Returns the batch packing capacity (total tokens).
+    pub fn n_batch(&self) -> u32 {
+        self.n_batch
+    }
+
+    /// Calculate the effective maximum tokens available for input per sequence.
     ///
     /// For BERT-style embedding models, the `max_position_embeddings` parameter
     /// defines the maximum sequence length the model can handle. The only overhead
     /// is from special tokens like \[CLS\] and \[SEP\] that the tokenizer adds.
     ///
+    /// When `n_seq_max > 1`, llama.cpp divides the KV cache by `n_seq_max`, so
+    /// each sequence can only use `n_ctx / n_seq_max` tokens. This method returns
+    /// the per-sequence limit, not the total context size.
+    ///
     /// # Returns
     ///
-    /// The maximum number of input tokens that can be safely processed.
+    /// The maximum number of input tokens that can be safely processed per sequence.
     ///
     /// # Implementation Note
     ///
@@ -440,9 +470,14 @@ impl EmbeddingModel {
     ///
     /// # Example
     ///
-    /// For a model with `max_position_embeddings` = 512:
+    /// For a model with `n_ctx = 512` and `n_seq_max = 1`:
     /// - Overhead: 2 tokens (\[CLS\] and \[SEP\])
     /// - Effective max: 512 - 2 = 510 tokens
+    ///
+    /// For a model with `n_ctx = 32768` and `n_seq_max = 2`:
+    /// - Per-sequence context: 32768 / 2 = 16384
+    /// - Overhead: 2 tokens
+    /// - Effective max: 16384 - 2 = 16382 tokens per sequence
     pub fn effective_max_tokens(&self) -> usize {
         // For embedding models, only special tokens ([CLS], [SEP]) consume overhead
         // The output embeddings don't use KV cache space
@@ -607,18 +642,21 @@ impl EmbeddingModel {
         }
 
         debug!(
-            "Processing batch of {} sequences with n_seq_max={}",
+            "Processing batch of {} sequences (n_seq_max={}, n_batch={})",
             token_sequences.len(),
-            self.n_seq_max
+            self.n_seq_max,
+            self.n_batch
         );
 
         // If we have more sequences than n_seq_max, process in chunks
+        // Note: n_seq_max is a sequence limit for parallel processing, not a packing limit
         #[allow(clippy::cast_lossless)]
         if token_sequences.len() > self.n_seq_max as usize {
             debug!(
-                "Batch size {} exceeds n_seq_max {}, chunking",
+                "Sequence count {} exceeds n_seq_max {}, chunking by sequence limit (n_batch capacity: {})",
                 token_sequences.len(),
-                self.n_seq_max
+                self.n_seq_max,
+                self.n_batch
             );
 
             let mut all_embeddings = Vec::with_capacity(token_sequences.len());
@@ -626,7 +664,11 @@ impl EmbeddingModel {
             // Process sequences in chunks of n_seq_max
             #[allow(clippy::cast_lossless)]
             for chunk in token_sequences.chunks(self.n_seq_max as usize) {
-                debug!("Processing chunk of {} sequences", chunk.len());
+                debug!(
+                    "Processing chunk of {} sequences (batch capacity: {} tokens)",
+                    chunk.len(),
+                    self.n_batch
+                );
                 let chunk_embeddings = self.process_batch_tokens_internal(chunk)?;
                 all_embeddings.extend(chunk_embeddings);
             }
@@ -654,13 +696,21 @@ impl EmbeddingModel {
         // Calculate total tokens needed for batch allocation
         let total_tokens: usize = token_sequences.iter().map(std::vec::Vec::len).sum();
 
-        // Create a batch with all sequences (using actual n_seq_max)
-        let _n_seq_max_i32 =
-            i32::try_from(self.n_seq_max).map_err(|_| Error::EmbeddingGenerationError {
-                message: "n_seq_max too large for i32".to_string(),
+        // Pre-allocate batch to n_batch capacity for efficiency
+        // Use batch pool to reuse allocations across requests
+        let batch_capacity =
+            usize::try_from(self.n_batch).map_err(|_| Error::EmbeddingGenerationError {
+                message: format!("n_batch {} too large for usize", self.n_batch),
                 source: None,
             })?;
-        let mut batch = LlamaBatch::new(total_tokens, 1);
+
+        // Debug assertion: ensure we don't exceed batch capacity
+        debug_assert!(
+            total_tokens <= batch_capacity,
+            "Total tokens ({total_tokens}) exceeds n_batch capacity ({batch_capacity}). This should be prevented by chunking logic."
+        );
+
+        let mut batch = crate::batch_pool::get_or_create_batch(batch_capacity);
 
         // Add each sequence with unique ID
         for (seq_id, tokens) in token_sequences.iter().enumerate() {
@@ -705,6 +755,9 @@ impl EmbeddingModel {
                 self.finalize_embedding(&embeddings, token_sequences[seq_id].len())?;
             all_embeddings.push(final_embedding);
         }
+
+        // Return batch to pool for reuse
+        crate::batch_pool::return_batch(batch);
 
         Ok(all_embeddings)
     }
@@ -950,9 +1003,23 @@ impl EmbeddingModel {
         // Validate token limit
         self.validate_token_limit(tokens.len(), Some("Input"))?;
 
-        // Create a batch for processing
+        // Pre-allocate batch to n_batch capacity for efficiency
+        // Use batch pool to reuse allocations across requests
+        let batch_capacity =
+            usize::try_from(self.n_batch).map_err(|_| Error::EmbeddingGenerationError {
+                message: format!("n_batch {} too large for usize", self.n_batch),
+                source: None,
+            })?;
+
         let n_tokens = tokens.len();
-        let mut batch = LlamaBatch::new(n_tokens, 1);
+
+        // Debug assertion: ensure we don't exceed batch capacity
+        debug_assert!(
+            n_tokens <= batch_capacity,
+            "Token count ({n_tokens}) exceeds n_batch capacity ({batch_capacity}). This should be prevented by validation."
+        );
+
+        let mut batch = crate::batch_pool::get_or_create_batch(batch_capacity);
         batch
             .add_sequence(tokens, 0, true)
             .map_err(|e| Error::EmbeddingGenerationError {
@@ -970,6 +1037,9 @@ impl EmbeddingModel {
         // the pooled embedding, which we retrieve as a sequence embedding.
         // When pooling is NONE, we get individual token embeddings and pool ourselves.
         let all_embeddings = self.extract_sequence_embeddings(0, n_tokens, None)?;
+
+        // Return batch to pool for reuse
+        crate::batch_pool::return_batch(batch);
 
         Ok(all_embeddings)
     }
@@ -1291,6 +1361,49 @@ impl EmbeddingModel {
     fn extract_embeddings(&self, tokens: &[LlamaToken]) -> Result<Vec<Vec<f32>>> {
         // Delegate to the unified extraction method
         self.extract_sequence_embeddings(0, tokens.len(), None)
+    }
+
+    /// Performs a warmup run to initialize GPU/CPU resources.
+    ///
+    /// This runs a minimal embedding request with BOS+EOS tokens (or just token 0)
+    /// to trigger GPU memory allocation and kernel compilation at startup rather
+    /// than on the first user request.
+    ///
+    /// Based on llama.cpp's warmup implementation.
+    ///
+    /// # Errors
+    ///
+    /// Returns an error if the warmup embedding generation fails.
+    pub fn warmup(&mut self) -> Result<()> {
+        debug!("Starting model warmup");
+
+        // Get BOS and EOS tokens from the model
+        let model = self.cell.borrow_owner();
+        let bos = model.token_bos();
+        let eos = model.token_eos();
+
+        // Build minimal token sequence (similar to llama.cpp warmup)
+        let mut tokens = Vec::new();
+
+        // Some models (e.g., T5) don't have a BOS token
+        if bos.0 != -1 {
+            tokens.push(bos);
+        }
+        if eos.0 != -1 {
+            tokens.push(eos);
+        }
+        // If no special tokens, use token 0
+        if tokens.is_empty() {
+            tokens.push(LlamaToken(0));
+        }
+
+        debug!("Warmup with {} tokens", tokens.len());
+
+        // Run one embedding pass (result is discarded)
+        let _ = self.process_tokens_internal(&tokens)?;
+
+        info!("Model warmup completed");
+        Ok(())
     }
 
     /// Extract context size from GGUF file metadata

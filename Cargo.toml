@@ -108,6 +108,10 @@ path = "src/bin/server.rs"
 name = "embeddings_bench"
 harness = false
 
+[[bench]]
+name = "batch_allocation_bench"
+harness = false
+
 [profile.release]
 opt-level = 3
 lto = true

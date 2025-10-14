@@ -153,6 +153,15 @@ pub enum Error {
         message: String,
     },
 
+    /// Error when GPU runs out of memory
+    #[error("Out of memory: {message}")]
+    OutOfMemory {
+        /// Description of the OOM condition
+        message: String,
+        /// Attempted batch size that caused OOM
+        attempted_size: Option<usize>,
+    },
+
     /// Catch-all for other errors
     #[error(transparent)]
     Other(#[from] anyhow::Error),
@@ -194,12 +203,46 @@ impl Error {
         }
     }
 
+    /// Create an out-of-memory error
+    pub fn out_of_memory(message: impl Into<String>, attempted_size: Option<usize>) -> Self {
+        Self::OutOfMemory {
+            message: message.into(),
+            attempted_size,
+        }
+    }
+
     /// Check if this is a retryable error
     pub fn is_retryable(&self) -> bool {
         matches!(
             self,
-            Self::Timeout { .. } | Self::ThreadPoolError { .. } | Self::LockPoisoned
+            Self::Timeout { .. }
+                | Self::ThreadPoolError { .. }
+                | Self::LockPoisoned
+                | Self::OutOfMemory { .. }
         )
+    }
+
+    /// Check if this error indicates an out-of-memory condition
+    pub fn is_oom(&self) -> bool {
+        matches!(self, Self::OutOfMemory { .. })
+    }
+
+    /// Detect if an error message indicates an OOM condition
+    ///
+    /// This checks for common OOM patterns in llama.cpp error messages:
+    /// - "out of memory"
+    /// - "OOM"
+    /// - "CUDA out of memory"
+    /// - "failed to allocate"
+    /// - "allocation failed"
+    pub fn is_oom_message(message: &str) -> bool {
+        let lower = message.to_lowercase();
+        lower.contains("out of memory")
+            || lower.contains("oom")
+            || lower.contains("failed to allocate")
+            || lower.contains("allocation failed")
+            || lower.contains("cuda error")
+            || lower.contains("cudamalloc")
     }
 
     /// Check if this is a configuration-related error

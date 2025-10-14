@@ -54,6 +54,10 @@ struct Args {
     #[arg(long, env = "EMBELLAMA_N_SEQ_MAX", default_value_t = 8)]
     n_seq_max: u32,
 
+    /// Batch packing capacity - total tokens that can be packed together (default: 2048)
+    #[arg(long, short = 'b', env = "EMBELLAMA_N_BATCH")]
+    n_batch: Option<u32>,
+
     /// Pooling strategy for embeddings (mean, cls, max, mean-sqrt, last)
     #[arg(long, env = "EMBELLAMA_POOLING_STRATEGY")]
     pooling_strategy: Option<String>,
@@ -69,6 +73,10 @@ struct Args {
     /// Log level (trace, debug, info, warn, error)
     #[arg(long, env = "EMBELLAMA_LOG_LEVEL", default_value = "info")]
     log_level: String,
+
+    /// Skip warmup run on model load
+    #[arg(long, env = "EMBELLAMA_NO_WARMUP")]
+    no_warmup: bool,
 }
 
 /// Parse pooling strategy from string
@@ -118,8 +126,11 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     info!("Model: {:?} ({})", args.model_path, args.model_name);
     info!("Workers: {}, Queue size: {}", args.workers, args.queue_size);
     info!(
-        "Request timeout: {}s, n_seq_max: {}",
-        args.request_timeout, args.n_seq_max
+        "Request timeout: {}s, n_seq_max: {}, n_batch: {}",
+        args.request_timeout,
+        args.n_seq_max,
+        args.n_batch
+            .map_or_else(|| "default".to_string(), |n| n.to_string())
     );
     info!(
         "Pooling: {}, Normalization: {}",
@@ -150,7 +161,13 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
         .host(args.host)
         .port(args.port)
         .request_timeout(std::time::Duration::from_secs(args.request_timeout))
-        .n_seq_max(args.n_seq_max);
+        .n_seq_max(args.n_seq_max)
+        .no_warmup(args.no_warmup);
+
+    // Add n_batch if specified
+    if let Some(n_batch) = args.n_batch {
+        config_builder = config_builder.n_batch(n_batch);
+    }
 
     // Add pooling strategy if specified
     if let Some(strategy) = pooling_strategy {

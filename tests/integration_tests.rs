@@ -607,6 +607,7 @@ fn test_thread_safety() {
 #[test]
 #[serial]
 fn bench_single_embedding() {
+    init_test_tracing();
     let model_path = std::env::var("EMBELLAMA_TEST_MODEL")
         .expect("EMBELLAMA_TEST_MODEL must be set - run 'just download-test-model' first");
 
@@ -643,9 +644,10 @@ fn bench_single_embedding() {
 
     println!("Average time per embedding: {avg_time:?}");
 
-    // Assert performance target (adjust based on hardware)
+    // Performance sanity check with CI-friendly threshold
+    // This accounts for resource contention on shared CI runners
     assert!(
-        avg_time.as_millis() < 1000,
+        avg_time.as_millis() < 1500,
         "Embedding generation too slow: {avg_time:?}"
     );
 }

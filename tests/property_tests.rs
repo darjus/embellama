@@ -51,7 +51,8 @@ fn ensure_engine_initialized() {
             .with_model_path(model_path)
             .with_model_name("proptest-model")
             .with_normalization_mode(NormalizationMode::L2)
-            .with_n_ubatch(2048); // Large enough for long texts in property tests
+            .with_n_ubatch(2048) // Large enough for long texts in property tests
+            .with_n_seq_max(1); // Use full context for single-sequence property tests
 
         // Allow overriding context size via environment variable
         // Useful for decoder models where full context (32k) is supported but 8k is recommended
@@ -411,5 +412,250 @@ proptest! {
         prop_assert!(cosine_similarity > similarity_threshold,
             "Low similarity {} for related texts (threshold: {}, base length: {}, suffix length: {}, proportional change: {:.2})",
             cosine_similarity, similarity_threshold, base_len, suffix_len, proportional_change);
+    }
+}
+
+// ============================================================================
+// Phase 5.4: Property-Based Tests for n_batch Refactoring
+// ============================================================================
+
+// Property: All sequences in a batch should be processed exactly once
+proptest! {
+    #[test]
+    #[serial]
+    fn test_all_sequences_processed_once(batch_size in 1..100usize) {
+        // Generate unique identifiable sequences
+        let texts: Vec<String> = (0..batch_size)
+            .map(|i| format!("Unique sequence identifier {i} for property testing"))
+            .collect();
+        let text_refs: Vec<&str> = texts.iter().map(std::string::String::as_str).collect();
+
+        let embeddings = with_engine(|engine| {
+            engine.embed_batch(None, &text_refs)
+                .expect("Failed to process batch")
+        });
+
+        // Verify count: all sequences processed exactly once
+        prop_assert_eq!(embeddings.len(), batch_size,
+            "Expected {} embeddings, got {}", batch_size, embeddings.len());
+
+        // Verify no embeddings are empty
+        for (i, emb) in embeddings.iter().enumerate() {
+            prop_assert!(!emb.is_empty(), "Embedding {} is empty", i);
+        }
+    }
+}
+
+// Property: Total tokens == sum of chunk tokens (no data loss in chunking)
+proptest! {
+    #[test]
+    #[serial]
+    fn test_chunking_preserves_all_data(
+        num_sequences in 5..50usize,
+        text_length in 10..100usize
+    ) {
+        // Create sequences that may exceed n_batch capacity
+        let texts: Vec<String> = (0..num_sequences)
+            .map(|i| {
+                let content = "word ".repeat(text_length);
+                format!("Sequence {i}: {content}")
+            })
+            .collect();
+        let text_refs: Vec<&str> = texts.iter().map(std::string::String::as_str).collect();
+
+        let embeddings = with_engine(|engine| {
+            engine.embed_batch(None, &text_refs)
+                .expect("Failed to process batch")
+        });
+
+        // Verify all sequences processed (sum of chunks == total)
+        prop_assert_eq!(embeddings.len(), num_sequences,
+            "Chunking should preserve all sequences: expected {}, got {}",
+            num_sequences, embeddings.len());
+
+        // Verify all embeddings have consistent dimensions
+        if !embeddings.is_empty() {
+            let expected_dim = embeddings[0].len();
+            for (i, emb) in embeddings.iter().enumerate() {
+                prop_assert_eq!(emb.len(), expected_dim,
+                    "Embedding {} has inconsistent dimension", i);
+            }
+        }
+    }
+}
+
+// Property: Chunking should not affect final results (order preservation)
+proptest! {
+    #[test]
+    #[serial]
+    fn test_chunking_order_preservation(
+        num_sequences in 10..50usize,
+        word_count in 20..80usize
+    ) {
+        // Create sequences that will force chunking
+        let texts: Vec<String> = (0..num_sequences)
+            .map(|i| {
+                let content = "testword ".repeat(word_count);
+                format!("ID{i} {content}")
+            })
+            .collect();
+        let text_refs: Vec<&str> = texts.iter().map(std::string::String::as_str).collect();
+
+        // Get batch embeddings (may be chunked)
+        let batch_embeddings = with_engine(|engine| {
+            engine.embed_batch(None, &text_refs)
+                .expect("Failed to process batch")
+        });
+
+        // Process first and last individually to verify order
+        let first_individual = with_engine(|engine| {
+            engine.embed(None, text_refs[0])
+                .expect("Failed to process first individually")
+        });
+        let last_individual = with_engine(|engine| {
+            engine.embed(None, text_refs[num_sequences - 1])
+                .expect("Failed to process last individually")
+        });
+
+        // Verify order is preserved (first and last match)
+        prop_assert_eq!(batch_embeddings[0].len(), first_individual.len());
+        prop_assert_eq!(batch_embeddings[num_sequences - 1].len(), last_individual.len());
+
+        // Check values are close (allowing for minor floating point differences)
+        for (batch_val, ind_val) in batch_embeddings[0].iter().zip(first_individual.iter()) {
+            prop_assert!((batch_val - ind_val).abs() < 1e-5,
+                "First embedding mismatch in chunked batch");
+        }
+        for (batch_val, ind_val) in batch_embeddings[num_sequences - 1].iter().zip(last_individual.iter()) {
+            prop_assert!((batch_val - ind_val).abs() < 1e-5,
+                "Last embedding mismatch in chunked batch");
+        }
+    }
+}
+
+// Property: Varying sequence lengths should be handled correctly
+proptest! {
+    #[test]
+    #[serial]
+    fn test_variable_length_sequences(
+        lengths in prop::collection::vec(1..200usize, 5..30)
+    ) {
+        // Create sequences with varying lengths
+        let texts: Vec<String> = lengths.iter()
+            .enumerate()
+            .map(|(i, &len)| {
+                let content = "x ".repeat(len);
+                format!("Seq{i}: {content}")
+            })
+            .collect();
+        let text_refs: Vec<&str> = texts.iter().map(std::string::String::as_str).collect();
+
+        let embeddings = with_engine(|engine| {
+            engine.embed_batch(None, &text_refs)
+                .expect("Failed to process variable length batch")
+        });
+
+        // Verify all sequences processed
+        prop_assert_eq!(embeddings.len(), texts.len(),
+            "Variable length batch should process all sequences");
+
+        // Verify consistent dimensions despite varying input lengths
+        if !embeddings.is_empty() {
+            let expected_dim = embeddings[0].len();
+            for (i, emb) in embeddings.iter().enumerate() {
+                prop_assert_eq!(emb.len(), expected_dim,
+                    "Embedding {} (input len {}) has wrong dimension",
+                    i, lengths[i]);
+                prop_assert!(!emb.is_empty(),
+                    "Embedding {} should not be empty", i);
+            }
+        }
+    }
+}
+
+// Property: Batch processing should not introduce NaN or Inf values
+proptest! {
+    #[test]
+    #[serial]
+    fn test_batch_finite_values(batch_size in 2..100usize) {
+        let texts: Vec<String> = (0..batch_size)
+            .map(|i| format!("Batch test sequence {i} with some content"))
+            .collect();
+        let text_refs: Vec<&str> = texts.iter().map(std::string::String::as_str).collect();
+
+        let embeddings = with_engine(|engine| {
+            engine.embed_batch(None, &text_refs)
+                .expect("Failed to process batch")
+        });
+
+        // Check all embeddings for finite values
+        for (i, emb) in embeddings.iter().enumerate() {
+            for (j, &value) in emb.iter().enumerate() {
+                prop_assert!(value.is_finite(),
+                    "Non-finite value in batch embedding {} at position {}: {}",
+                    i, j, value);
+                prop_assert!(value.abs() < 100.0,
+                    "Value out of bounds in batch embedding {} at position {}: {}",
+                    i, j, value);
+            }
+        }
+    }
+}
+
+// Property: Empty strings in batch should be rejected
+proptest! {
+    #[test]
+    #[serial]
+    fn test_empty_string_rejection(valid_count in 1..10usize, empty_position in 0..10usize) {
+        // Create batch with one empty string
+        let mut texts: Vec<String> = (0..valid_count)
+            .map(|i| format!("Valid text {i}"))
+            .collect();
+
+        // Insert empty string at random position
+        let insert_pos = empty_position.min(texts.len());
+        texts.insert(insert_pos, String::new());
+
+        let text_refs: Vec<&str> = texts.iter().map(std::string::String::as_str).collect();
+
+        let result = with_engine(|engine| engine.embed_batch(None, &text_refs));
+
+        // Should fail due to empty string
+        prop_assert!(result.is_err(),
+            "Batch with empty string should be rejected");
+    }
+}
+
+// Property: Very small batches (1-3 sequences) should use fast path efficiently
+proptest! {
+    #[test]
+    #[serial]
+    fn test_small_batch_efficiency(text_len in 10..100usize) {
+        let text = "word ".repeat(text_len);
+
+        // Single sequence (fast path)
+        let single_result = with_engine(|engine| {
+            engine.embed_batch(None, &[text.as_str()])
+                .expect("Single sequence should succeed")
+        });
+
+        prop_assert_eq!(single_result.len(), 1, "Fast path should return 1 embedding");
+        prop_assert!(!single_result[0].is_empty(), "Fast path embedding should not be empty");
+
+        // Two sequences
+        let two_result = with_engine(|engine| {
+            engine.embed_batch(None, &[text.as_str(), text.as_str()])
+                .expect("Two sequences should succeed")
+        });
+
+        prop_assert_eq!(two_result.len(), 2, "Should return 2 embeddings");
+
+        // Three sequences
+        let three_result = with_engine(|engine| {
+            engine.embed_batch(None, &[text.as_str(), text.as_str(), text.as_str()])
+                .expect("Three sequences should succeed")
+        });
+
+        prop_assert_eq!(three_result.len(), 3, "Should return 3 embeddings");
     }
 }
