@@ -67,9 +67,9 @@ thread_local! {
 
 /// Gets a batch from the thread-local pool or creates a new one.
 ///
-/// This function first checks the thread-local pool for an available batch
-/// with the requested capacity. If one is found, it's returned immediately.
-/// Otherwise, a new batch is allocated.
+/// This function checks the thread-local pool for an available batch.
+/// Batches are pooled by exact capacity to ensure efficient reuse patterns.
+/// The pool only stores standard-sized batches (typically matching `n_batch` config).
 ///
 /// # Arguments
 ///
@@ -96,7 +96,9 @@ pub fn get_or_create_batch(capacity: usize) -> LlamaBatch {
     BATCH_POOL.with(|pool| {
         let mut pool = pool.borrow_mut();
 
-        // Try to reuse a batch from the pool
+        // Try to find a pooled batch with matching capacity
+        // We pool batches by exact capacity to maintain predictable allocation patterns
+        // since all production requests use the same n_batch size
         if let Some(batch) = pool.pop() {
             debug!(
                 "Reused batch from pool (capacity: {}, pool_size: {})",

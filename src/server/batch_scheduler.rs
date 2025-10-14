@@ -180,7 +180,7 @@ impl BatchScheduler {
     ///
     /// * `tokens` - Number of tokens to add to pending count
     pub fn add_pending_tokens(&self, tokens: usize) {
-        let new_count = self.pending_tokens.fetch_add(tokens, Ordering::Relaxed) + tokens;
+        let new_count = self.pending_tokens.fetch_add(tokens, Ordering::SeqCst) + tokens;
         debug!("Pending tokens increased to {}", new_count);
     }
 
@@ -194,7 +194,7 @@ impl BatchScheduler {
     pub fn remove_pending_tokens(&self, tokens: usize) {
         let new_count = self
             .pending_tokens
-            .fetch_sub(tokens, Ordering::Relaxed)
+            .fetch_sub(tokens, Ordering::SeqCst)
             .saturating_sub(tokens);
         debug!("Pending tokens decreased to {}", new_count);
     }
@@ -205,7 +205,7 @@ impl BatchScheduler {
     ///
     /// Number of tokens currently pending in the queue
     pub fn pending_tokens(&self) -> usize {
-        self.pending_tokens.load(Ordering::Relaxed)
+        self.pending_tokens.load(Ordering::SeqCst)
     }
 
     /// Get the current active batch count
@@ -293,7 +293,7 @@ impl BatchScheduler {
     ///
     /// Uses `parking_lot::Mutex` which never panics, so no `unwrap()` needed
     fn determine_batch_size(&self) -> usize {
-        let pending = self.pending_tokens.load(Ordering::Relaxed);
+        let pending = self.pending_tokens.load(Ordering::SeqCst);
 
         // parking_lot::Mutex never panics, no unwrap needed
         let active_info = self.active_batches.lock();
@@ -430,13 +430,14 @@ impl BatchScheduler {
 
     /// Internal batch processing without retry logic
     ///
-    /// This method processes a batch of requests through the model.
+    /// This method processes a batch of requests through the model using actual batch processing.
+    /// All texts from all requests are tokenized and processed together in a single model pass.
     /// If OOM occurs, the error is propagated to the retry logic.
     ///
     /// # Arguments
     ///
     /// * `requests` - Slice of batch requests to process
-    /// * `batch_size` - Maximum batch size to use
+    /// * `batch_size` - Maximum batch size to use (currently unused as we use model's `n_batch`)
     ///
     /// # Returns
     ///
@@ -446,35 +447,40 @@ impl BatchScheduler {
         requests: &[BatchRequest],
         _batch_size: usize,
     ) -> Result<Vec<Vec<Vec<f32>>>> {
-        let mut all_results = Vec::with_capacity(requests.len());
+        // Collect all texts from all requests and track which request each text belongs to
+        let mut all_texts: Vec<&str> = Vec::new();
+        let mut request_indices: Vec<usize> = Vec::new();
 
-        for request in requests {
-            let texts: Vec<&str> = request.texts.iter().map(String::as_str).collect();
+        for (request_idx, request) in requests.iter().enumerate() {
+            for text in &request.texts {
+                all_texts.push(text.as_str());
+                request_indices.push(request_idx);
+            }
+        }
 
-            // Process through the model
-            let result = {
-                let mut model = self.model.lock();
-                // Use the existing batch processing method
-                if texts.len() == 1 {
-                    match model.generate_embedding(texts[0]) {
-                        Ok(embedding) => Ok(vec![embedding]),
-                        Err(e) => Err(e),
-                    }
-                } else {
-                    // For multiple texts, process as batch
-                    // > TODO: This should use the batch processor once integrated
-                    let mut embeddings = Vec::with_capacity(texts.len());
-                    for text in texts {
-                        match model.generate_embedding(text) {
-                            Ok(emb) => embeddings.push(emb),
-                            Err(e) => return Err(e),
-                        }
-                    }
-                    Ok(embeddings)
-                }
-            }?;
+        if all_texts.is_empty() {
+            return Ok(vec![Vec::new(); requests.len()]);
+        }
 
-            all_results.push(result);
+        // Process the entire batch in a single model pass
+        let all_embeddings = {
+            let mut model = self.model.lock();
+
+            // Tokenize all texts
+            let mut token_sequences = Vec::with_capacity(all_texts.len());
+            for text in &all_texts {
+                let tokens = model.tokenize(text)?;
+                token_sequences.push(tokens);
+            }
+
+            // Process all token sequences as a single batch
+            model.process_batch_tokens(&token_sequences)?
+        };
+
+        // Distribute results back to their respective requests
+        let mut all_results: Vec<Vec<Vec<f32>>> = vec![Vec::new(); requests.len()];
+        for (embedding, request_idx) in all_embeddings.into_iter().zip(request_indices) {
+            all_results[request_idx].push(embedding);
         }
 
         Ok(all_results)
@@ -503,8 +509,8 @@ impl BatchScheduler {
     /// Run the model worker loop
     ///
     /// This is the main processing loop that:
-    /// 1. Determines optimal batch size based on queue state and capacity
-    /// 2. Collects requests from the queue up to the determined size
+    /// 1. Blocks waiting for the first request to arrive
+    /// 2. Collects additional requests greedily up to optimal batch size
     /// 3. Tracks active batches during processing
     /// 4. Processes batches through the model
     /// 5. Sends responses back via oneshot channels
@@ -520,35 +526,43 @@ impl BatchScheduler {
         let mut batch_requests = Vec::new();
 
         loop {
+            // Block until first request arrives or channel closes
+            let first_request = {
+                let mut rx = self.request_rx.lock();
+                rx.recv().await
+            };
+
+            if let Some(req) = first_request {
+                batch_requests.push(req);
+            } else {
+                // Channel closed, exit worker loop
+                info!("Request channel closed, shutting down worker");
+                break;
+            }
+
             // Determine optimal batch size based on current load and capacity
             let target_batch_size = self.determine_batch_size();
+            let mut current_tokens: usize = batch_requests.iter().map(|r| r.token_count).sum();
 
-            // If no capacity or no pending work, yield and try again
-            if target_batch_size == 0 {
-                tokio::time::sleep(tokio::time::Duration::from_micros(100)).await;
-                continue;
-            }
-
-            // Try to collect requests up to the determined batch size
+            // Greedily collect more requests up to target size
             let mut rx = self.request_rx.lock();
-
-            // Collect as many requests as we can up to target_batch_size
-            while let Ok(req) = rx.try_recv() {
-                batch_requests.push(req);
-
-                let total_tokens: usize = batch_requests.iter().map(|r| r.token_count).sum();
-
-                // Stop collecting if we've reached the target size
-                if total_tokens >= target_batch_size {
-                    debug!(
-                        "Reached target batch size: {} tokens >= {} target",
-                        total_tokens, target_batch_size
-                    );
-                    break;
+            while current_tokens < target_batch_size {
+                match rx.try_recv() {
+                    Ok(req) => {
+                        current_tokens += req.token_count;
+                        batch_requests.push(req);
+                    }
+                    Err(_) => break, // No more requests available
                 }
             }
-
             drop(rx); // Release lock before processing
+
+            debug!(
+                "Collected {} requests ({} tokens, target: {})",
+                batch_requests.len(),
+                current_tokens,
+                target_batch_size
+            );
 
             // Process collected requests
             if !batch_requests.is_empty() {
@@ -597,9 +611,6 @@ impl BatchScheduler {
 
                 // Remove from active tracking
                 self.untrack_active_batch(batch_id);
-            } else {
-                // No work available, yield to avoid busy-waiting
-                tokio::time::sleep(tokio::time::Duration::from_micros(100)).await;
             }
         }
     }

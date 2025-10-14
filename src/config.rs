@@ -164,6 +164,20 @@ impl ModelConfig {
             )));
         }
 
+        // Validate that n_batch <= n_ctx (cannot exceed context size)
+        // Use n_ctx if set, otherwise use context_size
+        if let Some(n_batch) = self.n_batch {
+            let effective_ctx = self.n_ctx.or(self.context_size);
+            if let Some(n_ctx) = effective_ctx
+                && n_batch > n_ctx
+            {
+                return Err(Error::config(format!(
+                    "Batch size (n_batch={n_batch}) cannot exceed context size (n_ctx={n_ctx}). \
+                     llama.cpp will fail during processing if n_batch > n_ctx."
+                )));
+            }
+        }
+
         if let Some(n_threads) = self.n_threads
             && n_threads == 0
         {
