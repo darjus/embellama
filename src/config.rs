@@ -30,8 +30,14 @@ pub struct ModelConfig {
     /// Context size (number of tokens)
     pub n_ctx: Option<u32>,
 
-    /// Micro-batch size for prompt processing
-    /// This must be >= the number of tokens in any single input
+    /// Batch size for prompt processing (max usable context per sequence)
+    /// If not set, defaults to `context_size`
+    /// This is the effective maximum context size for single sequences
+    pub n_batch: Option<u32>,
+
+    /// Micro-batch size for prompt processing (physical batch size)
+    /// If not set, defaults to `n_batch`
+    /// Must be <= `n_batch`
     pub n_ubatch: Option<u32>,
 
     /// Number of threads for CPU inference
@@ -133,10 +139,34 @@ impl ModelConfig {
             return Err(Error::config("Context size must be greater than 0"));
         }
 
+        if let Some(n_batch) = self.n_batch
+            && n_batch == 0
+        {
+            return Err(Error::config("Batch size must be greater than 0"));
+        }
+
         if let Some(n_ubatch) = self.n_ubatch
             && n_ubatch == 0
         {
             return Err(Error::config("Micro-batch size must be greater than 0"));
+        }
+
+        // Validate n_batch <= context_size if both are set
+        if let (Some(context_size), Some(n_batch)) = (self.context_size, self.n_batch)
+            && n_batch > context_size
+        {
+            return Err(Error::config(
+                "Batch size (n_batch) cannot exceed context size",
+            ));
+        }
+
+        // Validate n_ubatch <= n_batch if both are set
+        if let (Some(n_batch), Some(n_ubatch)) = (self.n_batch, self.n_ubatch)
+            && n_ubatch > n_batch
+        {
+            return Err(Error::config(
+                "Micro-batch size (n_ubatch) cannot exceed batch size (n_batch)",
+            ));
         }
 
         if let Some(n_threads) = self.n_threads
@@ -166,6 +196,7 @@ impl Default for ModelConfig {
             model_path: PathBuf::new(),
             model_name: String::new(),
             n_ctx: None,
+            n_batch: None,
             n_ubatch: None,
             n_threads: None,
             n_gpu_layers: None,
@@ -212,6 +243,13 @@ impl ModelConfigBuilder {
     #[must_use]
     pub fn with_n_ctx(mut self, ctx: u32) -> Self {
         self.config.n_ctx = Some(ctx);
+        self
+    }
+
+    /// Set the batch size for prompt processing
+    #[must_use]
+    pub fn with_n_batch(mut self, batch: u32) -> Self {
+        self.config.n_batch = Some(batch);
         self
     }
 
@@ -713,6 +751,13 @@ impl EngineConfigBuilder {
     #[must_use]
     pub fn with_context_size(mut self, size: usize) -> Self {
         self.config.model_config.context_size = u32::try_from(size).ok();
+        self
+    }
+
+    /// Set the batch size for prompt processing (convenience method)
+    #[must_use]
+    pub fn with_n_batch(mut self, batch: u32) -> Self {
+        self.config.model_config.n_batch = Some(batch);
         self
     }
 

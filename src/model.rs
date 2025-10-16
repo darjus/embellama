@@ -105,6 +105,8 @@ pub struct EmbeddingModel {
     max_context_size: usize,
     /// Maximum number of sequences for batch processing
     n_seq_max: u32,
+    /// Batch size (max usable context per sequence)
+    n_batch: Option<u32>,
     /// GGUF metadata containing architecture info, dimensions, context size
     metadata: crate::gguf::GGUFMetadata,
 }
@@ -129,6 +131,7 @@ impl EmbeddingModel {
     /// - Invalid configuration parameters are provided
     #[instrument(skip(backend, config), fields(model_path = %config.model_path.display()))]
     #[allow(clippy::too_many_lines)]
+    #[allow(clippy::similar_names)]
     pub fn new(backend: &LlamaBackend, config: &ModelConfig) -> Result<Self> {
         info!("Loading model from {:?}", config.model_path);
 
@@ -224,28 +227,62 @@ impl EmbeddingModel {
             // > NOTE: These optimizations are enabled through llama-cpp parameters
         }
 
-        // Set micro-batch size with architecture-aware defaults
-        // Decoder models (Qwen, LLaMA, etc.) need smaller n_ubatch to prevent memory issues and crashes
-        // Encoder models (BERT, etc.) can use larger values for better batch processing
+        // Set batch size (max usable context per sequence)
+        // Default: context_size (full context available for single sequences)
+        let n_batch = config.n_batch.unwrap_or(context_size);
+        debug!("Setting n_batch={} (max usable context)", n_batch);
+
+        // Validate n_batch <= context_size
+        if n_batch > context_size {
+            return Err(Error::ConfigurationError {
+                message: format!(
+                    "Batch size (n_batch={n_batch}) cannot exceed context size ({context_size})"
+                ),
+            });
+        }
+
+        ctx_params = ctx_params.with_n_batch(n_batch);
+
+        // Set micro-batch size (physical batch size for processing)
+        // Default: n_batch (or architecture-specific defaults capped at n_batch)
         let n_ubatch = if let Some(ubatch) = config.n_ubatch {
             // Use explicitly configured value
             debug!("Using configured n_ubatch: {}", ubatch);
+
+            // Validate n_ubatch <= n_batch
+            if ubatch > n_batch {
+                return Err(Error::ConfigurationError {
+                    message: format!(
+                        "Micro-batch size (n_ubatch={ubatch}) cannot exceed batch size (n_batch={n_batch})"
+                    ),
+                });
+            }
             ubatch
+        } else if config.n_batch.is_some() {
+            // n_batch was explicitly set, use it for n_ubatch
+            debug!("Setting n_ubatch={} (matching n_batch)", n_batch);
+            n_batch
         } else if is_decoder {
             // Decoder models: use conservative 512 to prevent crashes
             // llama-server uses 2048, but 512 is safer for large contexts
-            let ubatch = 512_u32;
+            // Cap at n_batch to ensure n_ubatch <= n_batch
+            let ubatch = 512_u32.min(n_batch);
             debug!(
-                "Setting n_ubatch={} for decoder model (conservative default)",
+                "Setting n_ubatch={} for decoder model (conservative default, capped at n_batch)",
                 ubatch
             );
             ubatch
         } else {
             // Encoder models: can use larger values for better performance
-            let ubatch = 2048_u32;
-            debug!("Setting n_ubatch={} for encoder model", ubatch);
+            // Cap at n_batch to ensure n_ubatch <= n_batch
+            let ubatch = 2048_u32.min(n_batch);
+            debug!(
+                "Setting n_ubatch={} for encoder model (capped at n_batch)",
+                ubatch
+            );
             ubatch
         };
+
         ctx_params = ctx_params.with_n_ubatch(n_ubatch);
 
         // Set thread counts
@@ -296,6 +333,7 @@ impl EmbeddingModel {
             #[allow(clippy::cast_lossless)]
             max_context_size: ctx_size as usize,
             n_seq_max,
+            n_batch: Some(n_batch),
             metadata,
         };
 
@@ -426,7 +464,7 @@ impl EmbeddingModel {
     /// Calculate the effective maximum tokens available per sequence in batch processing.
     ///
     /// When batching multiple sequences, each sequence gets its own KV cache slot.
-    /// The total context is divided among sequences based on `n_seq_max`.
+    /// The usable context (`n_batch`) is divided among sequences based on `n_seq_max`.
     ///
     /// # Returns
     ///
@@ -434,20 +472,24 @@ impl EmbeddingModel {
     ///
     /// # Implementation Note
     ///
-    /// Each sequence slot size = `context_size / n_seq_max - 2`
+    /// Each sequence slot size = `n_batch / n_seq_max - 2`
+    /// - `n_batch` represents the max usable context per sequence (defaults to `context_size`)
     /// - The division accounts for parallel sequence processing
     /// - The 2-token overhead is for special tokens ([CLS], [SEP])
     ///
     /// # Example
     ///
-    /// For a model with `context_size = 8192` and `n_seq_max = 2`:
+    /// For a model with `n_batch = 8192` and `n_seq_max = 2`:
     /// - Per-sequence size: 8192 / 2 = 4096
     /// - Overhead: 2 tokens (\[CLS\] and \[SEP\])
     /// - Effective max per sequence: 4096 - 2 = 4094 tokens
     pub fn effective_max_tokens(&self) -> usize {
-        // Each sequence gets its own KV cache slot: context_size / n_seq_max
+        // Use n_batch if set (the max usable context), otherwise max_context_size
+        let usable_context = self.n_batch.map_or(self.max_context_size, |b| b as usize);
+
+        // Each sequence gets its own KV cache slot: usable_context / n_seq_max
         // Subtract 2 for special tokens ([CLS], [SEP]) per sequence
-        let per_sequence_size = self.max_context_size / (self.n_seq_max as usize);
+        let per_sequence_size = usable_context / (self.n_seq_max as usize);
         per_sequence_size.saturating_sub(2)
     }
 

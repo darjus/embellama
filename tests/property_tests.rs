@@ -35,7 +35,7 @@ static ENGINE: std::sync::LazyLock<Arc<Mutex<Option<EmbeddingEngine>>>> =
 
 /// Initialize the engine once for all property tests
 fn ensure_engine_initialized() {
-    let mut engine_guard = ENGINE.lock().unwrap();
+    let mut engine_guard = ENGINE.lock().unwrap_or_else(|e| e.into_inner());
     if engine_guard.is_none() {
         let model_path = std::env::var("EMBELLAMA_TEST_MODEL")
             .expect("EMBELLAMA_TEST_MODEL must be set - run 'just download-test-model' first");
@@ -51,7 +51,7 @@ fn ensure_engine_initialized() {
             .with_model_path(model_path)
             .with_model_name("proptest-model")
             .with_normalization_mode(NormalizationMode::L2)
-            .with_n_ubatch(2048); // Large enough for long texts in property tests
+            .with_n_seq_max(1); // Use full context for single sequences
 
         // Allow overriding context size via environment variable
         // Useful for decoder models where full context (32k) is supported but 8k is recommended
@@ -78,7 +78,7 @@ where
     F: FnOnce(&EmbeddingEngine) -> T,
 {
     ensure_engine_initialized();
-    let engine_guard = ENGINE.lock().unwrap();
+    let engine_guard = ENGINE.lock().unwrap_or_else(|e| e.into_inner());
     f(engine_guard.as_ref().unwrap())
 }
 
