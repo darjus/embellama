@@ -423,32 +423,32 @@ impl EmbeddingModel {
         self.n_seq_max
     }
 
-    /// Calculate the effective maximum tokens available for input.
+    /// Calculate the effective maximum tokens available per sequence in batch processing.
     ///
-    /// For BERT-style embedding models, the `max_position_embeddings` parameter
-    /// defines the maximum sequence length the model can handle. The only overhead
-    /// is from special tokens like \[CLS\] and \[SEP\] that the tokenizer adds.
+    /// When batching multiple sequences, each sequence gets its own KV cache slot.
+    /// The total context is divided among sequences based on `n_seq_max`.
     ///
     /// # Returns
     ///
-    /// The maximum number of input tokens that can be safely processed.
+    /// The maximum number of input tokens per sequence that can be safely processed.
     ///
     /// # Implementation Note
     ///
-    /// The overhead is minimal (2-3 tokens) for special tokens. The embedding
-    /// output vectors are computed from hidden states and don't consume context space.
+    /// Each sequence slot size = `context_size / n_seq_max - 2`
+    /// - The division accounts for parallel sequence processing
+    /// - The 2-token overhead is for special tokens ([CLS], [SEP])
     ///
     /// # Example
     ///
-    /// For a model with `max_position_embeddings` = 512:
+    /// For a model with `context_size = 8192` and `n_seq_max = 2`:
+    /// - Per-sequence size: 8192 / 2 = 4096
     /// - Overhead: 2 tokens (\[CLS\] and \[SEP\])
-    /// - Effective max: 512 - 2 = 510 tokens
+    /// - Effective max per sequence: 4096 - 2 = 4094 tokens
     pub fn effective_max_tokens(&self) -> usize {
-        // For embedding models, only special tokens ([CLS], [SEP]) consume overhead
-        // The output embeddings don't use KV cache space
-        let overhead = 2;
-
-        self.max_context_size.saturating_sub(overhead)
+        // Each sequence gets its own KV cache slot: context_size / n_seq_max
+        // Subtract 2 for special tokens ([CLS], [SEP]) per sequence
+        let per_sequence_size = self.max_context_size / (self.n_seq_max as usize);
+        per_sequence_size.saturating_sub(2)
     }
 
     /// Tokenizes the input text.

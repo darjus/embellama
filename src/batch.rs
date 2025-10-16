@@ -111,24 +111,21 @@ impl BatchProcessor {
         // Step 2: Parallel tokenization using the real tokenizer
         let token_sequences = Self::parallel_tokenize_real(model, texts)?;
 
-        // Step 3: Check if we need to chunk the batch based on total token count and n_seq_max
-        let total_tokens: usize = token_sequences.iter().map(std::vec::Vec::len).sum();
-        let effective_max = model.effective_max_tokens();
+        // Step 3: Check if we need to chunk the batch based on n_seq_max
+        // Each sequence is validated individually against effective_max_tokens in process_batch_tokens_internal
         let n_seq_max = model.n_seq_max() as usize;
 
         debug!(
-            "Batch validation: {} sequences, {} tokens, effective_max: {}",
+            "Batch validation: {} sequences, n_seq_max: {}",
             token_sequences.len(),
-            total_tokens,
-            effective_max
+            n_seq_max
         );
 
-        let embeddings = if total_tokens <= effective_max && token_sequences.len() <= n_seq_max {
+        let embeddings = if token_sequences.len() <= n_seq_max {
             // Process all sequences in a single batch
             debug!(
-                "Processing {} sequences with {} total tokens in single batch",
-                token_sequences.len(),
-                total_tokens
+                "Processing {} sequences in single batch",
+                token_sequences.len()
             );
 
             let batch_embeddings = model.process_batch_tokens(&token_sequences)?;
@@ -141,27 +138,19 @@ impl BatchProcessor {
 
             batch_embeddings
         } else {
-            // Need to chunk into smaller batches
+            // Need to chunk into smaller batches based on n_seq_max
             debug!(
-                "Chunking batch: {} total tokens (effective_max {}), {} sequences (n_seq_max {})",
-                total_tokens,
-                effective_max,
+                "Chunking batch: {} sequences (n_seq_max {})",
                 token_sequences.len(),
                 n_seq_max
             );
 
             let mut all_embeddings = Vec::with_capacity(texts.len());
             let mut current_batch = Vec::new();
-            let mut current_tokens = 0;
 
             for seq in token_sequences {
-                let seq_len = seq.len();
-
-                // Check if adding this sequence would exceed either limit
-                if !current_batch.is_empty()
-                    && (current_tokens + seq_len > effective_max
-                        || current_batch.len() >= n_seq_max)
-                {
+                // Check if adding this sequence would exceed n_seq_max
+                if !current_batch.is_empty() && current_batch.len() >= n_seq_max {
                     // Process current batch
                     let batch_embeddings = model.process_batch_tokens(&current_batch)?;
                     let batch_len = batch_embeddings.len();
@@ -175,11 +164,9 @@ impl BatchProcessor {
 
                     // Start new batch
                     current_batch = vec![seq];
-                    current_tokens = seq_len;
                 } else {
                     // Add to current batch
                     current_batch.push(seq);
-                    current_tokens += seq_len;
                 }
             }
 

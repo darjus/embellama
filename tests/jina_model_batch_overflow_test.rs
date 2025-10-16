@@ -14,12 +14,13 @@
 
 //! Integration tests for batch overflow handling with Jina model
 //!
-//! This test reproduces the GGML assertion failure when processing batches
-//! that exceed the effective max tokens limit (ctx_size - embedding_dimensions - padding).
+//! This test validates batch processing with per-sequence token limits.
+//! Each sequence gets its own KV cache slot of size: context_size / n_seq_max.
 //!
-//! The test is designed to fail initially (TDD red phase) and pass after implementing:
-//! 1. effective_max_tokens() method
-//! 2. Batch splitting logic that respects effective_max
+//! The test validates:
+//! 1. effective_max_tokens() method returns per-sequence limit
+//! 2. Batch splitting logic respects n_seq_max for parallel processing
+//! 3. Individual sequences are validated against per-sequence limit
 
 use embellama::{EmbeddingEngine, EngineConfig};
 use serial_test::serial;
@@ -95,10 +96,10 @@ fn test_jina_batch_overflow_with_8042_tokens() {
         .unwrap_or("jina-test-model");
 
     // Create engine config with Jina model
-    // Jina models typically have:
-    // - context_size: 8192
-    // - embedding_dimensions: 768
-    // - effective_max should be: 8192 - (768 + 100) = 7324 tokens
+    // Jina models typically have context_size: 8192
+    // With n_seq_max=8:
+    // - Per-sequence effective_max: 8192 / 8 - 2 = 1022 tokens per sequence
+    // - Total capacity: up to 8 sequences in parallel
     let config = EngineConfig::builder()
         .with_model_path(model_path)
         .with_model_name(model_name)
@@ -112,18 +113,13 @@ fn test_jina_batch_overflow_with_8042_tokens() {
     let batch = generate_large_token_batch();
 
     println!("Testing batch with {} sequences", batch.len());
-    println!("Expected total tokens: ~8042 (exceeds effective_max of 7324)");
+    println!("With n_seq_max=8, per-sequence limit is 1022 tokens");
+    println!("This batch will be automatically chunked into multiple batches of 8 sequences");
 
-    // CURRENT STATE (TDD Red Phase):
-    // This test will FAIL with GGML assertion:
-    // "GGML_ASSERT(cparams.n_ubatch >= n_tokens) failed"
-    // Because we're trying to process 8042 tokens which exceeds the
-    // effective max of 7324 (8192 - 768 - 100)
-    //
-    // EXPECTED STATE (After Implementation):
-    // After implementing effective_max_tokens() and batch splitting,
-    // this should PASS by automatically splitting the batch into chunks
-    // that fit within effective_max limit
+    // The batch processor will:
+    // 1. Validate each sequence individually (must be <= 1022 tokens)
+    // 2. Process sequences in chunks of 8 (n_seq_max) in parallel
+    // 3. Automatically handle the 60 sequences across multiple batches (60/8 = 8 batches)
 
     let text_refs: Vec<&str> = batch.iter().map(String::as_str).collect();
     let result = engine.embed_batch(Some(model_name), &text_refs);
@@ -193,24 +189,28 @@ fn test_jina_batch_at_effective_max_boundary() {
 
     let engine = EmbeddingEngine::new(config).expect("Failed to initialize engine");
 
-    // Create a batch that's exactly at the effective_max boundary
-    // For Jina: effective_max = 7324 tokens
-    // We'll create sequences that total approximately 7320 tokens (just under)
+    // Create a batch with sequences at the per-sequence limit
+    // With n_seq_max=8: per-sequence effective_max = 1022 tokens
+    // Each sequence should be close to but under 1022 tokens
 
-    // Average ~122 tokens per sequence = 60 sequences * 122 ≈ 7320 tokens
-    let batch: Vec<String> = (0..60)
+    // Each sequence should be close to 1022 tokens (the per-sequence limit)
+    let batch: Vec<String> = (0..8) // 8 sequences = one full batch at n_seq_max
         .map(|i| {
+            // Create text that's close to 1022 tokens
+            // Approximately 4000 characters ≈ 1000 tokens
+            let padding = "word ".repeat(800);
             format!(
-                "Sequence {}: Testing boundary condition with text that should fit within \
-                effective max tokens limit. This text is carefully sized to test the exact \
-                boundary where batch processing should succeed without splitting.",
-                i
+                "Sequence {}: Testing per-sequence boundary condition. {}",
+                i, padding
             )
         })
         .collect();
 
-    println!("Testing batch at effective_max boundary");
-    println!("Expected total tokens: ~7320 (just under effective_max of 7324)");
+    println!("Testing batch at per-sequence effective_max boundary");
+    println!(
+        "Each of {} sequences is close to 1022 tokens (per-sequence limit)",
+        batch.len()
+    );
 
     let text_refs: Vec<&str> = batch.iter().map(String::as_str).collect();
     let result = engine.embed_batch(Some(model_name), &text_refs);
