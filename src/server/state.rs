@@ -299,8 +299,9 @@ impl AppState {
 
         let engine = EmbeddingEngine::get_or_init(engine_config)?;
 
-        // Create the dispatcher with worker pool
-        let dispatcher = Dispatcher::new(config.worker_count, config.queue_size);
+        // Create the dispatcher with inference worker
+        // Use n_seq_max as the batch size to match model's parallel processing capacity
+        let dispatcher = Dispatcher::new(config.n_seq_max as usize, config.queue_size);
 
         Ok(Self {
             dispatcher: Arc::new(dispatcher),

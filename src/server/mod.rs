@@ -49,6 +49,7 @@ pub mod cache_handlers;
 pub mod channel;
 pub mod dispatcher;
 pub mod handlers;
+pub mod inference_worker;
 pub mod middleware;
 pub mod state;
 pub mod worker;
