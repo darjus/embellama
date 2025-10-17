@@ -50,7 +50,6 @@ fn create_test_config(model_path: PathBuf, name: &str) -> EngineConfig {
     EngineConfig::builder()
         .with_model_path(model_path)
         .with_model_name(name)
-        .with_context_size(2048) // Increased from 512 to accommodate embedding overhead
         .with_n_threads(1)
         .with_normalization_mode(NormalizationMode::L2)
         .with_pooling_strategy(PoolingStrategy::Mean)
@@ -77,7 +76,6 @@ fn test_engine_creation_and_embedding() {
     let config = EngineConfig::builder()
         .with_model_path(model_path)
         .with_model_name("test-model")
-        .with_context_size(2048) // Increased from 512 to accommodate embedding overhead
         .with_normalization_mode(if normalize {
             NormalizationMode::L2
         } else {

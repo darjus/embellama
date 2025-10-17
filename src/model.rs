@@ -218,6 +218,16 @@ impl EmbeddingModel {
 
         // Set context size (use context_size if specified, otherwise use n_ctx)
         let context_size = config.context_size.unwrap_or(ctx_size);
+
+        // Validate context_size doesn't exceed GGUF maximum
+        if context_size > ctx_size {
+            return Err(Error::ConfigurationError {
+                message: format!(
+                    "context_size ({context_size}) cannot exceed maximum context size from GGUF metadata ({ctx_size})"
+                ),
+            });
+        }
+
         let n_ctx = NonZeroU32::new(context_size);
         ctx_params = ctx_params.with_n_ctx(n_ctx);
 
@@ -228,8 +238,8 @@ impl EmbeddingModel {
         }
 
         // Set batch size (max usable context per sequence)
-        // Default: context_size (full context available for single sequences)
-        let n_batch = config.n_batch.unwrap_or(context_size);
+        // Default: min(ctx_size, 2048) for reasonable memory usage
+        let n_batch = config.n_batch.unwrap_or(ctx_size.min(2048));
         debug!("Setting n_batch={} (max usable context)", n_batch);
 
         // Validate n_batch <= context_size
@@ -331,7 +341,7 @@ impl EmbeddingModel {
             model_name: config.model_name.clone(),
             embedding_dimensions,
             #[allow(clippy::cast_lossless)]
-            max_context_size: ctx_size as usize,
+            max_context_size: context_size as usize,
             n_seq_max,
             n_batch: Some(n_batch),
             metadata,
@@ -339,11 +349,11 @@ impl EmbeddingModel {
 
         // Log effective max tokens for debugging batch size issues
         let effective_max = model.effective_max_tokens();
+        let usable_context = model.n_batch.map_or(model.max_context_size, |b| b as usize);
+        let overhead = usable_context.saturating_sub(effective_max);
         info!(
-            "Effective max tokens: {} (context: {}, overhead: {})",
-            effective_max,
-            model.max_context_size,
-            model.max_context_size - effective_max
+            "Effective max tokens: {} (usable_context: {}, overhead: {})",
+            effective_max, usable_context, overhead
         );
 
         Ok(model)
@@ -822,14 +832,12 @@ impl EmbeddingModel {
         let effective_max = self.effective_max_tokens();
         if token_count > effective_max {
             let context_prefix = context_hint.map_or_else(String::new, |h| format!("{h} "));
+            let usable_context = self.n_batch.map_or(self.max_context_size, |b| b as usize);
+            let overhead = usable_context.saturating_sub(effective_max);
             return Err(Error::InvalidInput {
                 message: format!(
-                    "{}exceeds effective maximum tokens: {} tokens > {} effective max (context: {}, overhead: {}). Please truncate your input.",
-                    context_prefix,
-                    token_count,
-                    effective_max,
-                    self.max_context_size,
-                    self.max_context_size - effective_max
+                    "{context_prefix}exceeds effective maximum tokens: {token_count} tokens > {effective_max} effective max (context: {}, overhead: {overhead}). Please truncate your input.",
+                    self.max_context_size
                 ),
             });
         }
