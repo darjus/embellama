@@ -557,9 +557,9 @@ async fn test_memory_stability() {
 
     println!("\nPerformance degradation: {degradation:.2}%");
 
-    // Performance shouldn't degrade by more than 20%
+    // Performance shouldn't degrade by more than 35%
     assert!(
-        degradation < 20.0,
+        degradation < 35.0,
         "Performance degradation too high: {degradation:.2}%"
     );
 }

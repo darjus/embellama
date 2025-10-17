@@ -485,7 +485,7 @@ impl EmbeddingModel {
     /// Each sequence slot size = `n_batch / n_seq_max - 2`
     /// - `n_batch` represents the max usable context per sequence (defaults to `context_size`)
     /// - The division accounts for parallel sequence processing
-    /// - The 2-token overhead is for special tokens ([CLS], [SEP])
+    /// - The 2-token overhead is for special tokens (\[CLS\], \[SEP\])
     ///
     /// # Example
     ///
