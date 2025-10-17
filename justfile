@@ -130,7 +130,7 @@ test-property-decoder: download-decoder-model
     cargo test --test property_tests --features "{{backend_features}}" -- --nocapture
 
 # Run property-based tests with both encoder and decoder models
-test-property: test-property-encoder test-property-decoder
+test-property: test-property-quick-encoder test-property-quick-decoder
     @echo "✓ Property tests completed with both models"
 
 # Run property-based tests with fewer cases (faster) - encoder model

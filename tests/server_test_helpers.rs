@@ -49,7 +49,7 @@ impl TestServer {
     ///
     /// Panics if the model path cannot be converted to a string
     pub async fn spawn(model_path: PathBuf, workers: usize) -> Result<Self, String> {
-        Self::spawn_with_config(model_path, workers, None).await
+        Self::spawn_with_config(model_path, workers, Some(1)).await
     }
 
     /// Spawn a test server with the given configuration and optional n_seq_max
