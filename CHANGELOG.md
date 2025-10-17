@@ -5,6 +5,38 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.7.0] - 2025-10-17
+
+### Bug Fixes
+
+- Clear KV cache before embedding generation to prevent contamination ([108656c](https://github.com/darjus/embellama/commit/108656c2ab7e7acf8eefbd2072eb47cb04b63594))
+- Remove unsafe logging from Drop implementation to prevent TLS panics ([ef1283f](https://github.com/darjus/embellama/commit/ef1283f8ed8268ad88b4e2c3d606a23ad39d4670))
+- Ignore batch ordering for now ([9ad73da](https://github.com/darjus/embellama/commit/9ad73daeb898bfd82744c28ca5a255c3e2db3d33))
+- Align normalization with llama-server behavior ([41481ff](https://github.com/darjus/embellama/commit/41481ffc89641d38d46e920aa39caa56117da96c))
+- Make test_config_with_backend_detection work without environment variable ([b26ca9f](https://github.com/darjus/embellama/commit/b26ca9fbb17bf3f2ea9c978c6ee2e84d11899875))
+- Set bos token to always for embeddings ([7fa03eb](https://github.com/darjus/embellama/commit/7fa03eb07aa78ea2a01eefe74157ef365bab3db6))
+- Fix rustdoc ([1d824dc](https://github.com/darjus/embellama/commit/1d824dc4c480ed1436e921bf01e7ab87a638ec70))
+- Correct effective_max_tokens to account for per-sequence batching ([5b0049e](https://github.com/darjus/embellama/commit/5b0049e8623c462be952c777f55a8add3299321e))
+- Add context_size validation and prevent integer overflow ([7df53c8](https://github.com/darjus/embellama/commit/7df53c8799941350a8676c314fc8701809882099))
+- Update justfile tests to run quick property tests, fix server API tests with n_seq_max ([2a63a2b](https://github.com/darjus/embellama/commit/2a63a2b3684f8ee792089302eddb25c9d5df4495))
+- Fix doc and small tweak to perf test for CI ([87c4c2f](https://github.com/darjus/embellama/commit/87c4c2ff32b1b6b4a9e8694891c7e888af5f40f9))
+
+### Features
+
+- Add decoder model testing support to justfile ([dd26960](https://github.com/darjus/embellama/commit/dd2696083a9f4df94e481fd137458662e7a40b15))
+- Replace gguf crate with custom GGUF metadata reader ([955f6f2](https://github.com/darjus/embellama/commit/955f6f2988e984aa71e2c703f063e3b9bb6d0519))
+- Add configurable context size for property tests ([eb07737](https://github.com/darjus/embellama/commit/eb07737ab957a93a6e0d05f940072949fe9f4db4))
+- Expose pooling and normalization settings through server CLI ([2cc9697](https://github.com/darjus/embellama/commit/2cc9697110799f658fb5ecdc3e1bc675d949f168))
+- Add n_batch parameter for max usable context control ([6fdf866](https://github.com/darjus/embellama/commit/6fdf8663af990df1774b16a58602680289538635))
+
+### Refactoring
+
+- Eliminate code duplication in model.rs ([fd627e3](https://github.com/darjus/embellama/commit/fd627e36e7370b2b7c8b99798140ee803ba69118))
+- Remove deprecated methods and fields, updates to use model config ([01b100b](https://github.com/darjus/embellama/commit/01b100bf14570d3bf5e08e396b611f3c7c5ea536))
+- Remove BOS token detection logic ([35607d3](https://github.com/darjus/embellama/commit/35607d3e1a3b7fdd54494095d5c8c1fca87d5d6e))
+- Unify n_seq_max handling across encoder and decoder models ([4de65f4](https://github.com/darjus/embellama/commit/4de65f4d4b6c06a405b65584eeda548eb56622df))
+- Consolidate to single inference worker thread per model ([7f574e2](https://github.com/darjus/embellama/commit/7f574e27395fc0c0fec371d614f3b8570fb3ab46))
+
 ## [0.6.1] - 2025-10-08
 
 ### Bug Fixes
