@@ -18,27 +18,31 @@
 
 mod server_test_helpers;
 
-use embellama::server::{AppState, FileModelProvider, ModelProvider, ServerConfig, create_router};
+use embellama::server::{
+    AppState, EngineConfig, FileModelProvider, ModelProvider, ServerConfig, create_router,
+};
 use server_test_helpers::*;
 use std::path::PathBuf;
 
 #[test]
 fn test_server_config_builder() {
-    // Test building with required fields
-    let config = ServerConfig::builder()
-        .model_path("/path/to/model.gguf")
+    let model_path = match get_test_model_path() {
+        Ok(path) => path,
+        Err(_) => {
+            eprintln!("Skipping test_server_config_builder: test model not found");
+            return;
+        }
+    };
+
+    // Test building with explicit EngineConfig
+    let engine_config = EngineConfig::builder()
+        .with_model_path(model_path.to_string_lossy().to_string())
+        .with_model_name("custom-model")
         .build()
-        .expect("Should build with model_path");
+        .expect("Should build engine config");
 
-    assert_eq!(config.model_path, "/path/to/model.gguf");
-    assert_eq!(config.model_name, "default");
-    assert_eq!(config.host, "127.0.0.1");
-    assert_eq!(config.port, 8080);
-
-    // Test building with all fields
     let config = ServerConfig::builder()
-        .model_path("/custom/model.gguf")
-        .model_name("custom-model")
+        .engine_config(engine_config)
         .host("0.0.0.0")
         .port(9000)
         .worker_count(4)
@@ -46,22 +50,37 @@ fn test_server_config_builder() {
         .build()
         .expect("Should build with all fields");
 
-    assert_eq!(config.model_path, "/custom/model.gguf");
-    assert_eq!(config.model_name, "custom-model");
+    assert_eq!(config.engine_config.model_config.model_path, model_path);
+    assert_eq!(config.engine_config.model_config.model_name, "custom-model");
     assert_eq!(config.host, "0.0.0.0");
     assert_eq!(config.port, 9000);
     assert_eq!(config.worker_count, 4);
     assert_eq!(config.queue_size, 200);
+
+    // Test that default values are applied
+    let engine_config2 = EngineConfig::builder()
+        .with_model_path(model_path.to_string_lossy().to_string())
+        .with_model_name("test-model")
+        .build()
+        .expect("Should build engine config");
+
+    let config2 = ServerConfig::builder()
+        .engine_config(engine_config2)
+        .build()
+        .expect("Should build with defaults");
+
+    assert_eq!(config2.host, "127.0.0.1");
+    assert_eq!(config2.port, 8080);
 }
 
 #[test]
-fn test_server_config_builder_requires_model_path() {
-    // Test that building without model_path fails
+fn test_server_config_builder_requires_engine_config() {
+    // Test that building without engine_config fails
     let result = ServerConfig::builder().build();
 
     assert!(result.is_err());
     if let Err(e) = result {
-        assert!(e.to_string().contains("Model path is required"));
+        assert!(e.to_string().contains("Engine configuration is required"));
     }
 }
 
@@ -131,9 +150,14 @@ async fn test_file_model_provider_with_real_gguf() {
 async fn test_create_router_with_custom_state() {
     let model_path = get_test_model_path().expect("Test model not found");
 
+    let engine_config = EngineConfig::builder()
+        .with_model_path(model_path.to_string_lossy().to_string())
+        .with_model_name("library-test-model")
+        .build()
+        .expect("Should build engine config");
+
     let config = ServerConfig::builder()
-        .model_path(model_path.to_string_lossy().to_string())
-        .model_name("library-test-model")
+        .engine_config(engine_config)
         .worker_count(1)
         .build()
         .expect("Should build config");
@@ -152,9 +176,14 @@ async fn test_create_router_with_custom_state() {
 async fn test_nested_router_integration() {
     let model_path = get_test_model_path().expect("Test model not found");
 
+    let engine_config = EngineConfig::builder()
+        .with_model_path(model_path.to_string_lossy().to_string())
+        .with_model_name("nested-test-model")
+        .build()
+        .expect("Should build engine config");
+
     let config = ServerConfig::builder()
-        .model_path(model_path.to_string_lossy().to_string())
-        .model_name("nested-test-model")
+        .engine_config(engine_config)
         .worker_count(1)
         .build()
         .expect("Should build config");

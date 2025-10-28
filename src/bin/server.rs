@@ -14,7 +14,7 @@
 
 use clap::Parser;
 use embellama::server::ServerConfig;
-use embellama::{NormalizationMode, PoolingStrategy};
+use embellama::{EngineConfig, ModelConfig, NormalizationMode, PoolingStrategy};
 use std::path::PathBuf;
 use tracing::info;
 
@@ -141,28 +141,38 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
         None
     };
 
+    // Build model configuration first
+    let mut model_config_builder = ModelConfig::builder()
+        .with_model_path(args.model_path.to_string_lossy().to_string())
+        .with_model_name(&args.model_name)
+        .with_n_seq_max(args.n_seq_max);
+
+    // Add pooling strategy if specified
+    if let Some(strategy) = pooling_strategy {
+        model_config_builder = model_config_builder.with_pooling_strategy(strategy);
+    }
+
+    // Add normalization mode if specified
+    if let Some(mode) = normalization_mode {
+        model_config_builder = model_config_builder.with_normalization_mode(mode);
+    }
+
+    let model_config = model_config_builder.build()?;
+
+    // Build engine configuration
+    let engine_config = EngineConfig::builder()
+        .with_model_config(model_config)
+        .build()?;
+
     // Create server configuration using the library API
-    let mut config_builder = ServerConfig::builder()
-        .model_name(args.model_name)
-        .model_path(args.model_path.to_string_lossy().to_string())
+    let config = ServerConfig::builder()
+        .engine_config(engine_config)
         .worker_count(args.workers)
         .queue_size(args.queue_size)
         .host(args.host)
         .port(args.port)
         .request_timeout(std::time::Duration::from_secs(args.request_timeout))
-        .n_seq_max(args.n_seq_max);
-
-    // Add pooling strategy if specified
-    if let Some(strategy) = pooling_strategy {
-        config_builder = config_builder.pooling_strategy(strategy);
-    }
-
-    // Add normalization mode if specified
-    if let Some(mode) = normalization_mode {
-        config_builder = config_builder.normalization_mode(mode);
-    }
-
-    let config = config_builder.build()?;
+        .build()?;
 
     // Use the library's run_server function
     embellama::server::run_server(config).await?;

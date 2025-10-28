@@ -185,9 +185,11 @@ pub async fn list_models_handler(State(state): State<AppState>) -> Response {
     // If no models are loaded, return at least the default configured model
     let models = if models.is_empty() {
         // Extract context size for fallback model
-        let context_size = extract_gguf_metadata(Path::new(&state.config.model_path))
-            .ok()
-            .and_then(|metadata| u32::try_from(metadata.context_size).ok());
+        let context_size = extract_gguf_metadata(Path::new(
+            &state.config.engine_config.model_config.model_path,
+        ))
+        .ok()
+        .and_then(|metadata| u32::try_from(metadata.context_size).ok());
         vec![ModelData::new_with_context(
             state.model_name().to_string(),
             context_size,

@@ -28,7 +28,8 @@ use axum::{
 };
 #[cfg(feature = "server")]
 use embellama::server::{
-    AppState, ServerConfig, create_router, inject_request_id, limit_request_size,
+    AppState, EngineConfig, ModelConfig, ServerConfig, create_router, inject_request_id,
+    limit_request_size,
 };
 #[cfg(feature = "server")]
 use serde_json::json;
@@ -77,10 +78,15 @@ async fn example_simple_server(model_path: &str) -> Result<(), Box<dyn std::erro
     println!("\n=== Example 1: Simple Server ===");
     println!("This uses the convenient run_server function");
 
-    // Build configuration using the builder pattern
+    // Build engine configuration first
+    let engine_config = EngineConfig::builder()
+        .with_model_path(model_path)
+        .with_model_name("embedded-model")
+        .build()?;
+
+    // Build server configuration
     let config = ServerConfig::builder()
-        .model_path(model_path)
-        .model_name("embedded-model")
+        .engine_config(engine_config)
         .host("127.0.0.1")
         .port(8081)
         .worker_count(2)
@@ -102,10 +108,15 @@ async fn example_custom_router(model_path: &str) -> Result<(), Box<dyn std::erro
     println!("\n=== Example 2: Custom Router ===");
     println!("This creates a custom router with additional routes");
 
-    // Create configuration
+    // Build engine configuration
+    let engine_config = EngineConfig::builder()
+        .with_model_path(model_path)
+        .with_model_name("custom-model")
+        .build()?;
+
+    // Create server configuration
     let config = ServerConfig::builder()
-        .model_path(model_path)
-        .model_name("custom-model")
+        .engine_config(engine_config)
         .port(8082)
         .build()?;
 
@@ -170,10 +181,15 @@ async fn example_integrated_app(model_path: &str) -> Result<(), Box<dyn std::err
         custom_data: String,
     }
 
-    // Create embedding configuration
+    // Create engine configuration
+    let engine_config = EngineConfig::builder()
+        .with_model_path(model_path)
+        .with_model_name("integrated-model")
+        .build()?;
+
+    // Create embedding server configuration
     let config = ServerConfig::builder()
-        .model_path(model_path)
-        .model_name("integrated-model")
+        .engine_config(engine_config)
         .build()?;
 
     // Create embedding state

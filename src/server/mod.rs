@@ -22,14 +22,22 @@
 //! The server can be embedded into other applications as a library feature:
 //!
 //! ```no_run
-//! use embellama::server::{AppState, ServerConfig, create_router, run_server};
+//! use embellama::server::{
+//!     AppState, ServerConfig, create_router, run_server,
+//!     EngineConfig, ModelConfig
+//! };
 //!
 //! #[tokio::main]
 //! async fn main() -> Result<(), Box<dyn std::error::Error>> {
+//!     // Build engine configuration first
+//!     let engine_config = EngineConfig::builder()
+//!         .with_model_path("/path/to/model.gguf")
+//!         .with_model_name("my-model")
+//!         .build()?;
+//!
 //!     // Option 1: Use the convenient run_server function
 //!     let config = ServerConfig::builder()
-//!         .model_path("/path/to/model.gguf")
-//!         .model_name("my-model")
+//!         .engine_config(engine_config.clone())
 //!         .port(8080)
 //!         .build()?;
 //!
@@ -68,6 +76,9 @@ pub use middleware::{
     extract_request_id, inject_request_id, limit_request_size,
 };
 pub use state::{AppState, ServerConfig, ServerConfigBuilder};
+
+// Re-export configuration types needed for building ServerConfig
+pub use crate::{EngineConfig, ModelConfig, NormalizationMode, PoolingStrategy};
 
 use axum::{
     Router,
@@ -329,8 +340,11 @@ pub fn create_router(state: AppState) -> Router<()> {
 /// # }
 /// ```
 pub async fn run_server(config: ServerConfig) -> crate::Result<()> {
+    let model_path = &config.engine_config.model_config.model_path;
+    let model_name = &config.engine_config.model_config.model_name;
+
     info!("Starting Embellama server v{}", env!("CARGO_PKG_VERSION"));
-    info!("Model: {} ({})", config.model_path, config.model_name);
+    info!("Model: {} ({})", model_path.display(), model_name);
     info!(
         "Workers: {}, Queue size: {}",
         config.worker_count, config.queue_size

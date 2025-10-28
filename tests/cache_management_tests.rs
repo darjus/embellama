@@ -188,7 +188,7 @@ mod server_tests {
     use axum::http::StatusCode;
     use axum_test::TestServer;
     use embellama::server::api_types::{CacheClearResponse, CacheStatsResponse, CacheWarmRequest};
-    use embellama::server::{AppState, ServerConfig, create_router};
+    use embellama::server::{AppState, EngineConfig, ServerConfig, create_router};
     use serde_json::json;
 
     /// Create a test server with caching enabled
@@ -200,9 +200,14 @@ mod server_tests {
             panic!("Test model not found at: {}", model_path);
         }
 
+        let engine_config = EngineConfig::builder()
+            .with_model_path(&model_path)
+            .with_model_name("test-model")
+            .build()
+            .expect("Failed to create engine config");
+
         let config = ServerConfig::builder()
-            .model_path(model_path)
-            .model_name("test-model")
+            .engine_config(engine_config)
             .worker_count(1)
             .queue_size(10)
             .build()
