@@ -5,6 +5,12 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.8.0] - 2025-10-28
+
+### Refactoring
+
+- Eliminate ServerConfig duplication with EngineConfig ([a6d7f26](https://github.com/darjus/embellama/commit/a6d7f26a35ed480d3e05e1d1f5bd2ec52bfc276c))
+
 ## [0.7.0] - 2025-10-17
 
 ### Bug Fixes
