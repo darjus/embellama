@@ -370,6 +370,9 @@ pub struct EngineConfig {
 
     /// Cache configuration
     pub cache: Option<CacheConfig>,
+
+    /// Embedding-specific configuration (truncation, etc.)
+    pub embedding: Option<EmbeddingConfig>,
 }
 
 /// Pooling strategy for combining token embeddings
@@ -409,6 +412,23 @@ pub enum NormalizationMode {
 impl Default for NormalizationMode {
     fn default() -> Self {
         Self::L2
+    }
+}
+
+/// Token truncation strategy for embedding inputs
+#[derive(Debug, Clone, Copy, Serialize, Deserialize, PartialEq, Eq)]
+pub enum TruncateTokens {
+    /// Don't truncate - let the model handle the tokens (may error if exceeds max)
+    No,
+    /// Truncate to model's `effective_max_tokens` (automatically adapts to model capacity)
+    Yes,
+    /// Truncate to specific limit (must be > 0 and <= `effective_max_tokens` at runtime)
+    Limit(u32),
+}
+
+impl Default for TruncateTokens {
+    fn default() -> Self {
+        Self::No
     }
 }
 
@@ -613,6 +633,87 @@ impl CacheConfigBuilder {
     }
 }
 
+/// Configuration for embedding-specific settings
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct EmbeddingConfig {
+    /// Token truncation strategy
+    pub truncate_tokens: TruncateTokens,
+}
+
+impl Default for EmbeddingConfig {
+    fn default() -> Self {
+        Self {
+            truncate_tokens: TruncateTokens::No,
+        }
+    }
+}
+
+impl EmbeddingConfig {
+    /// Create a new embedding configuration builder
+    pub fn builder() -> EmbeddingConfigBuilder {
+        EmbeddingConfigBuilder::new()
+    }
+
+    /// Validate the embedding configuration
+    ///
+    /// # Errors
+    ///
+    /// Returns an error if the configuration is invalid:
+    /// - Limit is 0
+    pub fn validate(&self) -> Result<()> {
+        if let TruncateTokens::Limit(n) = self.truncate_tokens
+            && n == 0
+        {
+            return Err(Error::config("Truncation limit must be greater than 0"));
+        }
+        Ok(())
+    }
+}
+
+/// Builder for `EmbeddingConfig`
+pub struct EmbeddingConfigBuilder {
+    config: EmbeddingConfig,
+}
+
+impl Default for EmbeddingConfigBuilder {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
+impl EmbeddingConfigBuilder {
+    /// Create a new builder with default configuration
+    pub fn new() -> Self {
+        Self {
+            config: EmbeddingConfig::default(),
+        }
+    }
+
+    /// Set the truncation strategy
+    #[must_use]
+    pub fn with_truncate_tokens(mut self, truncate: TruncateTokens) -> Self {
+        self.config.truncate_tokens = truncate;
+        self
+    }
+
+    /// Set truncation to a specific limit (convenience method)
+    #[must_use]
+    pub fn with_truncate_limit(mut self, limit: u32) -> Self {
+        self.config.truncate_tokens = TruncateTokens::Limit(limit);
+        self
+    }
+
+    /// Build the configuration
+    ///
+    /// # Errors
+    ///
+    /// Returns an error if the configuration validation fails
+    pub fn build(self) -> Result<EmbeddingConfig> {
+        self.config.validate()?;
+        Ok(self.config)
+    }
+}
+
 impl EngineConfig {
     /// Create a new configuration builder
     pub fn builder() -> EngineConfigBuilder {
@@ -664,6 +765,11 @@ impl EngineConfig {
         // Validate cache configuration if present
         if let Some(ref cache) = self.cache {
             cache.validate()?;
+        }
+
+        // Validate embedding configuration if present
+        if let Some(ref embedding) = self.embedding {
+            embedding.validate()?;
         }
 
         Ok(())
@@ -888,6 +994,30 @@ impl EngineConfigBuilder {
     pub fn with_cache_disabled(mut self) -> Self {
         self.config.cache = None;
         self
+    }
+
+    /// Set embedding configuration
+    #[must_use]
+    pub fn with_embedding_config(mut self, embedding: EmbeddingConfig) -> Self {
+        self.config.embedding = Some(embedding);
+        self
+    }
+
+    /// Set truncation strategy (convenience method)
+    #[must_use]
+    pub fn with_truncate_tokens(mut self, truncate: TruncateTokens) -> Self {
+        let embedding = self
+            .config
+            .embedding
+            .get_or_insert_with(EmbeddingConfig::default);
+        embedding.truncate_tokens = truncate;
+        self
+    }
+
+    /// Set truncation to a specific limit (convenience method)
+    #[must_use]
+    pub fn with_truncate_limit(self, limit: u32) -> Self {
+        self.with_truncate_tokens(TruncateTokens::Limit(limit))
     }
 
     /// Build the configuration
@@ -1350,5 +1480,176 @@ mod tests {
 
         assert!(!config.use_gpu);
         assert_eq!(config.model_config.n_gpu_layers, Some(10));
+    }
+
+    // ============================================================================
+    // Truncation Tests
+    // ============================================================================
+
+    #[test]
+    fn test_truncate_tokens_default() {
+        assert_eq!(TruncateTokens::default(), TruncateTokens::No);
+    }
+
+    #[test]
+    fn test_truncate_tokens_variants() {
+        // Test equality
+        assert_eq!(TruncateTokens::No, TruncateTokens::No);
+        assert_eq!(TruncateTokens::Yes, TruncateTokens::Yes);
+        assert_eq!(TruncateTokens::Limit(50), TruncateTokens::Limit(50));
+        assert_ne!(TruncateTokens::No, TruncateTokens::Yes);
+        assert_ne!(TruncateTokens::Limit(50), TruncateTokens::Limit(100));
+    }
+
+    #[test]
+    fn test_embedding_config_validation_limit_zero() {
+        let config = EmbeddingConfig {
+            truncate_tokens: TruncateTokens::Limit(0),
+        };
+        let result = config.validate();
+        assert!(result.is_err());
+        assert!(
+            result
+                .unwrap_err()
+                .to_string()
+                .contains("must be greater than 0")
+        );
+    }
+
+    #[test]
+    fn test_embedding_config_validation_limit_positive() {
+        let config = EmbeddingConfig {
+            truncate_tokens: TruncateTokens::Limit(100),
+        };
+        assert!(config.validate().is_ok());
+    }
+
+    #[test]
+    fn test_embedding_config_validation_yes_and_no() {
+        let config_no = EmbeddingConfig {
+            truncate_tokens: TruncateTokens::No,
+        };
+        assert!(config_no.validate().is_ok());
+
+        let config_yes = EmbeddingConfig {
+            truncate_tokens: TruncateTokens::Yes,
+        };
+        assert!(config_yes.validate().is_ok());
+    }
+
+    #[test]
+    fn test_embedding_config_builder() {
+        let config = EmbeddingConfig::builder()
+            .with_truncate_tokens(TruncateTokens::Yes)
+            .build()
+            .unwrap();
+        assert_eq!(config.truncate_tokens, TruncateTokens::Yes);
+    }
+
+    #[test]
+    fn test_embedding_config_builder_limit() {
+        let config = EmbeddingConfig::builder()
+            .with_truncate_limit(500)
+            .build()
+            .unwrap();
+        assert_eq!(config.truncate_tokens, TruncateTokens::Limit(500));
+    }
+
+    #[test]
+    fn test_embedding_config_builder_validation() {
+        // Valid config should build successfully
+        let result = EmbeddingConfig::builder().with_truncate_limit(100).build();
+        assert!(result.is_ok());
+
+        // Invalid config (Limit(0)) should fail
+        let result = EmbeddingConfig::builder().with_truncate_limit(0).build();
+        assert!(result.is_err());
+    }
+
+    #[test]
+    fn test_engine_config_with_truncate_tokens() {
+        let dir = tempdir().unwrap();
+        let model_path = dir.path().join("model.gguf");
+        fs::write(&model_path, b"dummy").unwrap();
+
+        let config = EngineConfig::builder()
+            .with_model_path(&model_path)
+            .with_model_name("test")
+            .with_truncate_tokens(TruncateTokens::Yes)
+            .build()
+            .unwrap();
+
+        assert!(config.embedding.is_some());
+        assert_eq!(
+            config.embedding.unwrap().truncate_tokens,
+            TruncateTokens::Yes
+        );
+    }
+
+    #[test]
+    fn test_engine_config_with_truncate_limit() {
+        let dir = tempdir().unwrap();
+        let model_path = dir.path().join("model.gguf");
+        fs::write(&model_path, b"dummy").unwrap();
+
+        let config = EngineConfig::builder()
+            .with_model_path(&model_path)
+            .with_model_name("test")
+            .with_truncate_limit(256)
+            .build()
+            .unwrap();
+
+        assert!(config.embedding.is_some());
+        assert_eq!(
+            config.embedding.unwrap().truncate_tokens,
+            TruncateTokens::Limit(256)
+        );
+    }
+
+    #[test]
+    fn test_engine_config_with_embedding_config() {
+        let dir = tempdir().unwrap();
+        let model_path = dir.path().join("model.gguf");
+        fs::write(&model_path, b"dummy").unwrap();
+
+        let embedding_config = EmbeddingConfig {
+            truncate_tokens: TruncateTokens::Limit(512),
+        };
+
+        let config = EngineConfig::builder()
+            .with_model_path(&model_path)
+            .with_model_name("test")
+            .with_embedding_config(embedding_config.clone())
+            .build()
+            .unwrap();
+
+        assert!(config.embedding.is_some());
+        assert_eq!(
+            config.embedding.unwrap().truncate_tokens,
+            TruncateTokens::Limit(512)
+        );
+    }
+
+    #[test]
+    fn test_engine_config_validation_with_truncation() {
+        let dir = tempdir().unwrap();
+        let model_path = dir.path().join("model.gguf");
+        fs::write(&model_path, b"dummy").unwrap();
+
+        // Valid truncation should pass
+        let result = EngineConfig::builder()
+            .with_model_path(&model_path)
+            .with_model_name("test")
+            .with_truncate_limit(100)
+            .build();
+        assert!(result.is_ok());
+
+        // Invalid truncation (Limit(0)) should fail
+        let result = EngineConfig::builder()
+            .with_model_path(&model_path)
+            .with_model_name("test")
+            .with_truncate_limit(0)
+            .build();
+        assert!(result.is_err());
     }
 }

@@ -19,7 +19,7 @@
 //! for pre/post-processing while respecting the single-threaded constraint of
 //! model inference.
 
-use crate::config::PoolingStrategy;
+use crate::config::{PoolingStrategy, TruncateTokens};
 use crate::error::{Error, Result};
 use crate::model::EmbeddingModel;
 use llama_cpp_2::token::LlamaToken;
@@ -78,6 +78,7 @@ impl BatchProcessor {
     ///
     /// * `model` - The embedding model to use
     /// * `texts` - Vector of texts to process
+    /// * `truncate` - Truncation strategy to apply to all texts
     ///
     /// # Returns
     ///
@@ -89,11 +90,13 @@ impl BatchProcessor {
     /// - Any text fails tokenization
     /// - Model inference fails
     /// - Memory allocation fails
+    /// - Truncation limit exceeds model's effective maximum
     #[instrument(skip(self, model, texts), fields(batch_size = texts.len()))]
     pub fn process_batch(
         &self,
         model: &mut EmbeddingModel,
         texts: &[&str],
+        truncate: TruncateTokens,
     ) -> Result<Vec<Vec<f32>>> {
         if texts.is_empty() {
             return Ok(Vec::new());
@@ -128,7 +131,7 @@ impl BatchProcessor {
                 token_sequences.len()
             );
 
-            let batch_embeddings = model.process_batch_tokens(&token_sequences)?;
+            let batch_embeddings = model.process_batch_tokens(&token_sequences, truncate)?;
 
             // Update progress
             let current = progress_counter.fetch_add(texts.len(), Ordering::Relaxed);
@@ -152,7 +155,7 @@ impl BatchProcessor {
                 // Check if adding this sequence would exceed n_seq_max
                 if !current_batch.is_empty() && current_batch.len() >= n_seq_max {
                     // Process current batch
-                    let batch_embeddings = model.process_batch_tokens(&current_batch)?;
+                    let batch_embeddings = model.process_batch_tokens(&current_batch, truncate)?;
                     let batch_len = batch_embeddings.len();
                     all_embeddings.extend(batch_embeddings);
 
@@ -172,7 +175,7 @@ impl BatchProcessor {
 
             // Process remaining batch
             if !current_batch.is_empty() {
-                let batch_embeddings = model.process_batch_tokens(&current_batch)?;
+                let batch_embeddings = model.process_batch_tokens(&current_batch, truncate)?;
                 let batch_len = batch_embeddings.len();
 
                 // Update progress

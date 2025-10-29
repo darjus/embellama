@@ -54,6 +54,8 @@ pub struct EmbeddingsRequest {
     pub dimensions: Option<usize>,
     /// Optional user identifier for tracking
     pub user: Option<String>,
+    /// Optional truncation strategy (overrides model default)
+    pub truncate: Option<crate::config::TruncateTokens>,
 }
 
 fn default_encoding_format() -> String {

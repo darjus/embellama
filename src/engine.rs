@@ -23,7 +23,7 @@ use crate::cache::embedding_cache::EmbeddingCache;
 use crate::cache::prefix_cache::PrefixCache;
 use crate::cache::token_cache::TokenCache;
 use crate::cache::{CacheStats, CacheStore};
-use crate::config::{EngineConfig, NormalizationMode};
+use crate::config::{EngineConfig, NormalizationMode, TruncateTokens};
 use crate::error::{Error, Result};
 use crate::model::EmbeddingModel;
 use llama_cpp_2::llama_backend::LlamaBackend;
@@ -581,18 +581,24 @@ impl EmbeddingEngine {
                 message: "No model specified and no default model set".to_string(),
             })?;
 
+        // Get model config (needed for both caching and truncation)
+        let config = self
+            .model_configs
+            .read()
+            .get(&model_name)
+            .ok_or_else(|| Error::ModelNotFound {
+                name: model_name.clone(),
+            })?
+            .clone();
+
+        // Get truncation setting from config
+        let truncate = config
+            .embedding
+            .as_ref()
+            .map_or(TruncateTokens::No, |e| e.truncate_tokens);
+
         // Check cache first if enabled
         if let Some(cache) = &self.embedding_cache {
-            // Get model config for cache key generation
-            let config = self
-                .model_configs
-                .read()
-                .get(&model_name)
-                .ok_or_else(|| Error::ModelNotFound {
-                    name: model_name.clone(),
-                })?
-                .clone();
-
             // Compute cache key
             let key = EmbeddingCache::compute_key(
                 text,
@@ -640,6 +646,7 @@ impl EmbeddingEngine {
                             text,
                             Some(prefix_cache.as_ref()),
                             cache_ref.as_deref(),
+                            truncate,
                         )
                     });
                 }
@@ -653,7 +660,7 @@ impl EmbeddingEngine {
             THREAD_TOKEN_CACHE.with(|tc| {
                 let cache_ref = tc.borrow();
                 if let Some(ref cache) = *cache_ref {
-                    model.generate_embedding_cached(text, Some(cache.as_ref()))
+                    model.generate_embedding_cached(text, Some(cache.as_ref()), truncate)
                 } else {
                     model.generate_embedding(text)
                 }
@@ -725,6 +732,12 @@ impl EmbeddingEngine {
             })?
             .clone();
 
+        // Get truncation setting from config
+        let truncate = config
+            .embedding
+            .as_ref()
+            .map_or(TruncateTokens::No, |e| e.truncate_tokens);
+
         // If cache is enabled, check for cached embeddings
         let mut results = Vec::with_capacity(texts.len());
         let mut uncached_indices = Vec::new();
@@ -785,7 +798,7 @@ impl EmbeddingEngine {
                     name: model_name.clone(),
                 })?;
 
-            batch_processor.process_batch(model, &uncached_texts)
+            batch_processor.process_batch(model, &uncached_texts, truncate)
         })?;
 
         // Update cache and results

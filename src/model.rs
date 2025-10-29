@@ -19,7 +19,7 @@
 
 use crate::cache::CacheStore;
 use crate::cache::token_cache::TokenCache;
-use crate::config::{ModelConfig, NormalizationMode, PoolingStrategy};
+use crate::config::{ModelConfig, NormalizationMode, PoolingStrategy, TruncateTokens};
 use crate::error::{Error, Result};
 use crate::gguf;
 use llama_cpp_2::context::LlamaContext;
@@ -580,7 +580,7 @@ impl EmbeddingModel {
     /// - Model inference fails
     #[instrument(skip(self, text), fields(text_len = text.len()))]
     pub fn generate_embedding(&mut self, text: &str) -> Result<Vec<f32>> {
-        self.generate_embedding_cached(text, None)
+        self.generate_embedding_cached(text, None, TruncateTokens::No)
     }
 
     /// Generates an embedding for the given text with optional token cache support.
@@ -589,6 +589,7 @@ impl EmbeddingModel {
     ///
     /// * `text` - The input text to generate embeddings for
     /// * `token_cache` - Optional token cache for caching tokenization results
+    /// * `truncate` - Truncation strategy to apply
     ///
     /// # Returns
     ///
@@ -598,13 +599,15 @@ impl EmbeddingModel {
     ///
     /// This function will return an error if:
     /// - Tokenization fails
-    /// - The input exceeds the maximum token limit
+    /// - The input exceeds the maximum token limit (when truncation is disabled)
     /// - Model inference fails
+    /// - Truncation limit exceeds model's effective maximum
     #[instrument(skip(self, text, token_cache), fields(text_len = text.len()))]
     pub fn generate_embedding_cached(
         &mut self,
         text: &str,
         token_cache: Option<&TokenCache>,
+        truncate: TruncateTokens,
     ) -> Result<Vec<f32>> {
         // Validate input
         if text.is_empty() {
@@ -616,13 +619,19 @@ impl EmbeddingModel {
         // Tokenize the text with caching support
         let tokens = self.tokenize_cached(text, token_cache)?;
 
-        // Validate token limit
+        // Resolve truncation limit
+        let truncation_limit = self.resolve_truncation_limit(truncate)?;
+
+        // Apply truncation if needed
+        let tokens = Self::truncate_tokens_if_needed(&tokens, truncation_limit);
+
+        // Validate token limit (after truncation)
         self.validate_token_limit(tokens.len(), Some("Input"))?;
 
-        debug!("Tokenized text into {} tokens", tokens.len());
+        debug!("Processing {} tokens", tokens.len());
 
         // Process tokens to get embeddings
-        let embeddings = self.process_tokens_internal(&tokens)?;
+        let embeddings = self.process_tokens_internal(tokens)?;
 
         // Apply pooling and normalization
         self.finalize_embedding(&embeddings, tokens.len())
@@ -637,6 +646,7 @@ impl EmbeddingModel {
     /// # Arguments
     ///
     /// * `token_sequences` - Slice of token sequences to process
+    /// * `truncate` - Truncation strategy to apply to each sequence
     ///
     /// # Returns
     ///
@@ -649,10 +659,12 @@ impl EmbeddingModel {
     /// - Batch processing fails
     /// - Embedding extraction fails
     /// - Pooling or normalization operations fail
+    /// - Truncation limit exceeds model's effective maximum
     #[instrument(skip(self, token_sequences), fields(batch_size = token_sequences.len()))]
     pub fn process_batch_tokens(
         &mut self,
         token_sequences: &[Vec<LlamaToken>],
+        truncate: TruncateTokens,
     ) -> Result<Vec<Vec<f32>>> {
         if token_sequences.is_empty() {
             return Ok(Vec::new());
@@ -679,7 +691,7 @@ impl EmbeddingModel {
             #[allow(clippy::cast_lossless)]
             for chunk in token_sequences.chunks(self.n_seq_max as usize) {
                 debug!("Processing chunk of {} sequences", chunk.len());
-                let chunk_embeddings = self.process_batch_tokens_internal(chunk)?;
+                let chunk_embeddings = self.process_batch_tokens_internal(chunk, truncate)?;
                 all_embeddings.extend(chunk_embeddings);
             }
 
@@ -687,7 +699,7 @@ impl EmbeddingModel {
         }
 
         // Process all sequences in a single batch
-        self.process_batch_tokens_internal(token_sequences)
+        self.process_batch_tokens_internal(token_sequences, truncate)
     }
 
     /// Internal method to process a batch of token sequences that fits within `n_seq_max`.
@@ -695,16 +707,25 @@ impl EmbeddingModel {
     fn process_batch_tokens_internal(
         &mut self,
         token_sequences: &[Vec<LlamaToken>],
+        truncate: TruncateTokens,
     ) -> Result<Vec<Vec<f32>>> {
-        // Validate each sequence individually against effective max
-        // For BERT-style batching, each sequence is processed independently
-        // and must fit within the model's max_position_embeddings
-        for (i, tokens) in token_sequences.iter().enumerate() {
-            self.validate_token_limit(tokens.len(), Some(&format!("Sequence {i}")))?;
-        }
+        // Resolve truncation limit once for all sequences
+        let truncation_limit = self.resolve_truncation_limit(truncate)?;
 
-        // Calculate total tokens needed for batch allocation
-        let total_tokens: usize = token_sequences.iter().map(std::vec::Vec::len).sum();
+        // Apply truncation and validate each sequence
+        let truncated_sequences: Vec<&[LlamaToken]> = token_sequences
+            .iter()
+            .enumerate()
+            .map(|(i, tokens)| {
+                let truncated = Self::truncate_tokens_if_needed(tokens, truncation_limit);
+                // Validate token limit after truncation
+                self.validate_token_limit(truncated.len(), Some(&format!("Sequence {i}")))?;
+                Ok(truncated)
+            })
+            .collect::<Result<Vec<_>>>()?;
+
+        // Calculate total tokens needed for batch allocation (from truncated sequences)
+        let total_tokens: usize = truncated_sequences.iter().map(|s| s.len()).sum();
 
         // Create a batch with all sequences (using actual n_seq_max)
         let _n_seq_max_i32 =
@@ -715,7 +736,7 @@ impl EmbeddingModel {
         let mut batch = LlamaBatch::new(total_tokens, 1);
 
         // Add each sequence with unique ID
-        for (seq_id, tokens) in token_sequences.iter().enumerate() {
+        for (seq_id, tokens) in truncated_sequences.iter().enumerate() {
             batch
                 .add_sequence(
                     tokens,
@@ -737,24 +758,21 @@ impl EmbeddingModel {
         self.process_batch(&mut batch)?;
 
         // Extract embeddings for each sequence
-        let mut all_embeddings = Vec::with_capacity(token_sequences.len());
+        let mut all_embeddings = Vec::with_capacity(truncated_sequences.len());
 
-        for seq_id in 0..token_sequences.len() {
+        for seq_id in 0..truncated_sequences.len() {
             // Calculate token offset for this sequence
-            let token_offset: usize = token_sequences[..seq_id]
-                .iter()
-                .map(std::vec::Vec::len)
-                .sum();
+            let token_offset: usize = truncated_sequences[..seq_id].iter().map(|s| s.len()).sum();
 
             let embeddings = self.extract_sequence_embeddings(
                 seq_id,
-                token_sequences[seq_id].len(),
+                truncated_sequences[seq_id].len(),
                 Some(token_offset),
             )?;
 
             // Apply pooling and normalization
             let final_embedding =
-                self.finalize_embedding(&embeddings, token_sequences[seq_id].len())?;
+                self.finalize_embedding(&embeddings, truncated_sequences[seq_id].len())?;
             all_embeddings.push(final_embedding);
         }
 
@@ -842,6 +860,77 @@ impl EmbeddingModel {
             });
         }
         Ok(())
+    }
+
+    /// Resolve truncation strategy to a concrete token limit.
+    ///
+    /// # Arguments
+    ///
+    /// * `truncate` - The truncation strategy to resolve
+    ///
+    /// # Returns
+    ///
+    /// Returns `Some(limit)` if truncation should be applied, `None` if no truncation.
+    ///
+    /// # Errors
+    ///
+    /// Returns an error if `Limit(n)` exceeds the model's `effective_max_tokens()`.
+    fn resolve_truncation_limit(&self, truncate: TruncateTokens) -> Result<Option<usize>> {
+        match truncate {
+            TruncateTokens::No => Ok(None),
+            TruncateTokens::Yes => {
+                let limit = self.effective_max_tokens();
+                debug!(
+                    "Truncation enabled: will truncate to {} tokens (model's effective_max_tokens)",
+                    limit
+                );
+                Ok(Some(limit))
+            }
+            TruncateTokens::Limit(n) => {
+                let limit = n as usize;
+                let effective_max = self.effective_max_tokens();
+                if limit > effective_max {
+                    return Err(Error::InvalidInput {
+                        message: format!(
+                            "Truncation limit ({limit}) exceeds model's effective maximum ({effective_max}) tokens"
+                        ),
+                    });
+                }
+                debug!(
+                    "Truncation enabled: will truncate to {} tokens (explicit limit)",
+                    limit
+                );
+                Ok(Some(limit))
+            }
+        }
+    }
+
+    /// Truncate tokens if needed based on the configured limit.
+    ///
+    /// # Arguments
+    ///
+    /// * `tokens` - The token sequence to potentially truncate
+    /// * `limit` - Optional token limit; if `None`, returns the original slice
+    ///
+    /// # Returns
+    ///
+    /// Returns a slice of tokens, truncated to the limit if specified.
+    fn truncate_tokens_if_needed(tokens: &[LlamaToken], limit: Option<usize>) -> &[LlamaToken] {
+        if let Some(limit) = limit {
+            if tokens.len() > limit {
+                debug!(
+                    "Truncating tokens: {} -> {} tokens (keeping first {})",
+                    tokens.len(),
+                    limit,
+                    limit
+                );
+                &tokens[..limit]
+            } else {
+                tokens
+            }
+        } else {
+            tokens
+        }
     }
 
     /// Finalize an embedding by applying pooling and normalization.
@@ -1267,6 +1356,7 @@ impl EmbeddingModel {
     /// * `text` - The input text to generate embeddings for
     /// * `prefix_cache` - Optional reference to the prefix cache
     /// * `token_cache` - Optional reference to the token cache
+    /// * `truncate` - Truncation strategy to apply
     ///
     /// # Returns
     ///
@@ -1274,15 +1364,23 @@ impl EmbeddingModel {
     ///
     /// # Errors
     ///
-    /// Returns an error if embedding generation fails
+    /// Returns an error if embedding generation fails or truncation limit exceeds model maximum
     pub fn generate_embedding_with_prefix(
         &mut self,
         text: &str,
         prefix_cache: Option<&crate::cache::prefix_cache::PrefixCache>,
         token_cache: Option<&TokenCache>,
+        truncate: TruncateTokens,
     ) -> Result<Vec<f32>> {
         // First tokenize to get tokens
         let tokens = self.tokenize_cached(text, token_cache)?;
+
+        // Resolve truncation limit
+        let truncation_limit = self.resolve_truncation_limit(truncate)?;
+
+        // Apply truncation if needed
+        let tokens = Self::truncate_tokens_if_needed(&tokens, truncation_limit);
+
         let tokens_i: Vec<i32> = tokens.iter().map(|t| t.0).collect();
 
         // Check for cached prefix if available
@@ -1323,14 +1421,14 @@ impl EmbeddingModel {
             let suffix_tokens = &tokens[prefix_len..];
             if suffix_tokens.is_empty() {
                 // The entire text was in the prefix, just extract embeddings
-                self.extract_embeddings(&tokens)?
+                self.extract_embeddings(tokens)?
             } else {
                 // Process the suffix and combine
                 self.process_tokens_internal(suffix_tokens)?
             }
         } else {
             // Normal processing without prefix optimization
-            self.process_tokens_internal(&tokens)?
+            self.process_tokens_internal(tokens)?
         };
 
         // Apply pooling and normalization

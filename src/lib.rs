@@ -92,8 +92,9 @@ pub mod server;
 pub use backend::{BackendInfo, BackendType, detect_best_backend, get_compiled_backend};
 pub use batch::{BatchProcessor, BatchProcessorBuilder};
 pub use config::{
-    CacheConfig, CacheConfigBuilder, EngineConfig, EngineConfigBuilder, ModelConfig,
-    ModelConfigBuilder, NormalizationMode, PoolingStrategy,
+    CacheConfig, CacheConfigBuilder, EmbeddingConfig, EmbeddingConfigBuilder, EngineConfig,
+    EngineConfigBuilder, ModelConfig, ModelConfigBuilder, NormalizationMode, PoolingStrategy,
+    TruncateTokens,
 };
 pub use engine::{EmbeddingEngine, ModelInfo};
 pub use error::{Error, Result};
