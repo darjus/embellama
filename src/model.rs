@@ -47,9 +47,12 @@ fn pooling_strategy_to_llama_type(strategy: PoolingStrategy) -> LlamaPoolingType
         PoolingStrategy::Mean => LlamaPoolingType::Mean,
         PoolingStrategy::Cls => LlamaPoolingType::Cls,
         PoolingStrategy::Last => LlamaPoolingType::Last,
-        // Max and MeanSqrt are not natively supported by llama.cpp
-        // We'll apply these strategies ourselves after extraction
-        PoolingStrategy::Max | PoolingStrategy::MeanSqrt => LlamaPoolingType::None,
+        // Max, MeanSqrt, and None are not natively supported by llama.cpp pooling.
+        // For Max/MeanSqrt we apply pooling ourselves after extraction.
+        // For None we return raw per-token embeddings without any pooling.
+        PoolingStrategy::Max | PoolingStrategy::MeanSqrt | PoolingStrategy::None => {
+            LlamaPoolingType::None
+        }
     }
 }
 
@@ -637,6 +640,49 @@ impl EmbeddingModel {
         self.finalize_embedding(&embeddings, tokens.len())
     }
 
+    /// Generates per-token (multi-vector) embeddings for the given text.
+    ///
+    /// Returns one embedding vector per token, suitable for ColBERT-style late
+    /// interaction reranking. Each vector is individually normalized according
+    /// to the model's normalization mode.
+    ///
+    /// # Arguments
+    ///
+    /// * `text` - The input text to generate embeddings for
+    /// * `token_cache` - Optional token cache for caching tokenization results
+    /// * `truncate` - Truncation strategy to apply
+    ///
+    /// # Returns
+    ///
+    /// Returns a vector of embedding vectors, one per token.
+    ///
+    /// # Errors
+    ///
+    /// Returns an error if tokenization or model inference fails.
+    #[instrument(skip(self, text, token_cache), fields(text_len = text.len()))]
+    pub fn generate_multi_embedding(
+        &mut self,
+        text: &str,
+        token_cache: Option<&TokenCache>,
+        truncate: TruncateTokens,
+    ) -> Result<Vec<Vec<f32>>> {
+        if text.is_empty() {
+            return Err(Error::InvalidInput {
+                message: "Cannot generate embedding for empty text".to_string(),
+            });
+        }
+
+        let tokens = self.tokenize_cached(text, token_cache)?;
+        let truncation_limit = self.resolve_truncation_limit(truncate)?;
+        let tokens = Self::truncate_tokens_if_needed(&tokens, truncation_limit);
+        self.validate_token_limit(tokens.len(), Some("Input"))?;
+
+        debug!("Processing {} tokens for multi-vector output", tokens.len());
+
+        let embeddings = self.process_tokens_internal(tokens)?;
+        self.finalize_multi_embedding(&embeddings)
+    }
+
     /// Processes multiple token sequences as a batch through the model.
     ///
     /// This method enables true batch processing by encoding multiple sequences
@@ -777,6 +823,102 @@ impl EmbeddingModel {
         }
 
         Ok(all_embeddings)
+    }
+
+    /// Processes multiple token sequences as a batch, returning per-token (multi-vector) embeddings.
+    ///
+    /// Each input sequence produces a `Vec<Vec<f32>>` — one embedding per token. This is the
+    /// batch equivalent of `generate_multi_embedding` for ColBERT-style late interaction.
+    ///
+    /// # Arguments
+    ///
+    /// * `token_sequences` - Slice of token sequences to process
+    /// * `truncate` - Truncation strategy to apply to each sequence
+    ///
+    /// # Returns
+    ///
+    /// Returns a vector of multi-vector embeddings, one per input sequence.
+    ///
+    /// # Errors
+    ///
+    /// Returns an error if batch processing, embedding extraction, or normalization fails.
+    #[instrument(skip(self, token_sequences), fields(batch_size = token_sequences.len()))]
+    pub fn process_batch_tokens_multi(
+        &mut self,
+        token_sequences: &[Vec<LlamaToken>],
+        truncate: TruncateTokens,
+    ) -> Result<Vec<Vec<Vec<f32>>>> {
+        if token_sequences.is_empty() {
+            return Ok(Vec::new());
+        }
+
+        // Chunk if needed, same as process_batch_tokens
+        #[allow(clippy::cast_lossless)]
+        if token_sequences.len() > self.n_seq_max as usize {
+            let mut all_embeddings = Vec::with_capacity(token_sequences.len());
+            #[allow(clippy::cast_lossless)]
+            for chunk in token_sequences.chunks(self.n_seq_max as usize) {
+                let chunk_embeddings = self.process_batch_tokens_multi_internal(chunk, truncate)?;
+                all_embeddings.extend(chunk_embeddings);
+            }
+            return Ok(all_embeddings);
+        }
+
+        self.process_batch_tokens_multi_internal(token_sequences, truncate)
+    }
+
+    /// Internal method to process a batch returning per-token embeddings.
+    fn process_batch_tokens_multi_internal(
+        &mut self,
+        token_sequences: &[Vec<LlamaToken>],
+        truncate: TruncateTokens,
+    ) -> Result<Vec<Vec<Vec<f32>>>> {
+        let truncation_limit = self.resolve_truncation_limit(truncate)?;
+
+        let truncated_sequences: Vec<&[LlamaToken]> = token_sequences
+            .iter()
+            .enumerate()
+            .map(|(i, tokens)| {
+                let truncated = Self::truncate_tokens_if_needed(tokens, truncation_limit);
+                self.validate_token_limit(truncated.len(), Some(&format!("Sequence {i}")))?;
+                Ok(truncated)
+            })
+            .collect::<Result<Vec<_>>>()?;
+
+        let total_tokens: usize = truncated_sequences.iter().map(|s| s.len()).sum();
+        let mut batch = LlamaBatch::new(total_tokens, 1);
+
+        for (seq_id, tokens) in truncated_sequences.iter().enumerate() {
+            batch
+                .add_sequence(
+                    tokens,
+                    i32::try_from(seq_id).map_err(|_| Error::EmbeddingGenerationError {
+                        message: format!("Sequence ID {seq_id} too large for i32"),
+                        source: None,
+                    })?,
+                    true,
+                )
+                .map_err(|e| Error::EmbeddingGenerationError {
+                    message: format!("Failed to add sequence {seq_id} to batch: {e}"),
+                    source: Some(anyhow::anyhow!(e)),
+                })?;
+        }
+
+        self.process_batch(&mut batch)?;
+
+        let mut all_multi_embeddings = Vec::with_capacity(truncated_sequences.len());
+        for seq_id in 0..truncated_sequences.len() {
+            let token_offset: usize = truncated_sequences[..seq_id].iter().map(|s| s.len()).sum();
+            let embeddings = self.extract_sequence_embeddings(
+                seq_id,
+                truncated_sequences[seq_id].len(),
+                Some(token_offset),
+            )?;
+            let final_embeddings = self.finalize_multi_embedding(&embeddings)?;
+            all_multi_embeddings.push(final_embeddings);
+        }
+
+        Ok(all_multi_embeddings)
     }
 
     /// Processes a batch of tokens through the model.
@@ -970,6 +1112,28 @@ impl EmbeddingModel {
             Ok(pooled)
         } else {
             Self::normalize_embedding(pooled, self.config.normalization_mode)
+        }
+    }
+
+    /// Finalizes per-token embeddings by applying normalization to each token
+    /// embedding individually, without pooling.
+    ///
+    /// Used by `generate_multi_embedding` for ColBERT-style output.
+    fn finalize_multi_embedding(&self, embeddings: &[Vec<f32>]) -> Result<Vec<Vec<f32>>> {
+        if embeddings.is_empty() {
+            return Err(Error::EmbeddingGenerationError {
+                message: "No embeddings to finalize".to_string(),
+                source: None,
+            });
+        }
+
+        if self.config.normalization_mode == NormalizationMode::None {
+            Ok(embeddings.to_vec())
+        } else {
+            embeddings
+                .iter()
+                .map(|emb| Self::normalize_embedding(emb.clone(), self.config.normalization_mode))
+                .collect()
         }
     }
 
@@ -1187,6 +1351,14 @@ impl EmbeddingModel {
                 // Use only the last token (EOS token)
                 // This is required for decoder models like Qwen
                 Ok(embeddings.last().unwrap().clone())
+            }
+            PoolingStrategy::None => {
+                // None strategy should not reach apply_pooling — use generate_multi_embedding instead
+                Err(Error::InvalidOperation {
+                    message: "PoolingStrategy::None does not produce a single embedding vector. \
+                              Use generate_multi_embedding() or embed_multi() for per-token embeddings."
+                        .to_string(),
+                })
             }
         }
     }

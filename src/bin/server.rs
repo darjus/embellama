@@ -79,8 +79,9 @@ fn parse_pooling_strategy(s: &str) -> Result<PoolingStrategy, String> {
         "max" => Ok(PoolingStrategy::Max),
         "mean-sqrt" | "meansqrt" => Ok(PoolingStrategy::MeanSqrt),
         "last" => Ok(PoolingStrategy::Last),
+        "none" => Ok(PoolingStrategy::None),
         _ => Err(format!(
-            "Invalid pooling strategy '{s}'. Valid options: mean, cls, max, mean-sqrt, last"
+            "Invalid pooling strategy '{s}'. Valid options: mean, cls, max, mean-sqrt, last, none"
         )),
     }
 }

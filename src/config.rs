@@ -376,9 +376,10 @@ pub struct EngineConfig {
 }
 
 /// Pooling strategy for combining token embeddings
-#[derive(Debug, Clone, Copy, Serialize, Deserialize, PartialEq, Eq)]
+#[derive(Debug, Default, Clone, Copy, Serialize, Deserialize, PartialEq, Eq)]
 pub enum PoolingStrategy {
     /// Mean pooling across all tokens
+    #[default]
     Mean,
     /// Use only the \[CLS\] token embedding
     Cls,
@@ -388,48 +389,37 @@ pub enum PoolingStrategy {
     MeanSqrt,
     /// Use only the last token embedding (EOS token) - required for decoder models like Qwen
     Last,
-}
-
-impl Default for PoolingStrategy {
-    fn default() -> Self {
-        Self::Mean
-    }
+    /// No pooling — return per-token embeddings for late interaction / ColBERT-style reranking.
+    /// When this strategy is selected, use `embed_multi` / `embed_batch_multi` on the engine
+    /// (or `generate_multi_embedding` on the model) to get `Vec<Vec<f32>>` output.
+    /// The standard `embed` / `generate_embedding` methods will return an error.
+    None,
 }
 
 /// Normalization mode for embedding vectors
-#[derive(Debug, Clone, Copy, Serialize, Deserialize, PartialEq, Eq)]
+#[derive(Debug, Default, Clone, Copy, Serialize, Deserialize, PartialEq, Eq)]
 pub enum NormalizationMode {
     /// No normalization (-1 in llama-server)
     None,
     /// Max absolute normalization scaled to int16 range (0 in llama-server)
     MaxAbs,
     /// L2 (Euclidean) normalization - default (2 in llama-server)
+    #[default]
     L2,
     /// P-norm with custom exponent (N in llama-server)
     PNorm(i32),
 }
 
-impl Default for NormalizationMode {
-    fn default() -> Self {
-        Self::L2
-    }
-}
-
 /// Token truncation strategy for embedding inputs
-#[derive(Debug, Clone, Copy, Serialize, Deserialize, PartialEq, Eq)]
+#[derive(Debug, Default, Clone, Copy, Serialize, Deserialize, PartialEq, Eq)]
 pub enum TruncateTokens {
     /// Don't truncate - let the model handle the tokens (may error if exceeds max)
+    #[default]
     No,
     /// Truncate to model's `effective_max_tokens` (automatically adapts to model capacity)
     Yes,
     /// Truncate to specific limit (must be > 0 and <= `effective_max_tokens` at runtime)
     Limit(u32),
-}
-
-impl Default for TruncateTokens {
-    fn default() -> Self {
-        Self::No
-    }
 }
 
 /// Configuration for caching system
@@ -1284,6 +1274,7 @@ mod tests {
             PoolingStrategy::Max,
             PoolingStrategy::MeanSqrt,
             PoolingStrategy::Last,
+            PoolingStrategy::None,
         ];
 
         for strategy in strategies {

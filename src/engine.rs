@@ -687,6 +687,130 @@ impl EmbeddingEngine {
         Ok(embedding)
     }
 
+    /// Generates per-token (multi-vector) embeddings for a single text.
+    ///
+    /// Returns one embedding vector per token, suitable for ColBERT-style late
+    /// interaction reranking. Each vector is individually normalized.
+    ///
+    /// This method does not use the embedding cache (since multi-vector results
+    /// have a different shape than cached single-vector embeddings).
+    ///
+    /// # Arguments
+    ///
+    /// * `model_name` - The name of the model to use (or None for default)
+    /// * `text` - The text to generate per-token embeddings for
+    ///
+    /// # Returns
+    ///
+    /// Returns a vector of embedding vectors, one per token.
+    ///
+    /// # Errors
+    ///
+    /// Returns an error if the model is not found or embedding generation fails.
+    #[instrument(skip(self, text), fields(text_len = text.len()))]
+    pub fn embed_multi(&self, model_name: Option<&str>, text: &str) -> Result<Vec<Vec<f32>>> {
+        let model_name = model_name
+            .map(std::string::ToString::to_string)
+            .or_else(|| self.default_model.clone())
+            .ok_or_else(|| Error::ConfigurationError {
+                message: "No model specified and no default model set".to_string(),
+            })?;
+
+        let config = self
+            .model_configs
+            .read()
+            .get(&model_name)
+            .ok_or_else(|| Error::ModelNotFound {
+                name: model_name.clone(),
+            })?
+            .clone();
+
+        let truncate = config
+            .embedding
+            .as_ref()
+            .map_or(TruncateTokens::No, |e| e.truncate_tokens);
+
+        self.ensure_model_loaded(&model_name)?;
+
+        THREAD_MODELS.with(|models| {
+            let mut models = models.borrow_mut();
+            let model = models
+                .get_mut(&model_name)
+                .ok_or_else(|| Error::ModelNotFound {
+                    name: model_name.clone(),
+                })?;
+
+            THREAD_TOKEN_CACHE.with(|tc| {
+                let cache_ref = tc.borrow();
+                model.generate_multi_embedding(text, cache_ref.as_deref(), truncate)
+            })
+        })
+    }
+
+    /// Generates per-token (multi-vector) embeddings for a batch of texts.
+    ///
+    /// Returns one `Vec<Vec<f32>>` per input text — each containing one embedding
+    /// vector per token. Suitable for ColBERT-style late interaction reranking.
+    ///
+    /// # Arguments
+    ///
+    /// * `model_name` - The name of the model to use (or None for default)
+    /// * `texts` - Texts to generate per-token embeddings for
+    ///
+    /// # Returns
+    ///
+    /// Returns a vector of multi-vector embeddings, one per input text.
+    ///
+    /// # Errors
+    ///
+    /// Returns an error if the model is not found or embedding generation fails.
+    #[instrument(skip(self, texts), fields(batch_size = texts.len()))]
+    pub fn embed_batch_multi(
+        &self,
+        model_name: Option<&str>,
+        texts: &[&str],
+    ) -> Result<Vec<Vec<Vec<f32>>>> {
+        let model_name = model_name
+            .map(std::string::ToString::to_string)
+            .or_else(|| self.default_model.clone())
+            .ok_or_else(|| Error::ConfigurationError {
+                message: "No model specified and no default model set".to_string(),
+            })?;
+
+        let config = self
+            .model_configs
+            .read()
+            .get(&model_name)
+            .ok_or_else(|| Error::ModelNotFound {
+                name: model_name.clone(),
+            })?
+            .clone();
+
+        let truncate = config
+            .embedding
+            .as_ref()
+            .map_or(TruncateTokens::No, |e| e.truncate_tokens);
+
+        self.ensure_model_loaded(&model_name)?;
+
+        THREAD_MODELS.with(|models| {
+            let mut models = models.borrow_mut();
+            let model = models
+                .get_mut(&model_name)
+                .ok_or_else(|| Error::ModelNotFound {
+                    name: model_name.clone(),
+                })?;
+
+            // Tokenize all texts
+            let token_sequences: Vec<Vec<_>> = texts
+                .iter()
+                .map(|text| model.tokenize(text))
+                .collect::<Result<Vec<_>>>()?;
+
+            model.process_batch_tokens_multi(&token_sequences, truncate)
+        })
+    }
+
     /// Generates embeddings for a batch of texts using the specified model.
     ///
     /// This method processes multiple texts efficiently using parallel processing
