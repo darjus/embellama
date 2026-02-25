@@ -159,7 +159,7 @@ fn test_backend_display() {
 }
 
 #[test]
-#[ignore] // This test requires a model file, run with --ignored flag
+#[ignore = "Requires model file"]
 fn test_engine_with_backend_detection() {
     let model_path = get_test_model_path();
 

@@ -14,13 +14,10 @@
 
 //! Integration tests for cache management features
 
-use embellama::cache::{
-    CacheStats, CacheStore, embedding_cache::EmbeddingCache, token_cache::TokenCache,
-};
-use embellama::{CacheConfig, EmbeddingEngine, EngineConfig, PoolingStrategy};
+use embellama::cache::{CacheStore, embedding_cache::EmbeddingCache, token_cache::TokenCache};
+use embellama::{CacheConfig, EmbeddingEngine, EngineConfig};
 use serial_test::serial;
 use std::sync::Arc;
-use std::time::Duration;
 
 /// Test cache eviction functionality
 #[test]
@@ -113,8 +110,8 @@ fn test_memory_monitor() {
 #[serial]
 fn test_cache_warmup() {
     // Skip this test if the model file doesn't exist
-    let model_path = std::env::var("TEST_MODEL_PATH")
-        .unwrap_or_else(|_| "tests/data/test_model.gguf".to_string());
+    let model_path = std::env::var("EMBELLAMA_TEST_MODEL")
+        .unwrap_or_else(|_| "models/test/all-minilm-l6-v2-q4_k_m.gguf".to_string());
 
     if !std::path::Path::new(&model_path).exists() {
         eprintln!("Skipping test_cache_warmup: model file not found");
@@ -123,6 +120,7 @@ fn test_cache_warmup() {
 
     let config = EngineConfig::builder()
         .with_model_path(&model_path)
+        .with_model_name("test-model")
         .with_cache_config(CacheConfig::default())
         .build()
         .expect("Failed to create engine config");
@@ -193,8 +191,8 @@ mod server_tests {
 
     /// Create a test server with caching enabled
     async fn create_test_server() -> TestServer {
-        let model_path = std::env::var("TEST_MODEL_PATH")
-            .unwrap_or_else(|_| "tests/data/test_model.gguf".to_string());
+        let model_path = std::env::var("EMBELLAMA_TEST_MODEL")
+            .unwrap_or_else(|_| "models/test/all-minilm-l6-v2-q4_k_m.gguf".to_string());
 
         if !std::path::Path::new(&model_path).exists() {
             panic!("Test model not found at: {}", model_path);

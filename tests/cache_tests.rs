@@ -236,7 +236,7 @@ fn test_embedding_cache_with_real_embeddings() {
 }
 
 #[test]
-#[ignore] // This test takes time due to sleep
+#[ignore = "Takes ~2 seconds due to sleep for TTL expiration"]
 fn test_cache_ttl_expiration() {
     // Create cache with 1 second TTL
     let cache = EmbeddingCache::new(100, 1);
@@ -249,8 +249,14 @@ fn test_cache_ttl_expiration() {
     // Wait for TTL to expire
     thread::sleep(Duration::from_secs(2));
 
-    // Should be expired and return None
-    // Note: This depends on the moka cache's background cleanup
-    // In practice, the entry might still be present but stale
-    // Moka uses lazy expiration, so we can't guarantee immediate removal
+    // Force moka to process pending expirations
+    cache.inner_cache().run_pending_tasks();
+
+    // Verify the shared (moka) cache has expired the entry.
+    // We check the moka cache directly because the thread-local LRU cache
+    // (which has no TTL) may still hold the value from the earlier get().
+    assert!(
+        cache.inner_cache().get(&"ephemeral".to_string()).is_none(),
+        "Entry should have expired from shared cache after TTL"
+    );
 }

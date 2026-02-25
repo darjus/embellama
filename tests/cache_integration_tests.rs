@@ -19,16 +19,12 @@ use embellama::{CacheConfigBuilder, EmbeddingEngine, EngineConfigBuilder, Normal
 use std::time::Instant;
 
 #[test]
-#[ignore] // Requires model file
+#[ignore = "Requires model file"]
 fn test_engine_with_cache_enabled() {
     let Some(model_path) = get_test_model_path() else {
         eprintln!("Skipping test: no test model configured");
         return;
     };
-    if !model_path.exists() {
-        eprintln!("Skipping test: model file not found at {:?}", model_path);
-        return;
-    }
 
     // Create engine with cache enabled
     let config = EngineConfigBuilder::new()
@@ -88,16 +84,12 @@ fn test_engine_with_cache_enabled() {
 }
 
 #[test]
-#[ignore] // Requires model file
+#[ignore = "Requires model file"]
 fn test_engine_with_cache_disabled() {
     let Some(model_path) = get_test_model_path() else {
         eprintln!("Skipping test: no test model configured");
         return;
     };
-    if !model_path.exists() {
-        eprintln!("Skipping test: model file not found at {:?}", model_path);
-        return;
-    }
 
     // Create engine with cache disabled
     let config = EngineConfigBuilder::new()
@@ -129,16 +121,12 @@ fn test_engine_with_cache_disabled() {
 }
 
 #[test]
-#[ignore] // Requires model file
+#[ignore = "Requires model file"]
 fn test_cache_batch_processing() {
     let Some(model_path) = get_test_model_path() else {
         eprintln!("Skipping test: no test model configured");
         return;
     };
-    if !model_path.exists() {
-        eprintln!("Skipping test: model file not found at {:?}", model_path);
-        return;
-    }
 
     // Create engine with cache
     let config = EngineConfigBuilder::new()
@@ -193,16 +181,12 @@ fn test_cache_batch_processing() {
 }
 
 #[test]
-#[ignore] // Requires model file
+#[ignore = "Requires model file"]
 fn test_cache_clearing() {
     let Some(model_path) = get_test_model_path() else {
         eprintln!("Skipping test: no test model configured");
         return;
     };
-    if !model_path.exists() {
-        eprintln!("Skipping test: model file not found at {:?}", model_path);
-        return;
-    }
 
     let config = EngineConfigBuilder::new()
         .with_model_path(model_path)
@@ -244,16 +228,12 @@ fn test_cache_clearing() {
 }
 
 #[test]
-#[ignore] // Requires model file
+#[ignore = "Requires model file"]
 fn test_cache_warm_up() {
     let Some(model_path) = get_test_model_path() else {
         eprintln!("Skipping test: no test model configured");
         return;
     };
-    if !model_path.exists() {
-        eprintln!("Skipping test: model file not found at {:?}", model_path);
-        return;
-    }
 
     let config = EngineConfigBuilder::new()
         .with_model_path(model_path)
@@ -300,16 +280,12 @@ fn test_cache_warm_up() {
 }
 
 #[test]
-#[ignore] // Requires model file
+#[ignore = "Requires model file"]
 fn test_cache_with_different_models() {
     let Some(model_path) = get_test_model_path() else {
         eprintln!("Skipping test: no test model configured");
         return;
     };
-    if !model_path.exists() {
-        eprintln!("Skipping test: model file not found at {:?}", model_path);
-        return;
-    }
 
     // Create engine with cache
     let config = EngineConfigBuilder::new()
@@ -345,7 +321,11 @@ fn test_cache_with_different_models() {
         .embed(Some("model2"), text)
         .expect("Failed to generate embedding");
 
-    // Embeddings might be different due to different normalization
+    // Different normalization (L2 vs None) should produce different embeddings
+    assert_ne!(
+        embedding1, embedding2,
+        "Different normalization modes should produce different embeddings"
+    );
     // But both should be in cache now
     let stats = engine.get_cache_stats().expect("Cache should be enabled");
     assert_eq!(stats.entry_count, 2); // Two different cache keys
@@ -399,16 +379,12 @@ fn test_cache_key_differences() {
 }
 
 #[test]
-#[ignore] // Requires model file
+#[ignore = "Requires model file"]
 fn test_mixed_batch_cache_hits() {
     let Some(model_path) = get_test_model_path() else {
         eprintln!("Skipping test: no test model configured");
         return;
     };
-    if !model_path.exists() {
-        eprintln!("Skipping test: model file not found at {:?}", model_path);
-        return;
-    }
 
     let config = EngineConfigBuilder::new()
         .with_model_path(model_path)

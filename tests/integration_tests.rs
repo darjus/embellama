@@ -38,11 +38,11 @@ fn init_test_tracing() {
 }
 
 /// Creates a dummy model file for testing
-fn create_test_model_file() -> PathBuf {
+fn create_test_model_file() -> (tempfile::TempDir, PathBuf) {
     let dir = tempdir().unwrap();
     let model_path = dir.path().join("test_model.gguf");
     fs::write(&model_path, b"dummy model file").unwrap();
-    model_path
+    (dir, model_path)
 }
 
 /// Creates a test configuration
@@ -552,7 +552,7 @@ fn test_configuration_validation() {
     assert!(result.is_err());
 
     // Test empty model name
-    let model_path = create_test_model_file();
+    let (_dir, model_path) = create_test_model_file();
     let result = EngineConfig::builder()
         .with_model_path(model_path)
         .with_model_name("")

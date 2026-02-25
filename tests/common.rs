@@ -13,6 +13,12 @@
 // limitations under the License.
 
 //! Common test utilities and fixtures
+//!
+//! Each integration test file that includes `mod common;` compiles this module
+//! independently. Functions not used by a particular test file would trigger
+//! dead_code warnings, so we allow them at the module level.
+
+#![allow(dead_code)]
 
 use embellama::{EngineConfig, NormalizationMode, PoolingStrategy};
 use std::fs;
@@ -125,19 +131,6 @@ pub fn calculate_l2_norm(embedding: &[f32]) -> f32 {
     embedding.iter().map(|x| x * x).sum::<f32>().sqrt()
 }
 
-/// Assert that an embedding is normalized (L2 norm ≈ 1.0)
-///
-/// # Panics
-///
-/// Panics if the embedding is not normalized within the given tolerance
-pub fn assert_normalized(embedding: &[f32], tolerance: f32) {
-    let norm = calculate_l2_norm(embedding);
-    assert!(
-        (norm - 1.0).abs() < tolerance,
-        "Embedding is not normalized. L2 norm: {norm} (expected: ~1.0)"
-    );
-}
-
 /// Calculate cosine similarity between two vectors
 ///
 /// For normalized vectors, this is equivalent to the dot product.
@@ -191,7 +184,6 @@ pub fn assert_embeddings_identical(a: &[f32], b: &[f32]) {
 /// Assert embedding is normalized with strict tolerance (1e-6)
 ///
 /// Use this for validating that embeddings are properly normalized.
-/// Stricter than assert_normalized which takes a tolerance parameter.
 ///
 /// # Panics
 ///

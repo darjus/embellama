@@ -16,7 +16,6 @@
 
 #[cfg(test)]
 mod tests {
-    use embellama::CacheConfig;
     use embellama::cache::prefix_cache::{PrefixCache, PrefixDetector};
     use std::sync::Arc;
     use std::thread;
@@ -113,9 +112,12 @@ mod tests {
             tokens.extend_from_slice(&base_tokens);
         } // 110 tokens
 
-        // First analysis - no suggestion yet
+        // First analysis - not enough frequency data yet, so no suggestion
         let suggestion = detector.analyze_tokens(&tokens);
-        assert!(suggestion.is_some() || suggestion.is_none()); // May or may not suggest
+        assert!(
+            suggestion.is_none(),
+            "First analysis should not suggest caching yet"
+        );
 
         // Analyze same prefix multiple times to increase frequency
         for _ in 0..10 {
@@ -190,8 +192,11 @@ mod tests {
         let tokens: Vec<i32> = vec![];
         let session = vec![];
 
-        // Should handle empty input gracefully
+        // Empty tokens are below MIN_PREFIX_LENGTH, so registration should fail
         let result = cache.register_prefix(text, &tokens, session);
-        assert!(result.is_err() || result.is_ok()); // Depends on implementation
+        assert!(
+            result.is_err(),
+            "Empty input should fail registration (below MIN_PREFIX_LENGTH)"
+        );
     }
 }
