@@ -94,7 +94,7 @@ pub use batch::{BatchProcessor, BatchProcessorBuilder};
 pub use config::{
     CacheConfig, CacheConfigBuilder, EmbeddingConfig, EmbeddingConfigBuilder, EngineConfig,
     EngineConfigBuilder, ModelConfig, ModelConfigBuilder, NormalizationMode, PoolingStrategy,
-    TruncateTokens,
+    RerankResult, TruncateTokens,
 };
 pub use engine::{EmbeddingEngine, ModelInfo};
 pub use error::{Error, Result};

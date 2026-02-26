@@ -402,6 +402,20 @@ pub enum PoolingStrategy {
     /// (or `generate_multi_embedding` on the model) to get `Vec<Vec<f32>>` output.
     /// The standard `embed` / `generate_embedding` methods will return an error.
     None,
+    /// Rank pooling for cross-encoder reranking models.
+    /// Returns a single scalar relevance score per query-document pair.
+    /// Use `rerank` on the engine (or `generate_rerank_score` / `generate_rerank_scores_batch`
+    /// on the model). The standard `embed` / `generate_embedding` methods will return an error.
+    Rank,
+}
+
+/// A single reranking result for a query-document pair.
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
+pub struct RerankResult {
+    /// Original index of the document in the input list
+    pub index: usize,
+    /// Relevance score (higher = more relevant)
+    pub relevance_score: f32,
 }
 
 /// Normalization mode for embedding vectors
@@ -1283,6 +1297,7 @@ mod tests {
             PoolingStrategy::MeanSqrt,
             PoolingStrategy::Last,
             PoolingStrategy::None,
+            PoolingStrategy::Rank,
         ];
 
         for strategy in strategies {

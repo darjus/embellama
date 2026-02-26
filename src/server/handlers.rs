@@ -20,6 +20,7 @@
 use crate::extract_gguf_metadata;
 use crate::server::api_types::{
     EmbeddingsRequest, EmbeddingsResponse, ErrorResponse, ListModelsResponse, ModelData,
+    RerankRequest, RerankResponse, RerankResultData, RerankUsage,
 };
 use crate::server::channel::WorkerRequest;
 use crate::server::state::AppState;
@@ -30,6 +31,7 @@ use axum::{
     response::{IntoResponse, Response},
 };
 use std::path::Path;
+use std::sync::Arc;
 use tokio::sync::oneshot;
 use tokio::time::timeout;
 use tracing::{debug, error, info, warn};
@@ -207,4 +209,108 @@ pub async fn list_models_handler(State(state): State<AppState>) -> Response {
 
     info!("Returning {} available models", response.data.len());
     (StatusCode::OK, Json(response)).into_response()
+}
+
+/// Handler for POST /v1/rerank
+///
+/// Reranks documents against a query using a cross-encoder reranking model.
+pub async fn rerank_handler(
+    State(state): State<AppState>,
+    Json(request): Json<RerankRequest>,
+) -> Response {
+    let request_id = Uuid::new_v4();
+    debug!(
+        "Processing rerank request {} for model '{}'",
+        request_id, request.model
+    );
+
+    // Validate inputs
+    if request.query.is_empty() {
+        warn!("Empty query in rerank request {}", request_id);
+        return (
+            StatusCode::BAD_REQUEST,
+            Json(ErrorResponse::invalid_request("Query cannot be empty")),
+        )
+            .into_response();
+    }
+    if request.documents.is_empty() {
+        warn!("Empty documents in rerank request {}", request_id);
+        return (
+            StatusCode::BAD_REQUEST,
+            Json(ErrorResponse::invalid_request(
+                "Documents list cannot be empty",
+            )),
+        )
+            .into_response();
+    }
+
+    let engine = Arc::clone(&state.engine);
+    let model = request.model.clone();
+    let query = request.query.clone();
+    let documents = request.documents.clone();
+    let top_n = request.top_n;
+    let normalize = request.normalize;
+    let req_timeout = state.config.request_timeout;
+
+    // Run reranking on a blocking thread since it involves model inference
+    let result = timeout(
+        req_timeout,
+        tokio::task::spawn_blocking(move || {
+            let engine = engine
+                .lock()
+                .map_err(|_| "Engine lock poisoned".to_string())?;
+            let doc_refs: Vec<&str> = documents.iter().map(String::as_str).collect();
+            engine
+                .rerank(Some(&model), &query, &doc_refs, top_n, normalize)
+                .map_err(|e| e.to_string())
+        }),
+    )
+    .await;
+
+    match result {
+        Ok(Ok(Ok(results))) => {
+            let total_documents = results.len();
+            let response = RerankResponse {
+                object: "rerank".to_string(),
+                results: results
+                    .into_iter()
+                    .map(|r| RerankResultData {
+                        index: r.index,
+                        relevance_score: r.relevance_score,
+                    })
+                    .collect(),
+                model: request.model,
+                usage: RerankUsage { total_documents },
+            };
+            info!("Rerank request {} completed", request_id);
+            (StatusCode::OK, Json(response)).into_response()
+        }
+        Ok(Ok(Err(e))) => {
+            error!("Rerank request {} failed: {}", request_id, e);
+            (
+                StatusCode::INTERNAL_SERVER_ERROR,
+                Json(ErrorResponse::internal_error(e)),
+            )
+                .into_response()
+        }
+        Ok(Err(e)) => {
+            error!("Rerank task panicked for request {}: {}", request_id, e);
+            (
+                StatusCode::INTERNAL_SERVER_ERROR,
+                Json(ErrorResponse::internal_error("Internal processing error")),
+            )
+                .into_response()
+        }
+        Err(_) => {
+            error!(
+                "Rerank request {} timed out after {:?}",
+                request_id, req_timeout
+            );
+            (
+                StatusCode::REQUEST_TIMEOUT,
+                Json(ErrorResponse::internal_error("Request timed out")),
+            )
+                .into_response()
+        }
+    }
 }

@@ -272,6 +272,55 @@ impl ModelData {
     }
 }
 
+/// Reranking request (inspired by Cohere Rerank API)
+#[derive(Debug, Clone, Deserialize)]
+pub struct RerankRequest {
+    /// Model identifier to use for reranking
+    pub model: String,
+    /// The query to rerank documents against
+    pub query: String,
+    /// List of documents to rerank
+    pub documents: Vec<String>,
+    /// Return only the top N results (None = return all)
+    pub top_n: Option<usize>,
+    /// Whether to apply sigmoid normalization to scores (default: true)
+    #[serde(default = "default_normalize")]
+    pub normalize: bool,
+}
+
+fn default_normalize() -> bool {
+    true
+}
+
+/// Reranking response
+#[derive(Debug, Clone, Serialize)]
+pub struct RerankResponse {
+    /// Object type
+    pub object: String,
+    /// Reranking results sorted by relevance (descending)
+    pub results: Vec<RerankResultData>,
+    /// Model used
+    pub model: String,
+    /// Usage statistics
+    pub usage: RerankUsage,
+}
+
+/// A single reranking result
+#[derive(Debug, Clone, Serialize)]
+pub struct RerankResultData {
+    /// Original index of the document in the input list
+    pub index: usize,
+    /// Relevance score (higher = more relevant)
+    pub relevance_score: f32,
+}
+
+/// Token usage for reranking
+#[derive(Debug, Clone, Serialize)]
+pub struct RerankUsage {
+    /// Total documents processed
+    pub total_documents: usize,
+}
+
 /// Add base64 encoding support
 use base64::{Engine as _, engine::general_purpose::STANDARD};
 

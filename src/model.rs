@@ -52,6 +52,7 @@ fn pooling_strategy_to_llama_type(strategy: PoolingStrategy) -> LlamaPoolingType
         PoolingStrategy::Mean => LlamaPoolingType::Mean,
         PoolingStrategy::Cls => LlamaPoolingType::Cls,
         PoolingStrategy::Last => LlamaPoolingType::Last,
+        PoolingStrategy::Rank => LlamaPoolingType::Rank,
         // Max, MeanSqrt, and None are not natively supported by llama.cpp pooling.
         // For Max/MeanSqrt we apply pooling ourselves after extraction.
         // For None we return raw per-token embeddings without any pooling.
@@ -1373,6 +1374,14 @@ impl EmbeddingModel {
                         .to_string(),
                 })
             }
+            PoolingStrategy::Rank => {
+                // Rank strategy should not reach apply_pooling — use rerank methods instead
+                Err(Error::InvalidOperation {
+                    message: "PoolingStrategy::Rank does not produce embedding vectors. \
+                              Use generate_rerank_score() or rerank() for relevance scoring."
+                        .to_string(),
+                })
+            }
         }
     }
 
@@ -1447,6 +1456,214 @@ impl EmbeddingModel {
                 Ok(embedding)
             }
         }
+    }
+
+    /// Generates a reranking relevance score for a query-document pair.
+    ///
+    /// The model encodes the concatenated query and document as a single sequence
+    /// and returns a scalar relevance score via `LlamaPoolingType::Rank`.
+    ///
+    /// # Arguments
+    ///
+    /// * `query` - The query text
+    /// * `document` - The document text to score against the query
+    /// * `truncate` - Truncation strategy for the combined input
+    ///
+    /// # Returns
+    ///
+    /// Returns the raw relevance score (f32). Apply sigmoid for \[0,1\] normalization.
+    ///
+    /// # Errors
+    ///
+    /// Returns an error if the model is not configured with `PoolingStrategy::Rank`,
+    /// tokenization fails, or model inference fails.
+    #[instrument(skip(self, query, document), fields(query_len = query.len(), doc_len = document.len()))]
+    pub fn generate_rerank_score(
+        &mut self,
+        query: &str,
+        document: &str,
+        truncate: TruncateTokens,
+    ) -> Result<f32> {
+        if self.config.pooling_strategy != PoolingStrategy::Rank {
+            return Err(Error::InvalidOperation {
+                message: format!(
+                    "Reranking requires PoolingStrategy::Rank, but model is configured with {:?}",
+                    self.config.pooling_strategy
+                ),
+            });
+        }
+
+        if query.is_empty() {
+            return Err(Error::InvalidInput {
+                message: "Rerank query cannot be empty".to_string(),
+            });
+        }
+        if document.is_empty() {
+            return Err(Error::InvalidInput {
+                message: "Rerank document cannot be empty".to_string(),
+            });
+        }
+
+        // Tokenize the combined query + document
+        // Reranking models expect query and document concatenated; the model's
+        // tokenizer will produce appropriate separator tokens.
+        let combined = format!("{query}\n\n{document}");
+        let tokens = self.tokenize(&combined)?;
+
+        // Resolve truncation
+        let truncation_limit = self.resolve_truncation_limit(truncate)?;
+        let tokens = Self::truncate_tokens_if_needed(&tokens, truncation_limit);
+
+        debug!("Processing {} tokens for reranking", tokens.len());
+
+        // Process through model
+        let embeddings = self.process_tokens_internal(tokens)?;
+
+        // Extract the scalar relevance score
+        Self::extract_rerank_score(&embeddings)
+    }
+
+    /// Generates reranking scores for multiple documents against a single query.
+    ///
+    /// Processes multiple query-document pairs in batches for efficiency.
+    ///
+    /// # Arguments
+    ///
+    /// * `query` - The query text
+    /// * `documents` - Slice of document texts to score
+    /// * `truncate` - Truncation strategy for each combined input
+    ///
+    /// # Returns
+    ///
+    /// Returns a vector of raw relevance scores, one per document, in input order.
+    ///
+    /// # Errors
+    ///
+    /// Returns an error if the model is not configured with `PoolingStrategy::Rank`,
+    /// tokenization fails, or model inference fails.
+    #[instrument(skip(self, query, documents), fields(query_len = query.len(), n_docs = documents.len()))]
+    pub fn generate_rerank_scores_batch(
+        &mut self,
+        query: &str,
+        documents: &[&str],
+        truncate: TruncateTokens,
+    ) -> Result<Vec<f32>> {
+        if self.config.pooling_strategy != PoolingStrategy::Rank {
+            return Err(Error::InvalidOperation {
+                message: format!(
+                    "Reranking requires PoolingStrategy::Rank, but model is configured with {:?}",
+                    self.config.pooling_strategy
+                ),
+            });
+        }
+
+        if query.is_empty() {
+            return Err(Error::InvalidInput {
+                message: "Rerank query cannot be empty".to_string(),
+            });
+        }
+        if documents.is_empty() {
+            return Ok(Vec::new());
+        }
+
+        // Tokenize each query+document pair
+        let token_sequences: Vec<Vec<LlamaToken>> = documents
+            .iter()
+            .map(|doc| {
+                let combined = format!("{query}\n\n{doc}");
+                self.tokenize(&combined)
+            })
+            .collect::<Result<Vec<_>>>()?;
+
+        // Process in batches, respecting n_seq_max
+        self.process_batch_rerank(&token_sequences, truncate)
+    }
+
+    /// Process batched token sequences for reranking, chunking if needed.
+    fn process_batch_rerank(
+        &mut self,
+        token_sequences: &[Vec<LlamaToken>],
+        truncate: TruncateTokens,
+    ) -> Result<Vec<f32>> {
+        if token_sequences.is_empty() {
+            return Ok(Vec::new());
+        }
+
+        #[allow(clippy::cast_lossless)]
+        let max_seqs = self.n_seq_max as usize;
+
+        if token_sequences.len() <= max_seqs {
+            return self.process_batch_rerank_internal(token_sequences, truncate);
+        }
+
+        // Chunk into batches of n_seq_max
+        let mut all_scores = Vec::with_capacity(token_sequences.len());
+        for chunk in token_sequences.chunks(max_seqs) {
+            let chunk_scores = self.process_batch_rerank_internal(chunk, truncate)?;
+            all_scores.extend(chunk_scores);
+        }
+        Ok(all_scores)
+    }
+
+    /// Internal: process a single batch of token sequences for reranking.
+    fn process_batch_rerank_internal(
+        &mut self,
+        token_sequences: &[Vec<LlamaToken>],
+        truncate: TruncateTokens,
+    ) -> Result<Vec<f32>> {
+        let truncation_limit = self.resolve_truncation_limit(truncate)?;
+
+        // Truncate and validate each sequence
+        let truncated: Vec<&[LlamaToken]> = token_sequences
+            .iter()
+            .enumerate()
+            .map(|(i, tokens)| {
+                let t = Self::truncate_tokens_if_needed(tokens, truncation_limit);
+                self.validate_token_limit(t.len(), Some(&format!("Rerank pair {i}")))?;
+                Ok(t)
+            })
+            .collect::<Result<Vec<_>>>()?;
+
+        let total_tokens: usize = truncated.iter().map(|s| s.len()).sum();
+        let mut batch = LlamaBatch::new(total_tokens, 1);
+
+        for (seq_id, tokens) in truncated.iter().enumerate() {
+            let seq_id_i32 = Self::to_i32(seq_id, "Sequence ID")?;
+            batch.add_sequence(tokens, seq_id_i32, true).map_err(|e| {
+                Error::EmbeddingGenerationError {
+                    message: format!("Failed to add rerank sequence {seq_id} to batch: {e}"),
+                    source: Some(anyhow::anyhow!(e)),
+                }
+            })?;
+        }
+
+        self.process_batch(&mut batch)?;
+
+        // Extract scores from each sequence
+        let mut scores = Vec::with_capacity(truncated.len());
+        let mut token_offset = 0usize;
+        for (seq_id, tokens) in truncated.iter().enumerate() {
+            let embeddings =
+                self.extract_sequence_embeddings(seq_id, tokens.len(), Some(token_offset))?;
+            scores.push(Self::extract_rerank_score(&embeddings)?);
+            token_offset += tokens.len();
+        }
+
+        Ok(scores)
+    }
+
+    /// Extract the rerank relevance score from raw embeddings.
+    ///
+    /// For `LlamaPoolingType::Rank`, llama.cpp returns a sequence embedding
+    /// where the first element is the relevance score.
+    fn extract_rerank_score(embeddings: &[Vec<f32>]) -> Result<f32> {
+        if embeddings.is_empty() || embeddings[0].is_empty() {
+            return Err(Error::EmbeddingGenerationError {
+                message: "No rerank score produced by model".to_string(),
+                source: None,
+            });
+        }
+        Ok(embeddings[0][0])
     }
 
     /// Save the current KV cache state to memory
@@ -1807,6 +2024,47 @@ mod tests {
                 .to_string()
                 .contains("PoolingStrategy::None")
         );
+    }
+
+    #[test]
+    fn test_apply_pooling_rank_returns_error() {
+        let embeddings = vec![vec![1.0, 2.0, 3.0]];
+        let result = EmbeddingModel::apply_pooling(&embeddings, PoolingStrategy::Rank);
+        assert!(result.is_err());
+        assert!(
+            result
+                .unwrap_err()
+                .to_string()
+                .contains("PoolingStrategy::Rank")
+        );
+    }
+
+    #[test]
+    fn test_pooling_strategy_to_llama_type_rank() {
+        let llama_type = pooling_strategy_to_llama_type(PoolingStrategy::Rank);
+        assert_eq!(llama_type, LlamaPoolingType::Rank);
+    }
+
+    #[test]
+    fn test_extract_rerank_score_valid() {
+        let embeddings = vec![vec![-2.5, 0.1, 0.3]];
+        let score = EmbeddingModel::extract_rerank_score(&embeddings).unwrap();
+        assert!((score - (-2.5)).abs() < f32::EPSILON);
+    }
+
+    #[test]
+    fn test_extract_rerank_score_empty() {
+        let embeddings: Vec<Vec<f32>> = vec![];
+        let result = EmbeddingModel::extract_rerank_score(&embeddings);
+        assert!(result.is_err());
+        assert!(result.unwrap_err().to_string().contains("No rerank score"));
+    }
+
+    #[test]
+    fn test_extract_rerank_score_empty_inner() {
+        let embeddings: Vec<Vec<f32>> = vec![vec![]];
+        let result = EmbeddingModel::extract_rerank_score(&embeddings);
+        assert!(result.is_err());
     }
 
     // ============================================================================

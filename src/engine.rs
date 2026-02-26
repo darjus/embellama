@@ -948,6 +948,103 @@ impl EmbeddingEngine {
         }
     }
 
+    /// Reranks documents against a query using a cross-encoder reranking model.
+    ///
+    /// The model must be configured with `PoolingStrategy::Rank`. Each document
+    /// is scored against the query, and results are returned sorted by relevance
+    /// (descending).
+    ///
+    /// # Arguments
+    ///
+    /// * `model_name` - The name of the reranking model (or None for default)
+    /// * `query` - The query text
+    /// * `documents` - Documents to rerank
+    /// * `top_n` - Optional limit on number of results returned
+    /// * `normalize` - Whether to apply sigmoid normalization to \[0, 1\]
+    ///
+    /// # Returns
+    ///
+    /// Returns a vector of `RerankResult` sorted by relevance score (descending).
+    ///
+    /// # Errors
+    ///
+    /// Returns an error if the model is not found, not configured for reranking,
+    /// or inference fails.
+    #[instrument(skip(self, query, documents), fields(query_len = query.len(), n_docs = documents.len()))]
+    pub fn rerank(
+        &self,
+        model_name: Option<&str>,
+        query: &str,
+        documents: &[&str],
+        top_n: Option<usize>,
+        normalize: bool,
+    ) -> Result<Vec<crate::config::RerankResult>> {
+        let model_name = model_name
+            .map(std::string::ToString::to_string)
+            .or_else(|| self.default_model.clone())
+            .ok_or_else(|| Error::ConfigurationError {
+                message: "No model specified and no default model set".to_string(),
+            })?;
+
+        let config = self
+            .model_configs
+            .read()
+            .get(&model_name)
+            .ok_or_else(|| Error::ModelNotFound {
+                name: model_name.clone(),
+            })?
+            .clone();
+
+        let truncate = config
+            .embedding
+            .as_ref()
+            .map_or(TruncateTokens::No, |e| e.truncate_tokens);
+
+        self.ensure_model_loaded(&model_name)?;
+
+        let raw_scores = THREAD_MODELS.with(|models| {
+            let mut models = models.borrow_mut();
+            let model = models
+                .get_mut(&model_name)
+                .ok_or_else(|| Error::ModelNotFound {
+                    name: model_name.clone(),
+                })?;
+
+            model.generate_rerank_scores_batch(query, documents, truncate)
+        })?;
+
+        let mut results: Vec<crate::config::RerankResult> = raw_scores
+            .into_iter()
+            .enumerate()
+            .map(|(index, score)| {
+                let relevance_score = if normalize {
+                    // Sigmoid normalization: 1 / (1 + e^(-x))
+                    1.0 / (1.0 + (-score).exp())
+                } else {
+                    score
+                };
+                crate::config::RerankResult {
+                    index,
+                    relevance_score,
+                }
+            })
+            .collect();
+
+        // Sort by relevance score descending
+        results.sort_by(|a, b| {
+            b.relevance_score
+                .partial_cmp(&a.relevance_score)
+                .unwrap_or(std::cmp::Ordering::Equal)
+        });
+
+        // Apply top_n filtering
+        if let Some(n) = top_n {
+            results.truncate(n);
+        }
+
+        Ok(results)
+    }
+
     /// Lists all currently loaded models.
     ///
     /// Note: This returns models registered in the engine, not necessarily

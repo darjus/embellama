@@ -258,6 +258,7 @@ pub fn create_router(state: AppState) -> Router<()> {
             axum::routing::post(handlers::embeddings_handler),
         )
         .route("/v1/models", get(handlers::list_models_handler))
+        .route("/v1/rerank", axum::routing::post(handlers::rerank_handler))
         // Cache management endpoints
         .route("/cache/stats", get(cache_handlers::cache_stats_handler))
         .route(
