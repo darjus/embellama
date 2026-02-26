@@ -147,10 +147,7 @@ impl EmbeddingEngine {
     /// This function will return an error if:
     /// - The configuration is invalid (on first initialization)
     /// - Model loading fails (on first initialization)
-    ///
-    /// # Panics
-    ///
-    /// Panics if the initialization lock cannot be acquired.
+    /// - The initialization lock is poisoned
     #[instrument(skip(config), fields(model_name = %config.model_config.model_name))]
     pub fn get_or_init(config: EngineConfig) -> Result<Arc<Mutex<Self>>> {
         // Fast path: check if already initialized
@@ -163,7 +160,7 @@ impl EmbeddingEngine {
         }
 
         // Slow path: initialize the singleton
-        let _lock = INIT_LOCK.lock().unwrap();
+        let _lock = INIT_LOCK.lock().map_err(|_| Error::LockPoisoned)?;
 
         // Double-check after acquiring lock
         {
@@ -535,7 +532,7 @@ impl EmbeddingEngine {
             info!("Loading model '{}' in current thread", model_name);
 
             // Use the model configuration from EngineConfig
-            let backend_guard = self.backend.lock().unwrap();
+            let backend_guard = self.backend.lock().map_err(|_| Error::LockPoisoned)?;
             let model = EmbeddingModel::new(&backend_guard, &config.model_config)?;
             drop(backend_guard); // Release lock as soon as we're done
 

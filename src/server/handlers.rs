@@ -164,16 +164,18 @@ pub async fn embeddings_handler(
 /// Handler for GET /v1/models
 ///
 /// Lists all available models in OpenAI-compatible format.
-///
-/// # Panics
-///
-/// Panics if the engine mutex is poisoned
 #[allow(clippy::unused_async)] // Required by axum even though we don't await
 pub async fn list_models_handler(State(state): State<AppState>) -> Response {
     debug!("Listing available models");
 
     // Get model list with details from engine
-    let engine = state.engine.lock().unwrap();
+    let Ok(engine) = state.engine.lock() else {
+        return (
+            StatusCode::INTERNAL_SERVER_ERROR,
+            Json(ErrorResponse::internal_error("Engine lock poisoned")),
+        )
+            .into_response();
+    };
     let model_details = engine.get_model_details();
 
     // Convert to ModelData with context size information

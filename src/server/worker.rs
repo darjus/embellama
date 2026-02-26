@@ -62,10 +62,6 @@ impl Worker {
     /// This method runs in a dedicated thread and processes requests
     /// until the channel is closed. The first request will trigger
     /// model loading in this thread via the engine's thread-local storage.
-    ///
-    /// # Panics
-    ///
-    /// Panics if the engine mutex lock cannot be acquired
     pub fn run(mut self) {
         info!("Worker {} starting", self.id);
 
@@ -76,7 +72,13 @@ impl Worker {
 
             // Process the request using the shared engine
             let result = {
-                let engine = self.engine.lock().unwrap();
+                let Ok(engine) = self.engine.lock() else {
+                    error!("Worker {} engine lock poisoned", self.id);
+                    // Drop response_tx without sending — receiver gets RecvError,
+                    // which is handled as an error by the caller
+                    drop(request.response_tx);
+                    continue;
+                };
                 match &request.input {
                     TextInput::Single(text) => {
                         // Generate single embedding

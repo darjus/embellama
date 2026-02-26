@@ -115,11 +115,19 @@ impl ModelConfig {
             )));
         }
 
-        // Validate GGUF extension
-        if self.model_path.extension().and_then(|e| e.to_str()) != Some("gguf") {
-            return Err(Error::config(format!(
-                "Model file must have .gguf extension: {}",
+        // Canonicalize the path to resolve symlinks and detect path traversal
+        let canonical = self.model_path.canonicalize().map_err(|e| {
+            Error::config(format!(
+                "Cannot resolve model path '{}': {e}",
                 self.model_path.display()
+            ))
+        })?;
+
+        // Ensure the canonical path still ends with .gguf (catches symlink tricks)
+        if canonical.extension().and_then(|e| e.to_str()) != Some("gguf") {
+            return Err(Error::config(format!(
+                "Model path resolves to non-GGUF file: {}",
+                canonical.display()
             )));
         }
 
@@ -1642,5 +1650,93 @@ mod tests {
             .with_truncate_limit(0)
             .build();
         assert!(result.is_err());
+    }
+
+    // ============================================================================
+    // Path Canonicalization Tests (validates symlink resolution in validate())
+    // ============================================================================
+
+    #[cfg(unix)]
+    #[test]
+    fn test_symlink_to_non_gguf_file_rejected() {
+        use std::os::unix::fs::symlink;
+
+        let dir = tempdir().unwrap();
+
+        // Create a real non-GGUF file
+        let real_file = dir.path().join("not_a_model.txt");
+        fs::write(&real_file, b"not a model").unwrap();
+
+        // Create a symlink with .gguf extension pointing to the non-GGUF file
+        let fake_gguf = dir.path().join("sneaky.gguf");
+        symlink(&real_file, &fake_gguf).unwrap();
+
+        let result = ModelConfig::builder()
+            .with_model_path(&fake_gguf)
+            .with_model_name("test")
+            .build();
+
+        assert!(result.is_err());
+        let err_msg = result.unwrap_err().to_string();
+        assert!(
+            err_msg.contains("non-GGUF"),
+            "Expected 'non-GGUF' in error, got: {err_msg}"
+        );
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn test_symlink_to_gguf_file_accepted() {
+        use std::os::unix::fs::symlink;
+
+        let dir = tempdir().unwrap();
+
+        // Create a real GGUF file
+        let real_gguf = dir.path().join("real_model.gguf");
+        fs::write(&real_gguf, b"dummy gguf").unwrap();
+
+        // Create a symlink pointing to the real GGUF file
+        let link_gguf = dir.path().join("link_model.gguf");
+        symlink(&real_gguf, &link_gguf).unwrap();
+
+        let result = ModelConfig::builder()
+            .with_model_path(&link_gguf)
+            .with_model_name("test")
+            .build();
+
+        assert!(result.is_ok());
+    }
+
+    #[test]
+    fn test_normal_gguf_path_still_validates() {
+        let dir = tempdir().unwrap();
+        let model_path = dir.path().join("model.gguf");
+        fs::write(&model_path, b"dummy").unwrap();
+
+        let result = ModelConfig::builder()
+            .with_model_path(&model_path)
+            .with_model_name("test")
+            .build();
+
+        assert!(result.is_ok());
+    }
+
+    #[test]
+    fn test_non_gguf_extension_rejected() {
+        let dir = tempdir().unwrap();
+        let model_path = dir.path().join("model.bin");
+        fs::write(&model_path, b"dummy").unwrap();
+
+        let result = ModelConfig::builder()
+            .with_model_path(&model_path)
+            .with_model_name("test")
+            .build();
+
+        assert!(result.is_err());
+        let err_msg = result.unwrap_err().to_string();
+        assert!(
+            err_msg.contains("non-GGUF"),
+            "Expected 'non-GGUF' in error, got: {err_msg}"
+        );
     }
 }

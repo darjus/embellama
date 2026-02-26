@@ -173,7 +173,15 @@ impl InferenceWorker {
 
         // Process all texts in a single batch
         let result = {
-            let engine = self.engine.lock().unwrap();
+            let Ok(engine) = self.engine.lock() else {
+                error!("Engine lock poisoned during batch processing");
+                // Drop all response channels without sending — receivers get RecvError,
+                // which is handled as an error by the callers
+                for request in batch {
+                    drop(request.response_tx);
+                }
+                return;
+            };
             engine.embed_batch(Some(model_name), &all_texts)
         };
 

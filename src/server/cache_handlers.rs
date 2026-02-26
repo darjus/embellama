@@ -27,19 +27,25 @@ use axum::{Json, extract::State, http::StatusCode, response::IntoResponse};
 use sha2::{Digest, Sha256};
 use tracing::{debug, error, info};
 
+/// Returns a 500 error response for a poisoned engine lock.
+fn lock_poisoned_response() -> (StatusCode, Json<ErrorResponse>) {
+    (
+        StatusCode::INTERNAL_SERVER_ERROR,
+        Json(ErrorResponse::internal_error("Engine lock poisoned")),
+    )
+}
+
 /// Handler for GET /cache/stats
 ///
 /// Returns cache statistics and system memory information
-///
-/// # Panics
-///
-/// Panics if the engine mutex is poisoned
 pub async fn cache_stats_handler(State(state): State<AppState>) -> impl IntoResponse {
     debug!("Processing cache stats request");
 
     // Get cache stats from the engine
     let cache_stats = {
-        let engine = state.engine.lock().unwrap();
+        let Ok(engine) = state.engine.lock() else {
+            return lock_poisoned_response().into_response();
+        };
         engine.get_cache_stats()
     };
 
@@ -59,16 +65,14 @@ pub async fn cache_stats_handler(State(state): State<AppState>) -> impl IntoResp
 /// Handler for POST /cache/clear
 ///
 /// Clears all caches and returns previous statistics
-///
-/// # Panics
-///
-/// Panics if the engine mutex is poisoned
 pub async fn cache_clear_handler(State(state): State<AppState>) -> impl IntoResponse {
     debug!("Processing cache clear request");
 
     // Get current stats before clearing
     let previous_stats = {
-        let engine = state.engine.lock().unwrap();
+        let Ok(engine) = state.engine.lock() else {
+            return lock_poisoned_response().into_response();
+        };
         let cache_stats = engine.get_cache_stats();
         engine.clear_cache();
         cache_stats
@@ -86,10 +90,7 @@ pub async fn cache_clear_handler(State(state): State<AppState>) -> impl IntoResp
 /// Handler for POST /cache/warm
 ///
 /// Pre-computes embeddings for the provided texts to warm the cache
-///
-/// # Panics
-///
-/// May panic if the engine mutex is poisoned
+#[allow(clippy::too_many_lines)]
 pub async fn cache_warm_handler(
     State(state): State<AppState>,
     Json(request): Json<CacheWarmRequest>,
@@ -122,13 +123,17 @@ pub async fn cache_warm_handler(
 
     // Check cache status before warming
     let initial_stats = {
-        let engine = state.engine.lock().unwrap();
+        let Ok(engine) = state.engine.lock() else {
+            return lock_poisoned_response().into_response();
+        };
         engine.get_cache_stats()
     };
 
     // Warm the cache
     let result = {
-        let engine = state.engine.lock().unwrap();
+        let Ok(engine) = state.engine.lock() else {
+            return lock_poisoned_response().into_response();
+        };
         let texts: Vec<&str> = request
             .texts
             .iter()
@@ -141,7 +146,9 @@ pub async fn cache_warm_handler(
         Ok(()) => {
             // Get stats after warming
             let final_stats = {
-                let engine = state.engine.lock().unwrap();
+                let Ok(engine) = state.engine.lock() else {
+                    return lock_poisoned_response().into_response();
+                };
                 engine.get_cache_stats()
             };
 
@@ -213,11 +220,6 @@ fn get_memory_info() -> MemoryInfo {
 /// Handler for POST /v1/embeddings/prefix
 ///
 /// Registers a new prefix for KV cache optimization
-///
-/// # Panics
-///
-/// This function may panic if:
-/// - The engine mutex is poisoned
 pub async fn prefix_register_handler(
     State(state): State<AppState>,
     Json(request): Json<PrefixRegisterRequest>,
@@ -245,7 +247,9 @@ pub async fn prefix_register_handler(
 
     // Register the prefix
     let result = {
-        let engine = state.engine.lock().unwrap();
+        let Ok(engine) = state.engine.lock() else {
+            return lock_poisoned_response().into_response();
+        };
         engine.register_prefix(request.model.as_deref(), &request.prefix)
     };
 
@@ -280,14 +284,12 @@ pub async fn prefix_register_handler(
 /// Handler for GET /v1/embeddings/prefix
 ///
 /// Lists all cached prefixes
-///
-/// # Panics
-///
-/// Panics if the engine mutex is poisoned
 pub async fn prefix_list_handler(State(state): State<AppState>) -> impl IntoResponse {
     debug!("Processing prefix list request");
 
-    let engine = state.engine.lock().unwrap();
+    let Ok(engine) = state.engine.lock() else {
+        return lock_poisoned_response().into_response();
+    };
     let cached_prefixes = engine.list_cached_prefixes();
 
     // Convert to PrefixInfo format
@@ -321,15 +323,13 @@ pub async fn prefix_list_handler(State(state): State<AppState>) -> impl IntoResp
 /// Handler for DELETE /v1/embeddings/prefix
 ///
 /// Clears all cached prefixes
-///
-/// # Panics
-///
-/// Panics if the engine mutex is poisoned
 pub async fn prefix_clear_handler(State(state): State<AppState>) -> impl IntoResponse {
     debug!("Processing prefix clear request");
 
     {
-        let engine = state.engine.lock().unwrap();
+        let Ok(engine) = state.engine.lock() else {
+            return lock_poisoned_response().into_response();
+        };
         engine.clear_prefix_cache();
     }
 
@@ -345,14 +345,12 @@ pub async fn prefix_clear_handler(State(state): State<AppState>) -> impl IntoRes
 /// Handler for GET /v1/embeddings/prefix/stats
 ///
 /// Returns prefix cache statistics
-///
-/// # Panics
-///
-/// Panics if the engine mutex is poisoned
 pub async fn prefix_stats_handler(State(state): State<AppState>) -> impl IntoResponse {
     debug!("Processing prefix stats request");
 
-    let engine = state.engine.lock().unwrap();
+    let Ok(engine) = state.engine.lock() else {
+        return lock_poisoned_response().into_response();
+    };
     let is_enabled = engine.is_prefix_cache_enabled();
 
     if let Some(stats) = engine.get_prefix_cache_stats() {
