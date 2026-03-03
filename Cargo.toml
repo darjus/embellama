@@ -44,7 +44,7 @@ governor = { version = "0.7", optional = true }
 prometheus = { version = "0.14", optional = true }
 rand = { version = "0.8", optional = true }
 subtle = { version = "2.6", optional = true }
-sysinfo = { version = "0.33"}
+sysinfo = { version = "0.38"}
 redis = { version = "0.27", optional = true, features = ["tokio-comp", "connection-manager"] }
 self_cell = "1.2.0"
 once_cell = "1.21.3"
