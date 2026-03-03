@@ -16,8 +16,8 @@
 //!
 //! Tests that require a real reranking model are gated behind the
 //! `EMBELLAMA_TEST_RERANK_MODEL` environment variable.
-//! Use a cross-encoder GGUF model such as bge-reranker-v2-m3 or
-//! jina-reranker-v1-turbo-en.
+//! Use a cross-encoder GGUF model such as bge-reranker-v2-m3,
+//! jina-reranker-v1-turbo-en, or jina-reranker-v2-base-multilingual.
 
 mod common;
 
