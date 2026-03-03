@@ -248,6 +248,7 @@ pub async fn rerank_handler(
     let model = request.model.clone();
     let query = request.query.clone();
     let documents = request.documents.clone();
+    let total_input_documents = documents.len();
     let top_n = request.top_n;
     let normalize = request.normalize;
     let req_timeout = state.config.request_timeout;
@@ -269,7 +270,6 @@ pub async fn rerank_handler(
 
     match result {
         Ok(Ok(Ok(results))) => {
-            let total_documents = results.len();
             let response = RerankResponse {
                 object: "rerank".to_string(),
                 results: results
@@ -280,7 +280,9 @@ pub async fn rerank_handler(
                     })
                     .collect(),
                 model: request.model,
-                usage: RerankUsage { total_documents },
+                usage: RerankUsage {
+                    total_documents: total_input_documents,
+                },
             };
             info!("Rerank request {} completed", request_id);
             (StatusCode::OK, Json(response)).into_response()

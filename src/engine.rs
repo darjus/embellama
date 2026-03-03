@@ -1030,12 +1030,18 @@ impl EmbeddingEngine {
             })
             .collect();
 
-        // Sort by relevance score descending
-        results.sort_by(|a, b| {
-            b.relevance_score
-                .partial_cmp(&a.relevance_score)
-                .unwrap_or(std::cmp::Ordering::Equal)
-        });
+        // Reject NaN scores that would corrupt sort order
+        for r in &results {
+            if r.relevance_score.is_nan() {
+                return Err(Error::EmbeddingGenerationError {
+                    message: "Model produced NaN relevance score".to_string(),
+                    source: None,
+                });
+            }
+        }
+
+        // Sort by relevance score descending (total_cmp provides well-defined ordering)
+        results.sort_by(|a, b| b.relevance_score.total_cmp(&a.relevance_score));
 
         // Apply top_n filtering
         if let Some(n) = top_n {

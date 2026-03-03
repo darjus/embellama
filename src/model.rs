@@ -1566,6 +1566,15 @@ impl EmbeddingModel {
             return Ok(Vec::new());
         }
 
+        // Validate no empty documents
+        for (i, doc) in documents.iter().enumerate() {
+            if doc.is_empty() {
+                return Err(Error::InvalidInput {
+                    message: format!("Rerank document at index {i} cannot be empty"),
+                });
+            }
+        }
+
         // Tokenize each query+document pair
         let token_sequences: Vec<Vec<LlamaToken>> = documents
             .iter()
