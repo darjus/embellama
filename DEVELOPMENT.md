@@ -481,9 +481,21 @@ version = "0.2.0"
 
 ### Creating a Release
 
-1. Update `CHANGELOG.md`
+The project uses [git-cliff](https://git-cliff.org/) for automated changelog generation from conventional commits. Install with `cargo install git-cliff`.
+
+The recommended way to create a release is via the justfile:
+
+```bash
+just release 0.9.0
+```
+
+This automates: version bumping, changelog generation, tagging, pushing, and creating a GitHub release.
+
+Manual steps (if needed):
+
+1. Generate changelog: `git-cliff --tag v0.9.0 -o CHANGELOG.md`
 2. Bump version in `Cargo.toml`
-3. Create a git tag: `git tag -a v0.2.0 -m "Release v0.2.0"`
+3. Create a git tag: `git tag -a v0.9.0 -m "Release v0.9.0"`
 4. Push tags: `git push origin --tags`
 5. Create GitHub release
 6. Publish to crates.io: `cargo publish`

@@ -371,6 +371,15 @@ EMBELLAMA_BENCH_MODEL=/path/to/model.gguf cargo bench
 
 For development setup, testing, and contributing guidelines, please see [DEVELOPMENT.md](DEVELOPMENT.md).
 
+### Changelog
+
+This project uses [git-cliff](https://git-cliff.org/) to generate changelogs from [conventional commits](https://www.conventionalcommits.org/). Install with `cargo install git-cliff`, then:
+
+```bash
+just changelog              # Regenerate CHANGELOG.md
+just changelog-unreleased   # Preview unreleased changes
+```
+
 ## Examples
 
 See the `examples/` directory for more examples:

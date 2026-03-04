@@ -377,6 +377,17 @@ update-hooks:
         exit 1; \
     fi
 
+# Generate changelog (requires git-cliff: cargo install git-cliff)
+changelog:
+    @echo "Generating changelog..."
+    git-cliff -o CHANGELOG.md
+    @echo "✓ CHANGELOG.md updated"
+
+# Generate changelog for unreleased changes only
+changelog-unreleased:
+    @echo "Unreleased changes:"
+    @git-cliff --unreleased
+
 # Full CI simulation
 ci: clean check clippy test bench
     @echo "✓ CI checks completed successfully"
