@@ -247,8 +247,8 @@ impl EmbeddingModel {
         }
 
         // Set batch size (max usable context per sequence)
-        // Default: min(ctx_size, 2048) for reasonable memory usage
-        let n_batch = config.n_batch.unwrap_or(ctx_size.min(2048));
+        // Default: min(context_size, 2048) for reasonable memory usage
+        let n_batch = config.n_batch.unwrap_or(context_size.min(2048));
         debug!("Setting n_batch={} (max usable context)", n_batch);
 
         // Validate n_batch <= context_size

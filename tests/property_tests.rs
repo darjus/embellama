@@ -89,8 +89,10 @@ fn calculate_l2_norm(embedding: &[f32]) -> f32 {
 
 // Property: Normalized embeddings should have L2 norm ≈ 1.0
 proptest! {
-    #[test]
+
     #[serial]
+    #[test_with::env(EMBELLAMA_TEST_MODEL)]
+    #[test]
     fn test_normalized_embeddings_invariant(text in "[a-zA-Z0-9 ]{1,500}") {
         // Skip empty or whitespace-only strings
         if text.trim().is_empty() {
@@ -111,8 +113,9 @@ proptest! {
 
 // Property: Embedding dimensions should be consistent
 proptest! {
-    #[test]
     #[serial]
+    #[test_with::env(EMBELLAMA_TEST_MODEL)]
+    #[test]
     fn test_consistent_dimensions(texts in prop::collection::vec("[a-zA-Z0-9 ]{1,100}", 1..10)) {
         let mut embeddings = Vec::new();
         for text in &texts {
@@ -140,8 +143,9 @@ proptest! {
 
 // Property: Batch processing should preserve order
 proptest! {
-    #[test]
     #[serial]
+    #[test_with::env(EMBELLAMA_TEST_MODEL)]
+    #[test]
     #[ignore = "Batch order preservation needs more investigation"]
     fn test_batch_order_preservation(texts in prop::collection::vec("[a-zA-Z0-9 ]{1,100}", 2..20)) {
 
@@ -193,8 +197,9 @@ proptest! {
 
 // Property: Empty batch should return empty results
 proptest! {
-    #[test]
     #[serial]
+    #[test_with::env(EMBELLAMA_TEST_MODEL)]
+    #[test]
     fn test_empty_batch_handling(_seed in 0u32..100u32) {
         let empty: Vec<&str> = vec![];
         let embeddings = with_engine(|engine| {
@@ -208,8 +213,9 @@ proptest! {
 
 // Property: Identical texts should produce identical embeddings
 proptest! {
-    #[test]
     #[serial]
+    #[test_with::env(EMBELLAMA_TEST_MODEL)]
+    #[test]
     fn test_deterministic_embeddings(text in "[a-zA-Z0-9 ]{1,200}", repetitions in 2..5) {
 
         if text.trim().is_empty() {
@@ -241,8 +247,9 @@ proptest! {
 
 // Property: Text length should not cause crashes (within reasonable limits)
 proptest! {
-    #[test]
     #[serial]
+    #[test_with::env(EMBELLAMA_TEST_MODEL)]
+    #[test]
     fn test_text_length_handling(
         short_text in "[a-zA-Z ]{1,10}",
         medium_text in "[a-zA-Z ]{50,200}",
@@ -270,8 +277,9 @@ proptest! {
 
 // Property: Special characters should not crash the system
 proptest! {
-    #[test]
     #[serial]
+    #[test_with::env(EMBELLAMA_TEST_MODEL)]
+    #[test]
     fn test_special_characters_handling(
         text in prop::string::string_regex("[!@#$%^&*()_+={};:,.<>?/|\\-\\[\\]'\"`~]{1,50}").unwrap()
     ) {
@@ -290,8 +298,9 @@ proptest! {
 
 // Property: Unicode text should be handled properly
 proptest! {
-    #[test]
     #[serial]
+    #[test_with::env(EMBELLAMA_TEST_MODEL)]
+    #[test]
     fn test_unicode_handling(
         english in "[a-zA-Z ]{1,50}",
         chinese in "[\u{4e00}-\u{9fff}]{1,20}",
@@ -315,8 +324,9 @@ proptest! {
 
 // Property: Batch size limits should be respected
 proptest! {
-    #[test]
     #[serial]
+    #[test_with::env(EMBELLAMA_TEST_MODEL)]
+    #[test]
     fn test_batch_size_limits(batch_size in 1..200usize) {
         let texts: Vec<String> = (0..batch_size)
             .map(|i| format!("Text number {i}"))
@@ -334,8 +344,9 @@ proptest! {
 
 // Property: Embedding values should be finite (no NaN or Inf)
 proptest! {
-    #[test]
     #[serial]
+    #[test_with::env(EMBELLAMA_TEST_MODEL)]
+    #[test]
     fn test_finite_embeddings(text in "[a-zA-Z0-9 ]{1,500}") {
         if text.trim().is_empty() {
             return Ok(());
@@ -359,8 +370,9 @@ proptest! {
 
 // Property: Similar texts should produce similar embeddings (cosine similarity)
 proptest! {
-    #[test]
     #[serial]
+    #[test_with::env(EMBELLAMA_TEST_MODEL)]
+    #[test]
     fn test_semantic_similarity(base_text in "[a-zA-Z ]{10,50}", suffix in "[a-zA-Z ]{1,10}") {
         if base_text.trim().is_empty() {
             return Ok(());

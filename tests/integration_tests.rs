@@ -21,6 +21,11 @@ use std::path::PathBuf;
 use std::sync::Once;
 use tempfile::tempdir;
 
+/// Gets the path to the test model (only call when env var is known to be set)
+fn get_test_model_path() -> PathBuf {
+    PathBuf::from(std::env::var("EMBELLAMA_TEST_MODEL").unwrap())
+}
+
 // Initialize global tracing once for all tests
 static INIT: Once = Once::new();
 
@@ -57,20 +62,12 @@ fn create_test_config(model_path: PathBuf, name: &str) -> EngineConfig {
         .unwrap()
 }
 
-#[test]
 #[serial]
+#[test_with::env(EMBELLAMA_TEST_MODEL)]
 fn test_engine_creation_and_embedding() {
     init_test_tracing();
 
-    // This test requires a real GGUF model file - no mocks, no fallbacks
-    let model_path = std::env::var("EMBELLAMA_TEST_MODEL")
-        .expect("EMBELLAMA_TEST_MODEL must be set - run 'just download-test-model' first");
-
-    let model_path = PathBuf::from(model_path);
-    assert!(
-        model_path.exists(),
-        "Model file not found at {model_path:?}. Run 'just download-test-model' to download it."
-    );
+    let model_path = get_test_model_path();
 
     let normalize = true; // Store this before moving config
     let config = EngineConfig::builder()
@@ -115,18 +112,11 @@ fn test_engine_creation_and_embedding() {
     engine.cleanup_thread_models();
 }
 
-#[test]
 #[serial]
+#[test_with::env(EMBELLAMA_TEST_MODEL)]
 fn test_batch_embeddings() {
     init_test_tracing();
-    let model_path = std::env::var("EMBELLAMA_TEST_MODEL")
-        .expect("EMBELLAMA_TEST_MODEL must be set - run 'just download-test-model' first");
-
-    let model_path = PathBuf::from(model_path);
-    assert!(
-        model_path.exists(),
-        "Model file not found at {model_path:?}. Run 'just download-test-model' to download it."
-    );
+    let model_path = get_test_model_path();
 
     let config = EngineConfig::builder()
         .with_model_path(model_path)
@@ -158,18 +148,11 @@ fn test_batch_embeddings() {
     engine.cleanup_thread_models();
 }
 
-#[test]
 #[serial]
+#[test_with::env(EMBELLAMA_TEST_MODEL)]
 fn test_multiple_models() {
     init_test_tracing();
-    let model_path = std::env::var("EMBELLAMA_TEST_MODEL")
-        .expect("EMBELLAMA_TEST_MODEL must be set - run 'just download-test-model' first");
-
-    let model_path = PathBuf::from(model_path);
-    assert!(
-        model_path.exists(),
-        "Model file not found at {model_path:?}. Run 'just download-test-model' to download it."
-    );
+    let model_path = get_test_model_path();
 
     // Create engine with first model
     let config1 = EngineConfig::builder()
@@ -214,18 +197,11 @@ fn test_multiple_models() {
     engine.cleanup_thread_models();
 }
 
-#[test]
 #[serial]
+#[test_with::env(EMBELLAMA_TEST_MODEL)]
 fn test_error_handling() {
     init_test_tracing();
-    let model_path = std::env::var("EMBELLAMA_TEST_MODEL")
-        .expect("EMBELLAMA_TEST_MODEL must be set - run 'just download-test-model' first");
-
-    let model_path = PathBuf::from(model_path);
-    assert!(
-        model_path.exists(),
-        "Model file not found at {model_path:?}. Run 'just download-test-model' to download it."
-    );
+    let model_path = get_test_model_path();
 
     let config = EngineConfig::builder()
         .with_model_path(model_path)
@@ -247,18 +223,11 @@ fn test_error_handling() {
     engine.cleanup_thread_models();
 }
 
-#[test]
 #[serial]
+#[test_with::env(EMBELLAMA_TEST_MODEL)]
 fn test_granular_unload_operations() {
     init_test_tracing();
-    let model_path = std::env::var("EMBELLAMA_TEST_MODEL")
-        .expect("EMBELLAMA_TEST_MODEL must be set - run 'just download-test-model' first");
-
-    let model_path = PathBuf::from(model_path);
-    assert!(
-        model_path.exists(),
-        "Model file not found at {model_path:?}. Run 'just download-test-model' to download it."
-    );
+    let model_path = get_test_model_path();
 
     // Create engine with a model
     let config = EngineConfig::builder()
@@ -329,18 +298,11 @@ fn test_granular_unload_operations() {
     assert!(result.is_err());
 }
 
-#[test]
 #[serial]
+#[test_with::env(EMBELLAMA_TEST_MODEL)]
 fn test_model_registration_checking() {
     init_test_tracing();
-    let model_path = std::env::var("EMBELLAMA_TEST_MODEL")
-        .expect("EMBELLAMA_TEST_MODEL must be set - run 'just download-test-model' first");
-
-    let model_path = PathBuf::from(model_path);
-    assert!(
-        model_path.exists(),
-        "Model file not found at {model_path:?}. Run 'just download-test-model' to download it."
-    );
+    let model_path = get_test_model_path();
 
     // Create engine with a model
     let config = EngineConfig::builder()
@@ -418,18 +380,11 @@ fn test_model_registration_checking() {
     assert!(engine.is_model_loaded_in_thread("model2"));
 }
 
-#[test]
 #[serial]
+#[test_with::env(EMBELLAMA_TEST_MODEL)]
 fn test_pooling_strategies() {
     init_test_tracing();
-    let model_path = std::env::var("EMBELLAMA_TEST_MODEL")
-        .expect("EMBELLAMA_TEST_MODEL must be set - run 'just download-test-model' first");
-
-    let model_path = PathBuf::from(model_path);
-    assert!(
-        model_path.exists(),
-        "Model file not found at {model_path:?}. Run 'just download-test-model' to download it."
-    );
+    let model_path = get_test_model_path();
 
     // Test different pooling strategies
     let strategies = vec![
@@ -482,18 +437,11 @@ fn test_pooling_strategies() {
     }
 }
 
-#[test]
 #[serial]
+#[test_with::env(EMBELLAMA_TEST_MODEL)]
 fn test_model_warmup() {
     init_test_tracing();
-    let model_path = std::env::var("EMBELLAMA_TEST_MODEL")
-        .expect("EMBELLAMA_TEST_MODEL must be set - run 'just download-test-model' first");
-
-    let model_path = PathBuf::from(model_path);
-    assert!(
-        model_path.exists(),
-        "Model file not found at {model_path:?}. Run 'just download-test-model' to download it."
-    );
+    let model_path = get_test_model_path();
 
     let config = EngineConfig::builder()
         .with_model_path(model_path)
@@ -511,18 +459,11 @@ fn test_model_warmup() {
     assert!(!embedding.is_empty());
 }
 
-#[test]
 #[serial]
+#[test_with::env(EMBELLAMA_TEST_MODEL)]
 fn test_model_info() {
     init_test_tracing();
-    let model_path = std::env::var("EMBELLAMA_TEST_MODEL")
-        .expect("EMBELLAMA_TEST_MODEL must be set - run 'just download-test-model' first");
-
-    let model_path = PathBuf::from(model_path);
-    assert!(
-        model_path.exists(),
-        "Model file not found at {model_path:?}. Run 'just download-test-model' to download it."
-    );
+    let model_path = get_test_model_path();
 
     let config = EngineConfig::builder()
         .with_model_path(model_path)
@@ -560,20 +501,13 @@ fn test_configuration_validation() {
     assert!(result.is_err());
 }
 
-#[test]
 #[serial]
+#[test_with::env(EMBELLAMA_TEST_MODEL)]
 fn test_thread_safety() {
     use std::sync::Arc;
     use std::thread;
 
-    let model_path = std::env::var("EMBELLAMA_TEST_MODEL")
-        .expect("EMBELLAMA_TEST_MODEL must be set - run 'just download-test-model' first");
-
-    let model_path = PathBuf::from(model_path);
-    assert!(
-        model_path.exists(),
-        "Model file not found at {model_path:?}. Run 'just download-test-model' to download it."
-    );
+    let model_path = get_test_model_path();
 
     let config = EngineConfig::builder()
         .with_model_path(model_path)
@@ -602,17 +536,10 @@ fn test_thread_safety() {
 }
 
 /// Performance benchmark for single embedding
-#[test]
 #[serial]
+#[test_with::env(EMBELLAMA_TEST_MODEL)]
 fn bench_single_embedding() {
-    let model_path = std::env::var("EMBELLAMA_TEST_MODEL")
-        .expect("EMBELLAMA_TEST_MODEL must be set - run 'just download-test-model' first");
-
-    let model_path = PathBuf::from(model_path);
-    assert!(
-        model_path.exists(),
-        "Model file not found at {model_path:?}. Run 'just download-test-model' to download it."
-    );
+    let model_path = get_test_model_path();
 
     let config = EngineConfig::builder()
         .with_model_path(model_path)
@@ -652,13 +579,11 @@ fn bench_single_embedding() {
 // Phase 4: Batch Processing Tests
 // ============================================================================
 
-#[test]
 #[serial]
+#[test_with::env(EMBELLAMA_TEST_MODEL)]
 fn test_batch_processing_basic() {
     init_test_tracing();
-    let model_path =
-        std::env::var("EMBELLAMA_TEST_MODEL").expect("Set EMBELLAMA_TEST_MODEL to run this test");
-    let model_path = PathBuf::from(model_path);
+    let model_path = get_test_model_path();
 
     let config = create_test_config(model_path, "test_batch");
     let engine = EmbeddingEngine::new(config).unwrap();
@@ -687,13 +612,11 @@ fn test_batch_processing_basic() {
     assert_ne!(embeddings[1], embeddings[2]);
 }
 
-#[test]
 #[serial]
+#[test_with::env(EMBELLAMA_TEST_MODEL)]
 fn test_batch_processing_large() {
     init_test_tracing();
-    let model_path =
-        std::env::var("EMBELLAMA_TEST_MODEL").expect("Set EMBELLAMA_TEST_MODEL to run this test");
-    let model_path = PathBuf::from(model_path);
+    let model_path = get_test_model_path();
 
     let config = create_test_config(model_path, "test_large_batch");
     let engine = EmbeddingEngine::new(config).unwrap();
@@ -718,13 +641,11 @@ fn test_batch_processing_large() {
     assert_eq!(embeddings.len(), texts.len());
 }
 
-#[test]
 #[serial]
+#[test_with::env(EMBELLAMA_TEST_MODEL)]
 fn test_batch_processing_empty() {
     init_test_tracing();
-    let model_path =
-        std::env::var("EMBELLAMA_TEST_MODEL").expect("Set EMBELLAMA_TEST_MODEL to run this test");
-    let model_path = PathBuf::from(model_path);
+    let model_path = get_test_model_path();
 
     let config = create_test_config(model_path, "test_empty_batch");
     let engine = EmbeddingEngine::new(config).unwrap();
@@ -738,13 +659,11 @@ fn test_batch_processing_empty() {
     assert!(embeddings.is_empty());
 }
 
-#[test]
 #[serial]
+#[test_with::env(EMBELLAMA_TEST_MODEL)]
 fn test_batch_processing_single_item() {
     init_test_tracing();
-    let model_path =
-        std::env::var("EMBELLAMA_TEST_MODEL").expect("Set EMBELLAMA_TEST_MODEL to run this test");
-    let model_path = PathBuf::from(model_path);
+    let model_path = get_test_model_path();
 
     let config = create_test_config(model_path, "test_single_batch");
     let engine = EmbeddingEngine::new(config).unwrap();
@@ -762,14 +681,12 @@ fn test_batch_processing_single_item() {
     assert_eq!(batch_embeddings[0], single_embedding);
 }
 
-#[test]
 #[serial]
+#[test_with::env(EMBELLAMA_TEST_MODEL)]
 #[ignore = "Batch vs sequential processing produces slightly different results due to numerical precision differences in llama.cpp batching"]
 fn test_batch_processing_order_preservation() {
     init_test_tracing();
-    let model_path =
-        std::env::var("EMBELLAMA_TEST_MODEL").expect("Set EMBELLAMA_TEST_MODEL to run this test");
-    let model_path = PathBuf::from(model_path);
+    let model_path = get_test_model_path();
 
     let config = create_test_config(model_path, "test_order");
     let engine = EmbeddingEngine::new(config).unwrap();
@@ -798,14 +715,12 @@ fn test_batch_processing_order_preservation() {
     }
 }
 
-#[test]
 #[serial]
+#[test_with::env(EMBELLAMA_TEST_MODEL)]
 #[ignore = "Batch vs sequential processing produces slightly different results due to numerical precision differences in llama.cpp batching"]
 fn test_batch_vs_sequential_performance() {
     init_test_tracing();
-    let model_path =
-        std::env::var("EMBELLAMA_TEST_MODEL").expect("Set EMBELLAMA_TEST_MODEL to run this test");
-    let model_path = PathBuf::from(model_path);
+    let model_path = get_test_model_path();
 
     let config = create_test_config(model_path, "test_perf");
     let engine = EmbeddingEngine::new(config).unwrap();

@@ -195,20 +195,21 @@ fn test_embedding_near_context_limit() {
         return;
     };
 
-    println!("Testing embedding generation near 8K context limit");
+    println!("Testing embedding generation near effective token limit");
 
+    // Default n_batch=min(ctx,2048)=2048, n_seq_max=2 for encoder models,
+    // so effective_max = 2048/2 - 2 = 1022 tokens.
+    // Generate text safely under that limit (~900 tokens).
     let config = EngineConfig::builder()
         .with_model_path(model_path)
         .with_model_name("jina-test")
-        // Use auto-detected 8192 context
         .build()
         .unwrap();
 
     let engine = EmbeddingEngine::new(config).expect("Failed to create engine");
 
-    // Generate a large text (aim for ~7900 tokens, safely under 8192)
-    // Rough estimate: ~1.3 chars per token for English
-    let target_tokens = 7900;
+    // Aim for ~900 tokens, safely under effective_max of 1022
+    let target_tokens = 900;
     let chars_needed = target_tokens * 13 / 10;
     let large_text = "The quick brown fox jumps over the lazy dog. This is a test of the embedding system with a very long context. "
         .repeat(chars_needed / 110);
@@ -219,7 +220,7 @@ fn test_embedding_near_context_limit() {
         target_tokens
     );
 
-    // This should succeed with the full 8K context
+    // This should succeed within the effective token limit
     let result = engine.embed(Some("jina-test"), &large_text);
 
     match &result {
@@ -319,27 +320,30 @@ fn test_embedding_at_exact_boundary() {
         return;
     };
 
-    println!("Testing boundary conditions at exactly 8192 tokens");
+    println!("Testing boundary conditions with context_size=100");
 
-    // Use a smaller context for more precise testing
+    // Use a smaller context for precise boundary testing.
+    // Set n_seq_max=1 so effective_max = n_batch - 2 = 98 tokens
+    // (with n_seq_max=2, effective_max would be 100/2 - 2 = 48).
     let test_context_size = 100;
     let config = EngineConfig::builder()
         .with_model_path(model_path)
         .with_model_name("jina-test")
         .with_context_size(test_context_size)
+        .with_n_seq_max(1)
         .build()
         .unwrap();
 
     let engine = EmbeddingEngine::new(config).expect("Failed to create engine");
 
-    // Test text that's just under the limit
-    let safe_text = "word ".repeat(95); // Well under 100 tokens
+    // Test text that's under the effective limit (98 tokens)
+    let safe_text = "word ".repeat(90); // ~90 tokens, under effective_max of 98
     let result = engine.embed(Some("jina-test"), &safe_text);
     assert!(result.is_ok(), "Text under limit should succeed");
     println!("✓ Text under limit succeeded");
 
     // Test text that exceeds the limit
-    let oversized_text = "word ".repeat(150); // Definitely over 100 tokens
+    let oversized_text = "word ".repeat(150); // Definitely over 98 tokens
     let result = engine.embed(Some("jina-test"), &oversized_text);
     assert!(result.is_err(), "Text over limit should fail");
     println!("✓ Text over limit correctly rejected");
@@ -359,6 +363,9 @@ fn test_batch_with_large_contexts() {
 
     println!("Testing batch processing with large contexts");
 
+    // Default n_batch=2048, n_seq_max=2 for encoder models,
+    // so effective_max per sequence = 2048/2 - 2 = 1022 tokens.
+    // Use texts safely under that limit (~900 tokens each).
     let config = EngineConfig::builder()
         .with_model_path(model_path)
         .with_model_name("jina-test")
@@ -367,8 +374,8 @@ fn test_batch_with_large_contexts() {
 
     let engine = EmbeddingEngine::new(config).expect("Failed to create engine");
 
-    // Create 3 texts, each around 6000 tokens
-    let target_tokens = 6000;
+    // Create 3 texts, each around 900 tokens (under effective_max of 1022)
+    let target_tokens = 900;
     let chars_needed = target_tokens * 13 / 10;
     let large_text = "The quick brown fox jumps over the lazy dog in this batch test. "
         .repeat(chars_needed / 65);
