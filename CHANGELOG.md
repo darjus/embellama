@@ -5,6 +5,32 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.9.0] - 2026-03-05
+
+### Bug Fixes
+
+- Resolve warnings, fix bugs, and strengthen assertions across test suite ([cc9ef0f](https://github.com/darjus/embellama/commit/cc9ef0f3765b32b020f4aff477027ec888ff66b6))
+- Eliminate panics, harden error handling, and add security checks ([a8b3c89](https://github.com/darjus/embellama/commit/a8b3c89869e873a7b8c171df81a644fa7748d011))
+- Harden reranking with NaN detection, input validation, and correct usage reporting ([d717677](https://github.com/darjus/embellama/commit/d7176777faf23cfab08cd852b2e01807c87fb99b))
+- Upgrade sysinfo 0.33 -> 0.38 to fix test_memory_monitor on macOS ([56d3e7d](https://github.com/darjus/embellama/commit/56d3e7d69419a2f04d7d8f3002158d3d4fc37d20))
+- Resolve test failures and use test-with for env-gated tests ([79db5d7](https://github.com/darjus/embellama/commit/79db5d782ed78cfaf85e9428c637563f3bdd2315))
+
+### Documentation
+
+- Mention jina-reranker-v2 as supported reranking model ([9963937](https://github.com/darjus/embellama/commit/9963937f001cbec2c022fca2a556139c8c457e03))
+- Add git-cliff changelog recipes and documentation ([3f968da](https://github.com/darjus/embellama/commit/3f968da0cfa7d09eea87e43145c49580452c2a8b))
+
+### Features
+
+- Add token truncation support with comprehensive tests ([ef37a73](https://github.com/darjus/embellama/commit/ef37a73b1112fca6004d7110ab3d7f76b72e956f))
+- Add PoolingStrategy::None for per-token ColBERT-style embeddings ([ac91cd7](https://github.com/darjus/embellama/commit/ac91cd7908bf97b842e584504bba2e5980a3b4b7))
+- Add cross-encoder reranking support with PoolingStrategy::Rank ([ec93890](https://github.com/darjus/embellama/commit/ec9389096f3ab31d73315199d5708b7b68795ef6))
+- Upgrade llama-cpp-2 from 0.1.121 to 0.1.138 ([bada0d0](https://github.com/darjus/embellama/commit/bada0d0fdd26c85b3cc9626b8ed93beec12f71b2))
+
+### Testing
+
+- Add comprehensive reranking integration tests ([4745cd8](https://github.com/darjus/embellama/commit/4745cd876685f2168a4aa171abf542dade07fb3d))
+
 ## [0.8.0] - 2025-10-28
 
 ### Refactoring
