@@ -59,12 +59,12 @@ fn validate_backend_features() {
         println!("cargo:rustc-env=EMBELLAMA_BACKEND=metal");
     } else if cfg!(all(not(target_os = "macos"), feature = "cuda")) {
         println!("cargo:rustc-env=EMBELLAMA_BACKEND=cuda");
+    } else if cfg!(feature = "rocm") {
+        println!("cargo:rustc-env=EMBELLAMA_BACKEND=rocm");
     } else if cfg!(feature = "vulkan") {
         println!("cargo:rustc-env=EMBELLAMA_BACKEND=vulkan");
     } else if cfg!(feature = "openmp") {
         println!("cargo:rustc-env=EMBELLAMA_BACKEND=openmp");
-    } else if cfg!(feature = "native") {
-        println!("cargo:rustc-env=EMBELLAMA_BACKEND=native");
     } else {
         println!("cargo:rustc-env=EMBELLAMA_BACKEND=cpu");
     }

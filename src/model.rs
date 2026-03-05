@@ -324,7 +324,7 @@ impl EmbeddingModel {
         // Decoder models benefit significantly from flash attention
         if is_decoder {
             debug!("Enabling flash attention for decoder model");
-            ctx_params = ctx_params.with_flash_attention(true);
+            ctx_params = ctx_params.with_flash_attention_policy(1); // LLAMA_FLASH_ATTN_TYPE_ENABLED
         }
 
         // Get embedding dimensions from the model

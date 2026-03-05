@@ -11,10 +11,10 @@ categories = ["science", "api-bindings", "text-processing"]
 license = "Apache-2.0"
 
 [dependencies]
-llama-cpp-2 = { version = "^0.1.121" }
-llama-cpp-sys-2 = { version = "^0.1.121" }
+llama-cpp-2 = { version = "^0.1.138" }
+llama-cpp-sys-2 = { version = "^0.1.138" }
 byteorder = "1"
-thiserror = "1.0"
+thiserror = "2.0"
 anyhow = "1.0"
 tracing = "0.1"
 tracing-subscriber = { version = "0.3", features = ["env-filter"] }
@@ -75,10 +75,10 @@ metal = ["llama-cpp-2/metal"]  # macOS Metal acceleration
 cuda = ["llama-cpp-2/cuda"]  # NVIDIA CUDA acceleration
 cuda-no-vmm = ["cuda", "llama-cpp-2/cuda-no-vmm"]  # CUDA without virtual memory management
 vulkan = ["llama-cpp-2/vulkan"]  # Vulkan acceleration (cross-platform GPU)
+rocm = ["llama-cpp-2/rocm"]  # AMD ROCm/HIP acceleration
 
 # CPU optimization features
 openmp = ["llama-cpp-2/openmp"]  # OpenMP parallel processing
-native = ["llama-cpp-2/native"]  # Native CPU optimizations
 
 # Other llama-cpp-2 features
 dynamic-link = ["llama-cpp-2/dynamic-link"]  # Dynamic linking
@@ -86,13 +86,15 @@ sampler = ["llama-cpp-2/sampler"]  # Sampler support
 
 # Android-specific features
 android-shared-stdcxx = ["llama-cpp-2/android-shared-stdcxx"]
+android-static-stdcxx = ["llama-cpp-2/android-static-stdcxx"]
 mtmd = ["llama-cpp-2/mtmd"]
 
 # Backend feature groups (convenience aliases)
 cuda-backend = ["cuda"]
 metal-backend = ["metal"]
 vulkan-backend = ["vulkan"]
-cpu-optimized = ["native", "openmp"]
+rocm-backend = ["rocm"]
+cpu-optimized = ["openmp"]
 
 # Server feature
 server = ["dep:axum", "dep:tokio", "dep:clap", "dep:async-trait", "dep:tower", "dep:tower-http", "dep:uuid", "dep:base64", "dep:governor", "dep:prometheus", "dep:rand", "dep:subtle"]

@@ -45,7 +45,7 @@ fn test_backend_detection() {
     match backend {
         BackendType::Cpu
         | BackendType::OpenMP
-        | BackendType::Native
+        | BackendType::ROCm
         | BackendType::Cuda
         | BackendType::Metal
         | BackendType::Vulkan => {
@@ -97,10 +97,7 @@ fn test_backend_gpu_acceleration() {
     }
 
     // CPU backends should not report GPU acceleration
-    if matches!(
-        backend,
-        BackendType::Cpu | BackendType::OpenMP | BackendType::Native
-    ) {
+    if matches!(backend, BackendType::Cpu | BackendType::OpenMP) {
         assert!(!backend.is_gpu_accelerated());
         assert_eq!(backend.recommended_gpu_layers(), None);
     }
@@ -152,7 +149,7 @@ fn test_backend_display() {
     // Test Display implementation
     assert_eq!(BackendType::Cpu.to_string(), "CPU");
     assert_eq!(BackendType::OpenMP.to_string(), "OpenMP");
-    assert_eq!(BackendType::Native.to_string(), "Native");
+    assert_eq!(BackendType::ROCm.to_string(), "ROCm");
     assert_eq!(BackendType::Cuda.to_string(), "CUDA");
     assert_eq!(BackendType::Metal.to_string(), "Metal");
     assert_eq!(BackendType::Vulkan.to_string(), "Vulkan");
