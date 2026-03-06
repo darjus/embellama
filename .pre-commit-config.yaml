@@ -43,6 +43,13 @@ repos:
         pass_filenames: false
         files: \.rs$
 
+      - id: test-doc
+        name: doc tests
+        entry: just test-doc
+        language: system
+        pass_filenames: false
+        files: (\.rs$|README\.md$)
+
   # Security audit (optional - only if cargo-audit is installed)
   - repo: local
     hooks:

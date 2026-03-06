@@ -255,6 +255,11 @@ test-compile:
     @echo "Compiling tests with platform features ({{platform_features}})..."
     cargo test --no-run --lib --features "{{platform_features}}"
 
+# Run doc tests (compiles README and doc examples)
+test-doc:
+    @echo "Running doc tests with platform features ({{platform_features}})..."
+    cargo test --doc --features "{{platform_features}}"
+
 # Build documentation with platform features
 doc:
     @echo "Building documentation with platform features ({{platform_features}})..."
@@ -585,6 +590,10 @@ release VERSION:
     # Tests
     echo "🧪 Running tests..."
     just test-unit
+
+    # Doc tests (README examples)
+    echo "📖 Running doc tests..."
+    just test-doc
 
     echo "✅ All quality checks passed"
     echo

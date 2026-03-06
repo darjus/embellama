@@ -14,12 +14,13 @@ High-performance Rust library for generating text embeddings using llama-cpp.
 - **Multiple Models**: Support for managing multiple embedding models
 - **Batch Processing**: Efficient batch embedding generation
 - **Flexible Configuration**: Extensive configuration options for model tuning
-- **Multiple Pooling Strategies**: Mean, CLS, Max, and MeanSqrt pooling
+- **Multiple Pooling Strategies**: Mean, CLS, Max, and `MeanSqrt` pooling
 - **Hardware Acceleration**: Support for Metal (macOS), CUDA (NVIDIA), Vulkan, and optimized CPU backends
 
 ## Quick Start
 
-```rust
+```rust,no_run
+# fn main() -> anyhow::Result<()> {
 use embellama::{ModelConfig, EngineConfig, EmbeddingEngine, NormalizationMode};
 
 // Build model configuration
@@ -43,14 +44,25 @@ let embedding = engine.embed(None, text)?;
 
 // Generate batch embeddings
 let texts = vec!["Text 1", "Text 2", "Text 3"];
-let embeddings = engine.embed_batch(None, texts)?;
+let embeddings = engine.embed_batch(None, &texts)?;
+# Ok(())
+# }
 ```
 
 ### Singleton Pattern (Advanced)
 
 The engine can optionally use a singleton pattern for shared access across your application. The singleton methods return `Arc<Mutex<EmbeddingEngine>>` for thread-safe access:
 
-```rust
+```rust,no_run
+# fn main() -> anyhow::Result<()> {
+# use embellama::{ModelConfig, EngineConfig, EmbeddingEngine};
+# let model_config = ModelConfig::builder()
+#     .with_model_path("/path/to/model.gguf")
+#     .with_model_name("my-model")
+#     .build()?;
+# let config = EngineConfig::builder()
+#     .with_model_config(model_config)
+#     .build()?;
 // Get or initialize singleton instance (returns Arc<Mutex<EmbeddingEngine>>)
 let engine = EmbeddingEngine::get_or_init(config)?;
 
@@ -63,13 +75,15 @@ let embedding = {
     let engine_guard = engine.lock().unwrap();
     engine_guard.embed(None, "text")?
 };
+# Ok(())
+# }
 ```
 
 ## Tested Models
 
 The library has been tested with the following GGUF models:
-- **MiniLM-L6-v2** (Q4_K_M): ~15MB, 384-dimensional embeddings - used for integration tests
-- **Jina Embeddings v2 Base Code** (Q4_K_M): ~110MB, 768-dimensional embeddings - used for benchmarks
+- **MiniLM-L6-v2** (`Q4_K_M`): ~15MB, 384-dimensional embeddings - used for integration tests
+- **Jina Embeddings v2 Base Code** (`Q4_K_M`): ~110MB, 768-dimensional embeddings - used for benchmarks
 
 Both BERT-style and LLaMA-style embedding models are supported.
 
@@ -90,7 +104,8 @@ Platform-specific GPU acceleration and other optional features are available via
 
 ### Basic Configuration
 
-```rust
+```rust,no_run
+# fn main() -> anyhow::Result<()> {
 use embellama::{ModelConfig, EngineConfig};
 
 let model_config = ModelConfig::builder()
@@ -101,11 +116,14 @@ let model_config = ModelConfig::builder()
 let config = EngineConfig::builder()
     .with_model_config(model_config)
     .build()?;
+# Ok(())
+# }
 ```
 
 ### Advanced Configuration
 
-```rust
+```rust,no_run
+# fn main() -> anyhow::Result<()> {
 use embellama::{ModelConfig, EngineConfig, PoolingStrategy, NormalizationMode};
 
 let model_config = ModelConfig::builder()
@@ -116,7 +134,6 @@ let model_config = ModelConfig::builder()
     .with_n_gpu_layers(32)
     .with_normalization_mode(NormalizationMode::L2)
     .with_pooling_strategy(PoolingStrategy::Mean)
-    .with_add_bos_token(Some(false))
     .build()?;
 
 let config = EngineConfig::builder()
@@ -124,13 +141,16 @@ let config = EngineConfig::builder()
     .with_use_gpu(true)
     .with_batch_size(64)
     .build()?;
+# Ok(())
+# }
 ```
 
 ### Backend Auto-Detection
 
 The library can automatically detect and use the best available backend:
 
-```rust
+```rust,no_run
+# fn main() -> anyhow::Result<()> {
 use embellama::{EngineConfig, detect_best_backend, BackendInfo};
 
 // Automatic backend detection
@@ -143,6 +163,8 @@ let config = EngineConfig::with_backend_detection()
 let backend_info = BackendInfo::new();
 println!("Using backend: {}", backend_info.backend);
 println!("Available features: {:?}", backend_info.available_features);
+# Ok(())
+# }
 ```
 
 ## Pooling Strategies
@@ -150,113 +172,21 @@ println!("Available features: {:?}", backend_info.available_features);
 - **Mean**: Average pooling across all tokens (default)
 - **CLS**: Use the CLS token embedding
 - **Max**: Maximum pooling across dimensions
-- **MeanSqrt**: Mean pooling with square root of sequence length normalization
-
-## Model-Specific Configuration
-
-### BOS Token Handling
-
-The library automatically detects model types and applies appropriate BOS token handling:
-
-**Encoder Models** (BERT, E5, BGE, GTE, MiniLM, etc.):
-- BOS token is **not** added (these models use CLS/SEP tokens)
-- Auto-detected by model name patterns
-
-**Decoder Models** (LLaMA, Mistral, Vicuna, etc.):
-- BOS token **is** added (standard for autoregressive models)
-- Default behavior for unknown models
-
-**Manual Override**:
-```rust
-// Force disable BOS for a specific model
-let model_config = ModelConfig::builder()
-    .with_model_path("/path/to/model.gguf")
-    .with_model_name("custom-encoder")
-    .with_add_bos_token(Some(false))  // Explicitly disable BOS
-    .build()?;
-
-// Force enable BOS
-let model_config = ModelConfig::builder()
-    .with_model_path("/path/to/model.gguf")
-    .with_model_name("custom-decoder")
-    .with_add_bos_token(Some(true))   // Explicitly enable BOS
-    .build()?;
-
-// Auto-detect (default)
-let model_config = ModelConfig::builder()
-    .with_model_path("/path/to/model.gguf")
-    .with_model_name("some-model")
-    .with_add_bos_token(None)         // Let the library decide
-    .build()?;
-```
+- **`MeanSqrt`**: Mean pooling with square root of sequence length normalization
 
 ## Thread Safety
 
-**⚠️ IMPORTANT**: The `LlamaContext` from llama-cpp is `!Send` and `!Sync`, which means:
+The `LlamaContext` from llama-cpp is `!Send` and `!Sync`, which means:
 
 - Models cannot be moved between threads
 - Models cannot be shared using `Arc` alone
 - Each thread must own its model instance
-- All concurrency must use message passing
 
 The library is designed with these constraints in mind:
 
-- Models are `!Send` due to llama-cpp constraints
 - Use thread-local storage for model instances
 - Batch processing uses parallel pre/post-processing with sequential inference
-
-Example of thread-safe usage with regular (non-singleton) engine:
-
-```rust
-use std::thread;
-
-// Each thread needs its own engine instance due to llama-cpp constraints
-let handles: Vec<_> = (0..4)
-    .map(|i| {
-        let config = config.clone(); // Clone config for each thread
-        thread::spawn(move || {
-            // Create engine instance in each thread
-            let engine = EmbeddingEngine::new(config)?;
-            let text = format!("Thread {} text", i);
-            let embedding = engine.embed(None, &text)?;
-            Ok::<_, embellama::Error>(embedding)
-        })
-    })
-    .collect();
-
-for handle in handles {
-    let embedding = handle.join().unwrap()?;
-    // Process embedding
-}
-```
-
-Or using the singleton pattern for shared access:
-
-```rust
-use std::thread;
-
-// Initialize singleton once
-let engine = EmbeddingEngine::get_or_init(config)?;
-
-let handles: Vec<_> = (0..4)
-    .map(|i| {
-        let engine = engine.clone(); // Clone Arc<Mutex<>>
-        thread::spawn(move || {
-            let text = format!("Thread {} text", i);
-            let embedding = {
-                let engine_guard = engine.lock().unwrap();
-                engine_guard.embed(None, &text)?
-            };
-            Ok::<_, embellama::Error>(embedding)
-        })
-    })
-    .collect();
-
-for handle in handles {
-    let embedding = handle.join().unwrap()?;
-    // Process embedding
-}
-```
+- The singleton pattern provides `Arc<Mutex<EmbeddingEngine>>` for cross-thread coordination
 
 ## API Reference
 
@@ -269,7 +199,17 @@ The library provides granular control over model lifecycle:
 - **Registration**: Model configuration stored in registry
 - **Loading**: Model actually loaded in thread-local memory
 
-```rust
+```rust,no_run
+# fn main() -> anyhow::Result<()> {
+# use embellama::{ModelConfig, EngineConfig, EmbeddingEngine};
+# let model_config = ModelConfig::builder()
+#     .with_model_path("/path/to/model.gguf")
+#     .with_model_name("my-model")
+#     .build()?;
+# let config = EngineConfig::builder()
+#     .with_model_config(model_config)
+#     .build()?;
+# let engine = EmbeddingEngine::new(config)?;
 // Check if model is registered (has configuration)
 if engine.is_model_registered("my-model") {
     println!("Model configuration exists");
@@ -279,15 +219,23 @@ if engine.is_model_registered("my-model") {
 if engine.is_model_loaded_in_thread("my-model") {
     println!("Model is ready to use in this thread");
 }
-
-// Deprecated - use is_model_registered() for clarity
-#[deprecated]
-engine.is_model_loaded("my-model");  // Same as is_model_registered()
+# Ok(())
+# }
 ```
 
 #### Granular Unload Operations
 
-```rust
+```rust,no_run
+# fn main() -> anyhow::Result<()> {
+# use embellama::{ModelConfig, EngineConfig, EmbeddingEngine};
+# let model_config = ModelConfig::builder()
+#     .with_model_path("/path/to/model.gguf")
+#     .with_model_name("my-model")
+#     .build()?;
+# let config = EngineConfig::builder()
+#     .with_model_config(model_config)
+#     .build()?;
+# let mut engine = EmbeddingEngine::new(config)?;
 // Remove only from current thread (keeps registration)
 engine.drop_model_from_thread("my-model")?;
 // Model can be reloaded on next use
@@ -299,6 +247,8 @@ engine.unregister_model("my-model")?;
 // Full unload - removes from both registry and thread
 engine.unload_model("my-model")?;
 // Completely removes the model
+# Ok(())
+# }
 ```
 
 ### Model Loading Behavior
@@ -306,9 +256,25 @@ engine.unload_model("my-model")?;
 - **Initial model** (via `EmbeddingEngine::new()`): Loaded immediately in current thread
 - **Additional models** (via `load_model()`): Lazy-loaded on first use
 
-```rust
+```rust,no_run
+# fn main() -> anyhow::Result<()> {
+# use embellama::{ModelConfig, EngineConfig, EmbeddingEngine};
+# let model_config = ModelConfig::builder()
+#     .with_model_path("/path/to/model.gguf")
+#     .with_model_name("model1")
+#     .build()?;
+# let config = EngineConfig::builder()
+#     .with_model_config(model_config)
+#     .build()?;
+# let model_config2 = ModelConfig::builder()
+#     .with_model_path("/path/to/model2.gguf")
+#     .with_model_name("model2")
+#     .build()?;
+# let config2 = EngineConfig::builder()
+#     .with_model_config(model_config2)
+#     .build()?;
 // First model - loaded immediately
-let engine = EmbeddingEngine::new(config)?;
+let mut engine = EmbeddingEngine::new(config)?;
 assert!(engine.is_model_loaded_in_thread("model1"));
 
 // Additional model - lazy loaded
@@ -319,6 +285,8 @@ assert!(!engine.is_model_loaded_in_thread("model2"));  // Not yet loaded
 // Triggers actual loading in thread
 engine.embed(Some("model2"), "text")?;
 assert!(engine.is_model_loaded_in_thread("model2"));  // Now loaded
+# Ok(())
+# }
 ```
 
 ## Performance

@@ -14,51 +14,7 @@
 
 #![warn(missing_docs, clippy::all, clippy::pedantic)]
 #![allow(clippy::module_name_repetitions, clippy::must_use_candidate)]
-
-//! # Embellama
-//!
-//! A high-performance Rust library for generating text embeddings using llama-cpp-2.
-//!
-//! ## Features
-//!
-//! - High-performance embedding generation using llama.cpp backend
-//! - Support for batch processing with parallel pre/post-processing
-//! - Thread-safe model management with Arc/RwLock
-//! - Comprehensive error handling
-//! - Builder pattern for configuration
-//! - Optional HTTP server with OpenAI-compatible API
-//!
-//! ## Example
-//!
-//! ```ignore
-//! use embellama::{EmbeddingEngine, EngineConfig};
-//!
-//! # async fn example() -> Result<(), Box<dyn std::error::Error>> {
-//! // Configure and build the engine
-//! let config = EngineConfig::builder()
-//!     .with_model_path("models/all-MiniLM-L6-v2.gguf")
-//!     .with_model_name("minilm")
-//!     .with_context_size(512)
-//!     .with_n_threads(4)
-//!     .build()?;
-//!
-//! let engine = EmbeddingEngine::new(config)?;
-//!
-//! // Generate a single embedding
-//! let embedding = engine.embed("minilm", "Hello, world!")?;
-//! println!("Embedding dimension: {}", embedding.len());
-//!
-//! // Generate batch embeddings
-//! let texts = vec![
-//!     "First document",
-//!     "Second document",
-//!     "Third document",
-//! ];
-//! let embeddings = engine.embed_batch("minilm", texts)?;
-//! println!("Generated {} embeddings", embeddings.len());
-//! # Ok(())
-//! # }
-//! ```
+#![doc = include_str!("../README.md")]
 
 /// Backend detection and configuration
 mod backend;
