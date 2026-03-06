@@ -597,10 +597,18 @@ release VERSION:
     sed -i.bak 's/^version = ".*"/version = "{{VERSION}}"/' Cargo.toml
     rm Cargo.toml.bak
 
-    # Update version in README.md
-    sed -i.bak 's/embellama = "[0-9]\+\.[0-9]\+\.[0-9]\+"/embellama = "{{VERSION}}"/g' README.md
-    sed -i.bak 's/version = "[0-9]\+\.[0-9]\+\.[0-9]\+"/version = "{{VERSION}}"/g' README.md
-    rm README.md.bak
+    # Update version in README.md (use -E for extended regex, portable across macOS/Linux)
+    sed -i.bak -E 's/embellama = "[0-9]+\.[0-9]+\.[0-9]+"/embellama = "{{VERSION}}"/g' README.md
+    sed -i.bak -E 's/(version = ")[0-9]+\.[0-9]+\.[0-9]+(")/\1{{VERSION}}\2/g' README.md
+    rm -f README.md.bak
+
+    # Verify README was actually updated
+    if grep -q 'embellama = "{{VERSION}}"' README.md; then
+        echo "✅ README.md version updated to {{VERSION}}"
+    else
+        echo "❌ Failed to update version in README.md"
+        exit 1
+    fi
 
     # Update Cargo.lock
     cargo update -p embellama
