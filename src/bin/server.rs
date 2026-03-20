@@ -126,7 +126,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     info!(
         "Pooling: {}, Normalization: {}",
         args.pooling_strategy.as_deref().unwrap_or("auto"),
-        args.normalization_mode.as_deref().unwrap_or("l2")
+        args.normalization_mode.as_deref().unwrap_or("auto")
     );
 
     // Parse pooling strategy if provided

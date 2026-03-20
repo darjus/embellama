@@ -124,10 +124,13 @@ fn test_engine_config_with_rank_pooling() {
         .build()
         .unwrap();
 
-    assert_eq!(config.model_config.pooling_strategy, PoolingStrategy::Rank);
+    assert_eq!(
+        config.model_config.pooling_strategy,
+        Some(PoolingStrategy::Rank)
+    );
     assert_eq!(
         config.model_config.normalization_mode,
-        NormalizationMode::None
+        Some(NormalizationMode::None)
     );
 }
 
@@ -434,4 +437,56 @@ fn test_rerank_on_embedding_model_fails() {
             .to_string()
             .contains("PoolingStrategy::Rank")
     );
+}
+
+// ============================================================================
+// Auto-detection tests (require real reranking model with GGUF pooling_type=4)
+// ============================================================================
+
+#[test]
+#[serial]
+fn test_rerank_auto_detect_from_gguf() {
+    if !should_run_rerank_tests() {
+        eprintln!("Skipping: EMBELLAMA_TEST_RERANK_MODEL not set");
+        return;
+    }
+    common::init_test_logger();
+
+    let model_path = get_rerank_model_path().unwrap();
+
+    // Do NOT set pooling_strategy or normalization_mode — let auto-detection work
+    let config = EngineConfig::builder()
+        .with_model_path(&model_path)
+        .with_model_name("reranker-auto")
+        .with_n_seq_max(4)
+        .build()
+        .unwrap();
+
+    let engine = EmbeddingEngine::new(config).unwrap();
+
+    let query = "What is the capital of France?";
+    let documents = [
+        "Paris is the capital and largest city of France.",
+        "Berlin is the capital of Germany.",
+        "The weather is nice today.",
+    ];
+
+    // rerank() should work without explicit PoolingStrategy::Rank
+    // because GGUF metadata pooling_type=4 is auto-detected
+    let results = engine
+        .rerank(Some("reranker-auto"), query, &documents, None, true)
+        .unwrap();
+
+    assert_eq!(results.len(), 3);
+
+    // Results should be sorted by relevance (descending)
+    for i in 1..results.len() {
+        assert!(
+            results[i - 1].relevance_score >= results[i].relevance_score,
+            "Results should be sorted descending"
+        );
+    }
+
+    // The most relevant document should be about Paris (index 0)
+    assert_eq!(results[0].index, 0, "Paris document should be ranked first");
 }

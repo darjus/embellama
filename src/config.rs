@@ -55,10 +55,10 @@ pub struct ModelConfig {
     pub use_mlock: bool,
 
     /// Normalization mode for embeddings
-    pub normalization_mode: NormalizationMode,
+    pub normalization_mode: Option<NormalizationMode>,
 
     /// Pooling strategy for embeddings
-    pub pooling_strategy: PoolingStrategy,
+    pub pooling_strategy: Option<PoolingStrategy>,
 
     /// Maximum number of sequences for batch processing
     /// Default: 1, max: 64 (llama.cpp limit)
@@ -210,8 +210,8 @@ impl Default for ModelConfig {
             n_gpu_layers: None,
             use_mmap: true,
             use_mlock: false,
-            normalization_mode: NormalizationMode::L2,
-            pooling_strategy: PoolingStrategy::default(),
+            normalization_mode: None,
+            pooling_strategy: None,
             n_seq_max: None,
             context_size: None,
             enable_kv_optimization: false,
@@ -299,14 +299,14 @@ impl ModelConfigBuilder {
     /// Set the normalization mode for embeddings
     #[must_use]
     pub fn with_normalization_mode(mut self, mode: NormalizationMode) -> Self {
-        self.config.normalization_mode = mode;
+        self.config.normalization_mode = Some(mode);
         self
     }
 
     /// Set the pooling strategy
     #[must_use]
     pub fn with_pooling_strategy(mut self, strategy: PoolingStrategy) -> Self {
-        self.config.pooling_strategy = strategy;
+        self.config.pooling_strategy = Some(strategy);
         self
     }
 
@@ -903,14 +903,14 @@ impl EngineConfigBuilder {
     /// Set the normalization mode for embeddings (convenience method)
     #[must_use]
     pub fn with_normalization_mode(mut self, mode: NormalizationMode) -> Self {
-        self.config.model_config.normalization_mode = mode;
+        self.config.model_config.normalization_mode = Some(mode);
         self
     }
 
     /// Set the pooling strategy (convenience method)
     #[must_use]
     pub fn with_pooling_strategy(mut self, strategy: PoolingStrategy) -> Self {
-        self.config.model_config.pooling_strategy = strategy;
+        self.config.model_config.pooling_strategy = Some(strategy);
         self
     }
 
@@ -1239,9 +1239,12 @@ mod tests {
         assert_eq!(config.model_config.n_gpu_layers, Some(32));
         assert_eq!(
             config.model_config.normalization_mode,
-            NormalizationMode::L2
+            Some(NormalizationMode::L2)
         );
-        assert_eq!(config.model_config.pooling_strategy, PoolingStrategy::Cls);
+        assert_eq!(
+            config.model_config.pooling_strategy,
+            Some(PoolingStrategy::Cls)
+        );
         assert_eq!(config.batch_size, Some(128));
     }
 
@@ -1280,11 +1283,8 @@ mod tests {
         assert!(config.model_config.n_threads.is_none());
         assert!(!config.use_gpu);
         assert!(config.model_config.n_gpu_layers.is_none());
-        assert_eq!(
-            config.model_config.normalization_mode,
-            NormalizationMode::L2
-        );
-        assert_eq!(config.model_config.pooling_strategy, PoolingStrategy::Mean);
+        assert_eq!(config.model_config.normalization_mode, None);
+        assert_eq!(config.model_config.pooling_strategy, None);
         assert!(config.batch_size.is_none());
     }
 
@@ -1312,7 +1312,7 @@ mod tests {
                 .build()
                 .unwrap();
 
-            assert_eq!(config.model_config.pooling_strategy, strategy);
+            assert_eq!(config.model_config.pooling_strategy, Some(strategy));
         }
     }
 

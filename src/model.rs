@@ -205,6 +205,7 @@ impl EmbeddingModel {
                 architecture: Some("unknown".to_string()),
                 embedding_dimensions: 0,
                 context_size: ctx_size as usize,
+                pooling_type: None,
             }
         });
         let is_decoder = metadata.is_decoder();
@@ -213,6 +214,38 @@ impl EmbeddingModel {
             if is_decoder { "decoder" } else { "encoder" },
             config.model_name
         );
+
+        // Resolve effective pooling strategy from config or GGUF metadata
+        let effective_pooling = match config.pooling_strategy {
+            Some(strategy) => strategy,
+            None => {
+                if metadata.is_reranker() {
+                    info!("Auto-detected reranker model from GGUF metadata, using Rank pooling");
+                    PoolingStrategy::Rank
+                } else if is_decoder {
+                    PoolingStrategy::Last
+                } else {
+                    PoolingStrategy::Mean
+                }
+            }
+        };
+
+        // Resolve effective normalization mode
+        let effective_normalization = match config.normalization_mode {
+            Some(mode) => mode,
+            None => {
+                if effective_pooling == PoolingStrategy::Rank {
+                    NormalizationMode::None
+                } else {
+                    NormalizationMode::L2
+                }
+            }
+        };
+
+        // Create resolved config with effective values
+        let mut resolved_config = config.clone();
+        resolved_config.pooling_strategy = Some(effective_pooling);
+        resolved_config.normalization_mode = Some(effective_normalization);
 
         // Use configured n_seq_max or default to 2 for reasonable batching
         let n_seq_max = config.n_seq_max.unwrap_or(2);
@@ -313,11 +346,11 @@ impl EmbeddingModel {
 
         // Set pooling type based on our pooling strategy
         // This is critical for decoder models (e.g., Qwen) which require Last pooling
-        let llama_pooling_type = pooling_strategy_to_llama_type(config.pooling_strategy);
+        let llama_pooling_type = pooling_strategy_to_llama_type(effective_pooling);
         ctx_params = ctx_params.with_pooling_type(llama_pooling_type);
         debug!(
             "Set llama.cpp pooling type to {:?} for strategy {:?}",
-            llama_pooling_type, config.pooling_strategy
+            llama_pooling_type, effective_pooling
         );
 
         // Enable flash attention for better performance
@@ -345,7 +378,7 @@ impl EmbeddingModel {
 
         let model = Self {
             cell,
-            config: config.clone(),
+            config: resolved_config,
             model_path: config.model_path.clone(),
             model_name: config.model_name.clone(),
             embedding_dimensions,
@@ -396,6 +429,24 @@ impl EmbeddingModel {
     pub fn unload(self) {
         // Model is dropped here, which triggers cleanup
         drop(self);
+    }
+
+    /// Returns the effective pooling strategy.
+    ///
+    /// After construction, `pooling_strategy` is always `Some(...)` because
+    /// `new()` resolves `None` to a concrete strategy. This helper avoids
+    /// `.unwrap()` calls throughout the codebase.
+    fn effective_pooling(&self) -> PoolingStrategy {
+        self.config
+            .pooling_strategy
+            .unwrap_or(PoolingStrategy::Mean)
+    }
+
+    /// Returns the effective normalization mode.
+    fn effective_normalization(&self) -> NormalizationMode {
+        self.config
+            .normalization_mode
+            .unwrap_or(NormalizationMode::L2)
     }
 
     /// Checks if the model is currently loaded and ready for inference.
@@ -1110,14 +1161,14 @@ impl EmbeddingModel {
             embeddings[0].clone()
         } else {
             // Apply our pooling strategy for multi-token outputs
-            Self::apply_pooling(embeddings, self.config.pooling_strategy)?
+            Self::apply_pooling(embeddings, self.effective_pooling())?
         };
 
         // Apply normalization based on configured mode
-        if self.config.normalization_mode == NormalizationMode::None {
+        if self.effective_normalization() == NormalizationMode::None {
             Ok(pooled)
         } else {
-            Self::normalize_embedding(pooled, self.config.normalization_mode)
+            Self::normalize_embedding(pooled, self.effective_normalization())
         }
     }
 
@@ -1133,12 +1184,12 @@ impl EmbeddingModel {
             });
         }
 
-        if self.config.normalization_mode == NormalizationMode::None {
+        if self.effective_normalization() == NormalizationMode::None {
             Ok(embeddings.to_vec())
         } else {
             embeddings
                 .iter()
-                .map(|emb| Self::normalize_embedding(emb.clone(), self.config.normalization_mode))
+                .map(|emb| Self::normalize_embedding(emb.clone(), self.effective_normalization()))
                 .collect()
         }
     }
@@ -1176,7 +1227,8 @@ impl EmbeddingModel {
                 // Got pooled embedding from llama.cpp
                 debug!(
                     "Retrieved pooled embedding for sequence {} (strategy: {:?})",
-                    seq_id, self.config.pooling_strategy
+                    seq_id,
+                    self.effective_pooling()
                 );
                 return Ok(vec![seq_embeddings.to_vec()]);
             }
@@ -1184,7 +1236,7 @@ impl EmbeddingModel {
             if seq_id == 0 {
                 debug!(
                     "Failed to get sequence embedding, falling back to token-wise (strategy: {:?})",
-                    self.config.pooling_strategy
+                    self.effective_pooling()
                 );
             }
 
@@ -1484,11 +1536,11 @@ impl EmbeddingModel {
         document: &str,
         truncate: TruncateTokens,
     ) -> Result<f32> {
-        if self.config.pooling_strategy != PoolingStrategy::Rank {
+        if self.effective_pooling() != PoolingStrategy::Rank {
             return Err(Error::InvalidOperation {
                 message: format!(
                     "Reranking requires PoolingStrategy::Rank, but model is configured with {:?}",
-                    self.config.pooling_strategy
+                    self.effective_pooling()
                 ),
             });
         }
@@ -1548,11 +1600,11 @@ impl EmbeddingModel {
         documents: &[&str],
         truncate: TruncateTokens,
     ) -> Result<Vec<f32>> {
-        if self.config.pooling_strategy != PoolingStrategy::Rank {
+        if self.effective_pooling() != PoolingStrategy::Rank {
             return Err(Error::InvalidOperation {
                 message: format!(
                     "Reranking requires PoolingStrategy::Rank, but model is configured with {:?}",
-                    self.config.pooling_strategy
+                    self.effective_pooling()
                 ),
             });
         }

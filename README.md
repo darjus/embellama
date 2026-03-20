@@ -84,8 +84,9 @@ let embedding = {
 The library has been tested with the following GGUF models:
 - **MiniLM-L6-v2** (`Q4_K_M`): ~15MB, 384-dimensional embeddings - used for integration tests
 - **Jina Embeddings v2 Base Code** (`Q4_K_M`): ~110MB, 768-dimensional embeddings - used for benchmarks
+- **BAAI/bge-reranker-v2-m3** (`Q4_K_M`): Cross-encoder reranking model - auto-detected from GGUF metadata
 
-Both BERT-style and LLaMA-style embedding models are supported.
+Both BERT-style and LLaMA-style embedding models are supported, as well as cross-encoder reranking models.
 
 ## Installation
 
@@ -167,12 +168,46 @@ println!("Available features: {:?}", backend_info.available_features);
 # }
 ```
 
+## Reranking
+
+Embellama supports cross-encoder reranking models like `bge-reranker-v2-m3`. Reranker models
+are auto-detected from GGUF metadata (`pooling_type = 4`), so you can just load the model
+without any special configuration:
+
+```rust,no_run
+# fn main() -> anyhow::Result<()> {
+use embellama::{EngineConfig, EmbeddingEngine};
+
+let config = EngineConfig::builder()
+    .with_model_path("/path/to/bge-reranker-v2-m3.gguf")
+    .with_model_name("reranker")
+    .build()?;
+
+let engine = EmbeddingEngine::new(config)?;
+
+let results = engine.rerank(
+    None,
+    "What is the capital of France?",
+    &["Paris is the capital of France.", "Berlin is in Germany."],
+    None,  // return all results
+    true,  // apply sigmoid normalization
+)?;
+
+for r in &results {
+    println!("[{:.4}] Document {}", r.relevance_score, r.index);
+}
+# Ok(())
+# }
+```
+
 ## Pooling Strategies
 
-- **Mean**: Average pooling across all tokens (default)
+- **Mean**: Average pooling across all tokens (default for encoder models)
 - **CLS**: Use the CLS token embedding
 - **Max**: Maximum pooling across dimensions
 - **`MeanSqrt`**: Mean pooling with square root of sequence length normalization
+- **Last**: Use the last token embedding (auto-selected for decoder models)
+- **Rank**: Cross-encoder reranking (auto-detected from GGUF metadata)
 
 ## Thread Safety
 
@@ -335,6 +370,7 @@ See the `examples/` directory for more examples:
 - `multi_model.rs` - Using multiple models
 - `config.rs` - Configuration examples
 - `error_handling.rs` - Error handling patterns
+- `reranking.rs` - Cross-encoder reranking
 
 Run examples with:
 

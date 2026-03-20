@@ -536,6 +536,17 @@ impl EmbeddingEngine {
             let model = EmbeddingModel::new(&backend_guard, &config.model_config)?;
             drop(backend_guard); // Release lock as soon as we're done
 
+            // Update the stored engine config with resolved pooling/normalization values
+            // so that cache keys and other downstream reads reflect the actual model semantics.
+            {
+                let resolved = model.config();
+                let mut configs = self.model_configs.write();
+                if let Some(stored) = configs.get_mut(model_name) {
+                    stored.model_config.pooling_strategy = resolved.pooling_strategy;
+                    stored.model_config.normalization_mode = resolved.normalization_mode;
+                }
+            }
+
             // Store in thread-local map
             models.insert(model_name.to_string(), model);
 
@@ -600,8 +611,8 @@ impl EmbeddingEngine {
             let key = EmbeddingCache::compute_key(
                 text,
                 &model_name,
-                config.model_config.pooling_strategy,
-                config.model_config.normalization_mode,
+                config.model_config.pooling_strategy.unwrap_or_default(),
+                config.model_config.normalization_mode.unwrap_or_default(),
             );
 
             // Check cache
@@ -673,8 +684,8 @@ impl EmbeddingEngine {
             let key = EmbeddingCache::compute_key(
                 text,
                 &model_name,
-                config.model_config.pooling_strategy,
-                config.model_config.normalization_mode,
+                config.model_config.pooling_strategy.unwrap_or_default(),
+                config.model_config.normalization_mode.unwrap_or_default(),
             );
 
             cache.insert(key, embedding.clone());
@@ -869,8 +880,8 @@ impl EmbeddingEngine {
                 let key = EmbeddingCache::compute_key(
                     text,
                     &model_name,
-                    config.model_config.pooling_strategy,
-                    config.model_config.normalization_mode,
+                    config.model_config.pooling_strategy.unwrap_or_default(),
+                    config.model_config.normalization_mode.unwrap_or_default(),
                 );
 
                 if let Some(embedding) = cache.get(&key) {
@@ -906,8 +917,11 @@ impl EmbeddingEngine {
         // Create batch processor with model configuration
         let batch_processor = BatchProcessorBuilder::default()
             .with_max_batch_size(64) // Default batch size
-            .with_normalization(config.model_config.normalization_mode != NormalizationMode::None)
-            .with_pooling_strategy(config.model_config.pooling_strategy)
+            .with_normalization(
+                config.model_config.normalization_mode.unwrap_or_default()
+                    != NormalizationMode::None,
+            )
+            .with_pooling_strategy(config.model_config.pooling_strategy.unwrap_or_default())
             .build();
 
         // Process uncached texts using the BatchProcessor
@@ -929,8 +943,8 @@ impl EmbeddingEngine {
                 let key = EmbeddingCache::compute_key(
                     text,
                     &model_name,
-                    config.model_config.pooling_strategy,
-                    config.model_config.normalization_mode,
+                    config.model_config.pooling_strategy.unwrap_or_default(),
+                    config.model_config.normalization_mode.unwrap_or_default(),
                 );
 
                 cache.insert(key, embedding.clone());
@@ -1249,8 +1263,40 @@ impl EmbeddingEngine {
     ///
     /// Returns an error if warmup fails.
     pub fn warmup_model(&self, model_name: Option<&str>) -> Result<()> {
-        let test_text = "This is a warmup text for model initialization.";
-        let _ = self.embed(model_name, test_text)?;
+        let resolved_name = model_name
+            .map(std::string::ToString::to_string)
+            .or_else(|| self.default_model.clone())
+            .ok_or_else(|| Error::ConfigurationError {
+                message: "No model specified and no default model set".to_string(),
+            })?;
+
+        // Ensure the model is loaded so the resolved config is available
+        self.ensure_model_loaded(&resolved_name)?;
+
+        // Check the resolved pooling strategy to pick the right warmup path
+        let is_reranker = {
+            let configs = self.model_configs.read();
+            configs
+                .get(&resolved_name)
+                .and_then(|c| c.model_config.pooling_strategy)
+                == Some(crate::config::PoolingStrategy::Rank)
+        };
+
+        if is_reranker {
+            let _ = self.rerank(
+                Some(&resolved_name),
+                "warmup query",
+                &["warmup document"],
+                None,
+                false,
+            )?;
+        } else {
+            let _ = self.embed(
+                Some(&resolved_name),
+                "This is a warmup text for model initialization.",
+            )?;
+        }
+
         debug!("Model warmed up successfully");
         Ok(())
     }

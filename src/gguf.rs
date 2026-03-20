@@ -43,6 +43,8 @@ pub struct GGUFMetadata {
     pub embedding_dimensions: usize,
     /// Context size / max sequence length
     pub context_size: usize,
+    /// Pooling type from GGUF metadata (e.g., 4 = Rank for reranker models)
+    pub pooling_type: Option<u32>,
 }
 
 impl GGUFMetadata {
@@ -100,6 +102,14 @@ impl GGUFMetadata {
             warn!("No architecture found in GGUF metadata, defaulting to decoder");
             true
         }
+    }
+
+    /// Checks if the model is a reranker based on GGUF `pooling_type` metadata.
+    ///
+    /// Pooling type 4 corresponds to Rank pooling in llama.cpp, which is used
+    /// by cross-encoder reranking models like bge-reranker-v2-m3.
+    pub fn is_reranker(&self) -> bool {
+        self.pooling_type == Some(4)
     }
 }
 
@@ -449,6 +459,7 @@ pub fn extract_metadata(path: &Path) -> Result<GGUFMetadata> {
     let mut architecture: Option<String> = None;
     let mut dimensions = 0usize;
     let mut context_size = 512usize; // Default fallback
+    let mut pooling_type: Option<u32> = None;
 
     debug!("Reading {} KV pairs", n_kv);
     for i in 0..n_kv {
@@ -565,6 +576,15 @@ pub fn extract_metadata(path: &Path) -> Result<GGUFMetadata> {
             context_size = ctx;
             debug!("Found context size: {} from key: {}", context_size, key);
         }
+
+        // Check for pooling type
+        if pooling_type.is_none()
+            && (key.ends_with(".pooling_type") || key == "pooling_type")
+            && let Some(pt) = extract_usize_from_value(&value)
+        {
+            pooling_type = u32::try_from(pt).ok();
+            debug!("Found pooling type: {} from key: {}", pt, key);
+        }
     }
 
     debug!("Finished parsing KV pairs");
@@ -580,6 +600,7 @@ pub fn extract_metadata(path: &Path) -> Result<GGUFMetadata> {
         architecture,
         embedding_dimensions: dimensions,
         context_size,
+        pooling_type,
     };
 
     // Cache the result for future calls
@@ -666,6 +687,7 @@ mod tests {
             architecture: Some("qwen2".to_string()),
             embedding_dimensions: 896,
             context_size: 32768,
+            pooling_type: None,
         };
         assert!(metadata.is_decoder(), "qwen2 should be detected as decoder");
     }
@@ -676,6 +698,7 @@ mod tests {
             architecture: Some("llama".to_string()),
             embedding_dimensions: 4096,
             context_size: 2048,
+            pooling_type: None,
         };
         assert!(metadata.is_decoder(), "llama should be detected as decoder");
     }
@@ -686,6 +709,7 @@ mod tests {
             architecture: Some("bert".to_string()),
             embedding_dimensions: 768,
             context_size: 512,
+            pooling_type: None,
         };
         assert!(!metadata.is_decoder(), "bert should be detected as encoder");
     }
@@ -696,6 +720,7 @@ mod tests {
             architecture: Some("jina-bert-v2".to_string()),
             embedding_dimensions: 768,
             context_size: 8192,
+            pooling_type: None,
         };
         assert!(
             !metadata.is_decoder(),
@@ -709,6 +734,7 @@ mod tests {
             architecture: Some("unknown-arch".to_string()),
             embedding_dimensions: 1024,
             context_size: 2048,
+            pooling_type: None,
         };
         assert!(
             metadata.is_decoder(),
@@ -722,10 +748,53 @@ mod tests {
             architecture: None,
             embedding_dimensions: 1024,
             context_size: 2048,
+            pooling_type: None,
         };
         assert!(
             metadata.is_decoder(),
             "no architecture should default to decoder"
+        );
+    }
+
+    #[test]
+    fn test_is_reranker_with_rank_pooling() {
+        let metadata = GGUFMetadata {
+            architecture: Some("bert".to_string()),
+            embedding_dimensions: 768,
+            context_size: 512,
+            pooling_type: Some(4),
+        };
+        assert!(
+            metadata.is_reranker(),
+            "pooling_type 4 should be detected as reranker"
+        );
+    }
+
+    #[test]
+    fn test_is_reranker_with_mean_pooling() {
+        let metadata = GGUFMetadata {
+            architecture: Some("bert".to_string()),
+            embedding_dimensions: 768,
+            context_size: 512,
+            pooling_type: Some(1),
+        };
+        assert!(
+            !metadata.is_reranker(),
+            "pooling_type 1 (Mean) should not be reranker"
+        );
+    }
+
+    #[test]
+    fn test_is_reranker_with_no_pooling_type() {
+        let metadata = GGUFMetadata {
+            architecture: Some("bert".to_string()),
+            embedding_dimensions: 768,
+            context_size: 512,
+            pooling_type: None,
+        };
+        assert!(
+            !metadata.is_reranker(),
+            "None pooling_type should not be reranker"
         );
     }
 
