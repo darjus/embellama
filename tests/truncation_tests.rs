@@ -103,6 +103,34 @@ fn test_truncation_yes() {
 
 #[test]
 #[serial]
+fn test_truncation_yes_without_token_cache() {
+    common::init_test_logger();
+
+    let Some(model_path) = get_model_path() else {
+        eprintln!("⚠️  Skipping test: Set EMBELLAMA_TEST_MODEL to run this test");
+        return;
+    };
+
+    let config = EngineConfig::builder()
+        .with_model_path(model_path)
+        .with_model_name("test-truncation-yes-no-token-cache")
+        .with_truncate_tokens(TruncateTokens::Yes)
+        .with_cache_disabled()
+        .build()
+        .unwrap();
+
+    let engine = EmbeddingEngine::new(config).unwrap();
+
+    // This long text should also succeed when token cache is explicitly disabled.
+    // Regression coverage for the non-cached embedding path.
+    let long_text = common::generate_text_with_approx_tokens(4000);
+    let embedding = engine.embed(None, &long_text).unwrap();
+    assert!(!embedding.is_empty());
+    common::assert_normalized_strict(&embedding);
+}
+
+#[test]
+#[serial]
 fn test_truncation_limit_valid() {
     common::init_test_logger();
 
