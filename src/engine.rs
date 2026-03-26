@@ -670,7 +670,7 @@ impl EmbeddingEngine {
                 if let Some(ref cache) = *cache_ref {
                     model.generate_embedding_cached(text, Some(cache.as_ref()), truncate)
                 } else {
-                    model.generate_embedding(text)
+                    model.generate_embedding_cached(text, None, truncate)
                 }
             })
         })?;
