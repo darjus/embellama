@@ -112,7 +112,7 @@ impl BatchProcessor {
         Self::parallel_validate(texts)?;
 
         // Step 2: Parallel tokenization using the real tokenizer
-        let token_sequences = Self::parallel_tokenize_real(model, texts)?;
+        let token_sequences = Self::parallel_tokenize_real(model, texts, truncate)?;
 
         // Step 3: Check if we need to chunk the batch based on n_seq_max
         // Each sequence is validated individually against effective_max_tokens in process_batch_tokens_internal
@@ -252,6 +252,7 @@ impl BatchProcessor {
     fn parallel_tokenize_real(
         model: &EmbeddingModel,
         texts: &[&str],
+        truncate: TruncateTokens,
     ) -> Result<Vec<Vec<LlamaToken>>> {
         debug!("Starting tokenization of {} texts", texts.len());
 
@@ -276,17 +277,32 @@ impl BatchProcessor {
         let mut results = Vec::with_capacity(texts.len());
         for text in texts {
             // Use real tokenizer from model
-            let tokens = model.tokenize(text)?;
+            let mut tokens = model.tokenize(text)?;
 
-            // Check token limit
-            if tokens.len() > max_seq_len {
-                return Err(Error::InvalidInput {
-                    message: format!(
-                        "Text exceeds maximum token limit: {} > {}",
-                        tokens.len(),
-                        max_seq_len
-                    ),
-                });
+            // Apply truncation or check token limit
+            match truncate {
+                TruncateTokens::Yes => {
+                    if tokens.len() > max_seq_len {
+                        tokens.truncate(max_seq_len);
+                    }
+                }
+                TruncateTokens::Limit(n) => {
+                    let limit = n as usize;
+                    if tokens.len() > limit {
+                        tokens.truncate(limit);
+                    }
+                }
+                TruncateTokens::No => {
+                    if tokens.len() > max_seq_len {
+                        return Err(Error::InvalidInput {
+                            message: format!(
+                                "Text exceeds maximum token limit: {} > {}",
+                                tokens.len(),
+                                max_seq_len
+                            ),
+                        });
+                    }
+                }
             }
 
             results.push(tokens);
