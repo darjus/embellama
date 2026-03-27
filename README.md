@@ -94,7 +94,7 @@ Add this to your `Cargo.toml`:
 
 ```toml
 [dependencies]
-embellama = "0.10.0"
+embellama = "0.10.1"
 ```
 
 ### Backend Features

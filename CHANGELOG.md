@@ -5,6 +5,12 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.10.1] - 2026-03-27
+
+### Bug Fixes
+
+- Forward TruncateTokens to parallel_tokenize_real in embed_batch ([36c5b37](https://github.com/darjus/embellama/commit/36c5b377ca15ddde22b91c02e68be05e3eb34e83))
+
 ## [0.10.0] - 2026-03-21
 
 ### Features
